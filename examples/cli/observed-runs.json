@@ -1,0 +1,17 @@
+[
+  {
+    "variantId": "prompt-visible",
+    "passed": true,
+    "score": 92,
+    "latencyMs": 342,
+    "notes": "Visible phrasing held under wrapper drift."
+  },
+  {
+    "variantId": "schema-holdout",
+    "passed": false,
+    "score": 18,
+    "latencyMs": 1204,
+    "notes": "Holdout serialization collapsed on reordered keys."
+  }
+]
+
