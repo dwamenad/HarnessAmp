@@ -2,6 +2,12 @@
 
 HarnessAmp is a small harness-robustness lab for AI agents.
 
+It is optimized for terminal-first and CLI-first workflows:
+
+- JSON bundles that are easy to generate from shell scripts or Python jobs
+- a shared analysis engine used by both the browser UI and the terminal CLI
+- report output that can be pasted into reviews, notes, or CI logs
+
 It does three things:
 
 1. Ingests a baseline agent harness.
@@ -22,6 +28,13 @@ npm run dev
 ```
 
 Open the local Vite URL, load the demo bundle, and the app will show a simulated analysis.
+
+If you prefer the terminal, start with:
+
+```bash
+npm run analyze -- examples/cli/quickstart-bundle.json
+npm run analyze -- examples/cli/quickstart-bundle.json --pack
+```
 
 ## Build it
 

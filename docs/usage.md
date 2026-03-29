@@ -14,4 +14,5 @@ HarnessAmp supports two primary workflows:
 - Run `npm run analyze` for the built-in demo bundle.
 - Pass a bundle file to analyze your own harness.
 - Add `--pack` to export the generated variant pack JSON.
-
+- Use the CLI when you want the report in text form for a terminal window, script, or CI log.
+- Treat the browser as a review surface rather than the only place to use the tool.
