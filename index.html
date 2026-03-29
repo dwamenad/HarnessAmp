@@ -1,0 +1,96 @@
+<!doctype html>
+<html class="dark" lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="HarnessAmp is a robustness lab for AI agents that stress-tests wrapper drift, tool renames, schema reshapes, and holdout brittleness."
+    />
+    <title>HARNESSAMP // Robustness Lab</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      window.tailwind = window.tailwind || {};
+      window.tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              'surface-dim': '#131313',
+              'on-tertiary-container': '#004360',
+              'on-secondary': '#003739',
+              'on-background': '#e5e2e1',
+              'surface-tint': '#ffb77d',
+              'on-tertiary': '#00344c',
+              'inverse-on-surface': '#313030',
+              'surface-container-highest': '#353534',
+              'surface-container-lowest': '#0e0e0e',
+              'error-container': '#93000a',
+              'surface-variant': '#353534',
+              'on-secondary-fixed': '#002021',
+              'on-secondary-container': '#006c71',
+              'surface': '#131313',
+              'error': '#ffb4ab',
+              'outline': '#a48c7a',
+              'outline-variant': '#564334',
+              'surface-container-low': '#1c1b1b',
+              'secondary': '#e6feff',
+              'on-tertiary-fixed-variant': '#004c6c',
+              'on-surface-variant': '#ddc1ae',
+              'primary-fixed-dim': '#ffb77d',
+              'inverse-primary': '#904d00',
+              'on-primary': '#4d2600',
+              'tertiary-container': '#00b5fc',
+              'surface-container': '#201f1f',
+              'on-primary-fixed-variant': '#6e3900',
+              'secondary-fixed': '#63f7ff',
+              'on-error-container': '#ffdad6',
+              'on-tertiary-fixed': '#001e2e',
+              'on-surface': '#e5e2e1',
+              'tertiary-fixed': '#c7e7ff',
+              'surface-bright': '#393939',
+              'primary-fixed': '#ffdcc3',
+              'primary': '#ffb77d',
+              'on-secondary-fixed-variant': '#004f53',
+              'inverse-surface': '#e5e2e1',
+              'on-primary-fixed': '#2f1500',
+              'secondary-container': '#00f4fe',
+              'tertiary-fixed-dim': '#85cfff',
+              'surface-container-high': '#2a2a2a',
+              tertiary: '#85cfff',
+              'on-primary-container': '#623200',
+              'primary-container': '#ff8c00',
+              'secondary-fixed-dim': '#00dce5',
+              background: '#131313',
+              'on-error': '#690005'
+            },
+            fontFamily: {
+              headline: ['Space Grotesk', 'sans-serif'],
+              body: ['Inter', 'sans-serif'],
+              label: ['IBM Plex Mono', 'monospace']
+            },
+            borderRadius: {
+              DEFAULT: '0px',
+              lg: '0px',
+              xl: '0px',
+              full: '9999px'
+            }
+          }
+        }
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body class="text-[#e5e2e1] selection:bg-[#ffb77d]/30 selection:text-[#ffb77d]">
+    <div id="app"></div>
+  </body>
+</html>
