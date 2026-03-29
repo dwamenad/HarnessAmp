@@ -1,120 +1,103 @@
 # HarnessAmp
 
-HarnessAmp is a small harness-robustness lab for AI agents.
+[![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Node 18+](https://img.shields.io/badge/Node-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Browser UI](https://img.shields.io/badge/Browser-Workbench-1f2937)](#browser-workbench)
+[![CLI First](https://img.shields.io/badge/CLI-first-orange)](#terminal-ui)
+[![JSON Bundles](https://img.shields.io/badge/JSON-bundles-4C78FF)](#quick-start)
+
+<p align="center">
+  <img src="output/playwright/readme-hero.png" alt="HarnessAmp browser workbench overview" width="900">
+  <br/>
+  <em>Browser workbench showing the live robustness score, mutation families, and hidden holdout gap.</em>
+</p>
+
+HarnessAmp is a harness-hardening lab for AI agents. It combines a browser workbench, a terminal CLI, and a shared analysis engine so you can move from bundle to report to exported pack without switching tools.
 
 It is optimized for terminal-first and CLI-first workflows:
 
 - JSON bundles that are easy to generate from shell scripts or Python jobs
-- a shared analysis engine used by both the browser UI and the terminal CLI
-- report output that can be pasted into reviews, notes, or CI logs
+- live reports that can be inspected in the browser or pasted into a terminal window
+- visible and hidden variants that surface wrapper drift before release
 
-It does three things:
+## Why use this tool
 
-1. Ingests a baseline agent harness.
-2. Generates semantically equivalent variants that stress wrapper dependence.
-3. Scores how brittle the harness is across visible and hidden holdouts.
+- Catch wrapper drift before it becomes a shipping bug.
+- Compare visible variants against hidden holdouts.
+- Diagnose whether the brittle surface is prompt wording, tool contracts, schema shape, timing, or scenario coverage.
+- Export report text and pack JSON for CI, PR review, or incident notes.
+- Keep the same analysis path available from a browser, shell, or automated job.
 
-The repo ships with:
+## Installation
 
-- a browser UI for editing a harness bundle and viewing the report
-- a CLI that prints the same report from the terminal
-- a shared scoring engine used by both surfaces
-
-## Run it
+### From source
 
 ```bash
+git clone https://github.com/dwamenad/HarnessAmp.git
+cd HarnessAmp
 npm install
 npm run dev
 ```
 
-Open the local Vite URL, load the demo bundle, and the app will show a simulated analysis.
+### Common commands
 
-If you prefer the terminal, start with:
+| Task | Command |
+| --- | --- |
+| Start the browser workbench | `npm run dev` |
+| Run the terminal report | `npm run analyze` |
+| Analyze a bundle file | `npm run analyze -- examples/demo-bundle.json` |
+| Export the generated pack JSON | `npm run analyze -- examples/demo-bundle.json --pack` |
+| Build for production | `npm run build` |
+| Run the tests | `npm test` |
+
+## Quick start
+
+### CLI-first workflow
+
+This is the fastest path when you want the report in a terminal window, shell script, or CI log:
 
 ```bash
 npm run analyze -- examples/cli/quickstart-bundle.json
+npm run analyze -- examples/cli/quickstart-bundle.json examples/cli/observed-runs.json
 npm run analyze -- examples/cli/quickstart-bundle.json --pack
 ```
 
-## Build it
+### Browser workbench
 
-```bash
-npm run build
-```
+Open `npm run dev`, paste a harness bundle, and compare visible variants against hidden holdouts from the inspector panel.
 
-## Test it
+The browser and terminal use the same analysis engine, so the score, gap, and weakest surface stay aligned across both surfaces.
 
-```bash
-npm test
-```
+## Terminal UI
 
-## CLI
+The terminal view is the main review surface for CLI-first workflows. It keeps the current report text visible in a shell-friendly format so you can copy it into notes, PRs, or CI logs.
 
-Print the demo report:
+<p align="center">
+  <img src="output/playwright/readme-terminal.png" alt="HarnessAmp terminal report view" width="900">
+  <br/>
+  <em>Terminal-first report view with the same analysis text used by the browser UI.</em>
+</p>
 
-```bash
-npm run analyze
-```
-
-Analyze a bundle file:
+Use the CLI when you want the shortest path from bundle to diagnosis:
 
 ```bash
 npm run analyze -- examples/demo-bundle.json
-```
-
-Output the generated pack JSON:
-
-```bash
+npm run analyze -- examples/demo-bundle.json examples/cli/observed-runs.json
 npm run analyze -- examples/demo-bundle.json --pack
 ```
 
-## Input format
+The report highlights:
 
-The UI and CLI accept a JSON bundle with this shape:
-
-```json
-{
-  "project": "Northstar Support Copilot",
-  "harness": {
-    "agentName": "Northstar",
-    "systemPrompt": "...",
-    "developerPrompt": "...",
-    "tools": [],
-    "scenarios": [],
-    "wrapper": {
-      "responseFormat": "json",
-      "retryPolicy": {
-        "maxAttempts": 3,
-        "backoffMs": 400,
-        "jitterMs": 120
-      },
-      "toolApproval": true,
-      "stopSequences": ["###STOP###"],
-      "messageEnvelope": "system+developer"
-    }
-  }
-}
-```
-
-Optional observed runs can be pasted as a JSON array:
-
-```json
-[
-  {
-    "variantId": "prompt-visible",
-    "passed": true,
-    "score": 88,
-    "latencyMs": 1280,
-    "notes": "Held under wrapper drift."
-  }
-]
-```
+- visible vs hidden pass rates
+- the robustness gap
+- the weakest surface family
+- short recommendations for hardening
 
 ## What the product is for
 
-This is not a benchmark runner. It is a harness hardening tool.
+HarnessAmp is not a benchmark runner. It is a harness hardening tool.
 
-The goal is to catch cases where an agent succeeds only because it learned one exact wrapper:
+It looks for cases where an agent only succeeds because it learned one exact wrapper:
 
 - prompt wording
 - tool names
@@ -122,16 +105,29 @@ The goal is to catch cases where an agent succeeds only because it learned one e
 - retry timing
 - scenario order
 
-HarnessAmp mutates those surfaces and highlights the widest gaps so you can fix the brittle parts before release.
+HarnessAmp mutates those surfaces and highlights the widest gaps so you can fix brittle parts before release.
+
+## Examples and walkthroughs
+
+- [Documentation home](docs/index.md)
+- [Installation guide](docs/installation.md)
+- [Usage guide](docs/usage.md)
+- [CLI guide](docs/cli.md)
+- [Examples guide](docs/examples.md)
+- [Testing guide](docs/testing.md)
+- [Troubleshooting guide](docs/troubleshooting.md)
+- [API reference](docs/reference/api.md)
+- [Architecture guide](docs/architecture.md)
 
 ## Repository layout
 
-The repo is organized to be easy to scan and expand:
-
 - `docs/` - architecture, usage, CLI, testing, and troubleshooting notes
-- `examples/` - starter bundles and structured example packs
+- `examples/` - starter bundles and example packs
+- `output/playwright/` - README screenshots and browser captures
 - `scripts/` - terminal helpers and report tooling
 - `src/` - the browser UI and shared analysis engine
 - `tests/` - Node test coverage for the scoring logic
 
-Start with [docs/index.md](docs/index.md) for the guide map.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md), and [STYLE_GUIDE.md](STYLE_GUIDE.md).
