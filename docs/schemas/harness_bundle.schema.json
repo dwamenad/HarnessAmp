@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessAmp Bundle",
+  "type": "object",
+  "required": ["project", "harness"],
+  "properties": {
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "harness": {
+      "type": "object",
+      "required": ["agentName", "systemPrompt", "tools", "scenarios", "wrapper"],
+      "properties": {
+        "agentName": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "systemPrompt": {
+          "type": "string"
+        },
+        "developerPrompt": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "schema"],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "objective"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "objective": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "wrapper": {
+          "type": "object",
+          "required": ["responseFormat", "retryPolicy", "toolApproval", "stopSequences", "messageEnvelope"],
+          "properties": {
+            "responseFormat": {
+              "type": "string"
+            },
+            "retryPolicy": {
+              "type": "object",
+              "required": ["maxAttempts", "backoffMs", "jitterMs"],
+              "properties": {
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "backoffMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "jitterMs": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "toolApproval": {
+              "type": "boolean"
+            },
+            "stopSequences": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "messageEnvelope": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string"
+          },
+          "familyId": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string",
+            "enum": ["visible", "holdout"]
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": ["number", "null"]
+          },
+          "latencyMs": {
+            "type": ["number", "null"]
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}
+
