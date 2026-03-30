@@ -8,10 +8,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test",
-    "analyze": "node scripts/analyze.mjs"
+    "analyze": "node scripts/analyze.mjs",
+    "compile:traces": "node scripts/compile-traces.mjs"
   },
   "devDependencies": {
     "vite": "^6.1.0"
   }
 }
-
