@@ -19,6 +19,7 @@ It is optimized for terminal-first and CLI-first workflows:
 - JSON bundles that are easy to generate from shell scripts or Python jobs
 - live reports that can be inspected in the browser or pasted into a terminal window
 - visible and hidden variants that surface wrapper drift before release
+- approved trace corpora that can be compiled into draft intent, contract, and benchmark packs
 
 ## Why use this tool
 
@@ -45,6 +46,7 @@ npm run dev
 | --- | --- |
 | Start the browser workbench | `npm run dev` |
 | Run the terminal report | `npm run analyze` |
+| Compile approved traces into a draft contract | `npm run compile:traces` |
 | Analyze a bundle file | `npm run analyze -- examples/demo-bundle.json` |
 | Export the generated pack JSON | `npm run analyze -- examples/demo-bundle.json --pack` |
 | Build for production | `npm run build` |
@@ -92,6 +94,24 @@ The report highlights:
 - the robustness gap
 - the weakest surface family
 - short recommendations for hardening
+
+## Trace-to-contract compiler
+
+When you already have approved traces but do not yet have a clean benchmark pack, use the trace compiler:
+
+```bash
+npm run compile:traces
+npm run compile:traces -- examples/traces/approved-support-traces.json
+npm run compile:traces -- examples/traces/approved-support-traces.json --pack
+```
+
+The compiler produces a draft:
+
+- `intent` section with a mission and success signals
+- `contract` section with per-agent role boundaries and allowed tools
+- `benchmark` section with case drafts, milestones, and assertions
+
+This is the front half of the product: define what the system is supposed to preserve before you start mutating the wrapper around it.
 
 ## What the product is for
 
