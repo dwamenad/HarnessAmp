@@ -841,6 +841,7 @@ function renderCurrentAnalysis() {
   setHotspotTone(statusTargets.hotspotLabel, analysis.summary.hotspot);
   renderRiskFlags(analysis.features.flags, statusTargets.heroFlagList, 3);
   renderRiskFlags(analysis.features.flags, statusTargets.flagList, 4);
+  renderSystemLayers(state.bundleDocument, analysis);
   renderFamilyStats(analysis.familyStats);
   renderVariants(analysis);
   renderRecommendations(analysis.recommendations);
@@ -869,6 +870,116 @@ function renderRiskFlags(flags, target = statusTargets.flagList, limit = 4) {
       `;
     })
     .join('');
+}
+
+function renderSystemLayers(rawBundle, analysis) {
+  if (!statusTargets.systemLayerGrid || !statusTargets.layerNote) return;
+
+  const layers = buildSystemLayers(rawBundle, analysis);
+  const explicitCount = layers.filter((layer) => layer.status === 'explicit').length;
+  const inferredCount = layers.filter((layer) => layer.status === 'inferred').length;
+
+  statusTargets.layerNote.textContent = `${explicitCount} explicit · ${inferredCount} inferred · 1 mutable wrapper`;
+  statusTargets.systemLayerGrid.innerHTML = layers.map((layer, index) => renderSystemLayerCard(layer, index)).join('');
+}
+
+function renderSystemLayerCard(layer, index) {
+  const tone = layerTone(layer);
+  return `
+    <div class="border border-white/10 bg-[#131313]/80 p-6 transition-colors hover:bg-[#1c1b1b]">
+      <div class="flex items-center justify-between">
+        <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Layer ${String(index + 1).padStart(2, '0')}</span>
+        <span class="border px-2 py-0.5 font-label text-[9px] uppercase tracking-widest ${TONE_CLASSES[tone]}">${escapeHtml(layer.statusLabel)}</span>
+      </div>
+      <h3 class="mt-4 font-headline text-2xl font-bold uppercase tracking-tight text-white">${escapeHtml(layer.title)}</h3>
+      <p class="mt-3 font-body text-[13px] leading-6 text-[#ddc1ae]">${escapeHtml(layer.summary)}</p>
+      <div class="mt-5 space-y-2">
+        ${layer.points.map((point) => `<div class="font-label text-[10px] uppercase tracking-widest text-slate-400">${escapeHtml(point)}</div>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function buildSystemLayers(rawBundle, analysis) {
+  const source = isObject(rawBundle) ? rawBundle : {};
+  const harness = analysis.bundle?.harness ?? {};
+  const explicitIntent = pickFirstText(source.intent?.mission, source.intent?.goal, source.intent?.objective);
+  const explicitContract = isObject(source.contract) ? source.contract : null;
+  const explicitBenchmark = isObject(source.benchmark) ? source.benchmark : null;
+  const scenarios = Array.isArray(harness.scenarios) ? harness.scenarios : [];
+  const observations = Array.isArray(source.observations)
+    ? source.observations
+    : Array.isArray(source.results)
+      ? source.results
+      : [];
+
+  const intentMission = explicitIntent || inferIntentMission(source, harness, analysis);
+  const contractAgentCount = Array.isArray(explicitContract?.agents) ? explicitContract.agents.length : 0;
+  const contractMustCount = Array.isArray(explicitContract?.must)
+    ? explicitContract.must.length
+    : Array.isArray(explicitContract?.global?.must)
+      ? explicitContract.global.must.length
+      : 0;
+  const benchmarkCaseCount = countBenchmarkCases(explicitBenchmark);
+
+  return [
+    {
+      title: 'Intent',
+      status: explicitIntent ? 'explicit' : 'inferred',
+      statusLabel: explicitIntent ? 'DEFINED' : 'INFERRED',
+      summary: intentMission,
+      points: [
+        explicitIntent ? 'Mission comes from the current pack.' : 'Mission is inferred from the project, description, and scenario set.',
+        `${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'} currently shape the goal surface.`,
+        explicitIntent ? 'This layer should not drift under mutation.' : 'Make this explicit before using the score as a release gate.',
+      ],
+    },
+    {
+      title: 'Contract',
+      status: explicitContract ? 'explicit' : 'inferred',
+      statusLabel: explicitContract ? 'DEFINED' : 'INFERRED',
+      summary: explicitContract
+        ? `Per-agent and global constraints are defined in the pack.`
+        : 'No explicit contract found. HarnessAmp is deriving constraints from response format, tool approval, and observed role boundaries.',
+      points: [
+        explicitContract
+          ? `${contractAgentCount || 0} agent contract${contractAgentCount === 1 ? '' : 's'} in the bundle.`
+          : `${analysis.features.toolCount} approved tool surface${analysis.features.toolCount === 1 ? '' : 's'} and ${analysis.features.responseFormat.toUpperCase()} response policy detected.`,
+        explicitContract
+          ? `${contractMustCount || 0} hard requirement${contractMustCount === 1 ? '' : 's'} captured.`
+          : `${analysis.features.toolApproval ? 'Tool approval is on.' : 'Tool approval is off.'} Retry budget is ${analysis.features.retryPolicy.maxAttempts} attempts.`,
+        'This layer should stay fixed while wrapper variants run.',
+      ],
+    },
+    {
+      title: 'Benchmark',
+      status: explicitBenchmark ? 'explicit' : 'inferred',
+      statusLabel: explicitBenchmark ? 'DEFINED' : 'INFERRED',
+      summary: explicitBenchmark
+        ? 'The bundle carries an explicit benchmark pack with cases and assertions.'
+        : 'No explicit benchmark pack found. HarnessAmp is treating scenarios and observed runs as provisional benchmark material.',
+      points: [
+        explicitBenchmark
+          ? `${benchmarkCaseCount} benchmark case${benchmarkCaseCount === 1 ? '' : 's'} in the current pack.`
+          : `${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'} and ${observations.length} observed run${observations.length === 1 ? '' : 's'} available.`,
+        explicitBenchmark
+          ? 'Use this layer to justify architecture and release decisions.'
+          : 'Promote this into an explicit benchmark pack before trusting hidden-holdout gates.',
+        `Current mutation run covers ${analysis.summary.familyCount} wrapper surface${analysis.summary.familyCount === 1 ? '' : 's'}.`,
+      ],
+    },
+    {
+      title: 'Wrapper',
+      status: 'active',
+      statusLabel: 'MUTATED',
+      summary: 'This is the mutable layer: prompts, tools, schema shape, runtime policy, and delivery envelope.',
+      points: [
+        `${analysis.features.toolCount} tool${analysis.features.toolCount === 1 ? '' : 's'}, ${analysis.features.scenarioCount} scenario${analysis.features.scenarioCount === 1 ? '' : 's'}, ${analysis.features.schemaNodeCount} schema node${analysis.features.schemaNodeCount === 1 ? '' : 's'}.`,
+        `${analysis.features.messageEnvelope} envelope, ${analysis.features.responseFormat.toUpperCase()} output, ${analysis.features.retryPolicy.maxAttempts}x retry budget.`,
+        'This is the only layer that should drift under test.',
+      ],
+    },
+  ];
 }
 
 function renderFamilyStats(families) {
@@ -1124,6 +1235,12 @@ function familySurfaceStatus(surface) {
   }
 }
 
+function layerTone(layer) {
+  if (layer.status === 'explicit') return 'secondary';
+  if (layer.status === 'active') return 'primary';
+  return 'error';
+}
+
 function variantStatusFor(score, passed) {
   if (!passed) {
     return { label: 'FAIL', classes: TONE_CLASSES.error };
@@ -1150,8 +1267,36 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function pickFirstText(...values) {
+  return values.find((value) => typeof value === 'string' && value.trim())?.trim() ?? '';
+}
+
+function inferIntentMission(source, harness, analysis) {
+  const fromDescription = pickFirstText(source.description);
+  if (fromDescription) return fromDescription;
+  if (harness.agentName && harness.domain) {
+    return `${harness.agentName} should preserve the ${harness.domain} mission across wrapper changes.`;
+  }
+  if (harness.agentName) {
+    return `${harness.agentName} should preserve the intended mission across wrapper changes.`;
+  }
+  return `Current bundle implies a ${analysis.summary.label} system with ${analysis.features.scenarioCount} scenarios.`;
+}
+
+function countBenchmarkCases(benchmark) {
+  if (!isObject(benchmark)) return 0;
+  if (Array.isArray(benchmark.cases)) return benchmark.cases.length;
+  if (Array.isArray(benchmark.goldens)) return benchmark.goldens.length;
+  if (Array.isArray(benchmark.tests)) return benchmark.tests.length;
+  return 0;
+}
+
 function formatCount(value) {
   return String(value).padStart(2, '0');
+}
+
+function isObject(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function escapeHtml(value) {
