@@ -106,6 +106,7 @@ const state = {
   showHoldouts: true,
   activeVariantTier: 'visible',
   analysis: null,
+  bundleDocument: null,
   parseError: '',
 };
 
@@ -631,6 +632,8 @@ const statusTargets = {
   confidenceLabel: document.querySelector('#confidence-label'),
   hotspotLabel: document.querySelector('#hotspot-label'),
   flagList: document.querySelector('#flag-list'),
+  layerNote: document.querySelector('#layer-note'),
+  systemLayerGrid: document.querySelector('#system-layer-grid'),
   familyList: document.querySelector('#family-list'),
   variantTableBody: document.querySelector('#variant-table-body'),
   visibleCount: document.querySelector('#visible-count'),
@@ -784,6 +787,7 @@ function analyzeAndRender() {
     observations = resultsParse.value;
   }
 
+  state.bundleDocument = bundleParse.value;
   state.analysis = analyzeBundle(bundleParse.value, observations, { intensity: state.intensity });
   state.parseError = '';
   persistDraft();
