@@ -123,6 +123,7 @@ app.innerHTML = `
         </div>
         <div class="hidden items-center gap-6 md:flex">
           <a class="border-b-2 border-[#ffb77d] pb-1 font-headline text-sm font-bold uppercase tracking-tight text-[#ffb77d]" href="#overview">OVERVIEW</a>
+          <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#layers">LAYERS</a>
           <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#features">FEATURES</a>
           <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#terminal">TERMINAL</a>
           <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#workflow">WORKFLOW</a>
@@ -209,9 +210,30 @@ app.innerHTML = `
       </div>
     </section>
 
+    <section id="layers" class="mx-auto max-w-[1600px] px-6 pt-16">
+      <div class="flex items-center gap-4">
+        <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">HarnessAmp evaluates four different layers, not one generic prompt blob.</span>
+        <div class="h-px flex-1 bg-white/5"></div>
+        <span id="layer-note" class="font-label text-[10px] uppercase tracking-widest text-[#ffb77d]">WAITING FOR BUNDLE</span>
+      </div>
+      <p class="mt-4 max-w-3xl font-body text-[15px] leading-7 text-[#ddc1ae]">
+        The intent and contract should stay fixed. The benchmark proves them. The wrapper is the only layer that should drift under test.
+      </p>
+      <div id="system-layer-grid" class="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="border border-white/10 bg-[#131313]/80 p-6">
+          <div class="flex items-center justify-between">
+            <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Layer 01</span>
+            <span class="font-label text-[10px] uppercase tracking-widest text-slate-600">WAITING</span>
+          </div>
+          <h3 class="mt-4 font-headline text-2xl font-bold uppercase tracking-tight text-white">Intent</h3>
+          <p class="mt-3 font-body text-[13px] leading-6 text-slate-400">Load a bundle to see the mission the system is meant to preserve.</p>
+        </div>
+      </div>
+    </section>
+
     <section id="features" class="mx-auto max-w-[1600px] px-6 pt-16">
       <div class="flex items-center gap-4">
-        <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Built for the way AI teams actually debug harnesses.</span>
+        <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Built for the way AI teams make architecture and release decisions.</span>
         <div class="h-px flex-1 bg-white/5"></div>
       </div>
       <div class="mt-8 flex flex-wrap gap-2">
