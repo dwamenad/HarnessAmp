@@ -31,10 +31,10 @@ const DEMO_OBSERVATIONS = JSON.stringify(
 const SCORE_CIRCUMFERENCE = 552.92;
 
 const HERO_CHIPS = [
-  'CLI first',
-  'Terminal UI',
-  'JSON bundles',
-  'Visible variants',
+  'Intent',
+  'Contract',
+  'Benchmark',
+  'Wrapper drift',
   'Hidden holdouts',
 ];
 
@@ -49,19 +49,19 @@ const COVERAGE_CHIPS = [
 
 const FEATURE_COLUMNS = [
   {
-    title: 'Terminal-first visibility',
-    detail: 'Keep the analysis in the shell or the terminal UI, then open the browser only when you want a wider report surface.',
-    points: ['Real-time scores', 'Text-first reports', 'Visible vs holdout comparison'],
+    title: 'Intent first',
+    detail: 'Make the mission explicit before you trust any drift score. HarnessAmp should show what the system is supposed to preserve, not just what the prompt happens to say today.',
+    points: ['Mission summary', 'Success signals', 'Explicit vs inferred status'],
   },
   {
-    title: 'Actionable diagnostics',
-    detail: 'Move from symptoms to concrete surfaces: prompt wording, tool shape, scenario coverage, retry behavior, and CI-friendly JSON exports.',
-    points: ['Mutation family breakdowns', 'Exportable report text', 'Bundle-level recommendations'],
+    title: 'Contract aware',
+    detail: 'Separate role boundaries, hard constraints, and benchmark material from the mutable wrapper so the operator can see what is fixed and what is allowed to move.',
+    points: ['Agent boundaries', 'Constraint summaries', 'Benchmark case counts'],
   },
   {
-    title: 'Automation friendly',
-    detail: 'Use HarnessAmp in a terminal script, a CI check, or a browser review pass without changing the underlying bundle format.',
-    points: ['Bundle import/export', 'CLI reporting', 'Reusable demo packs'],
+    title: 'Wrapper drift visible',
+    detail: 'Stress the prompt, tool, schema, timing, and envelope layers only after the intended system contract is in view.',
+    points: ['Wrapper mutation surfaces', 'Visible vs holdout comparison', 'Release-gate reporting'],
   },
 ];
 
@@ -144,7 +144,7 @@ app.innerHTML = `
           <div class="space-y-5">
             <h1 class="max-w-4xl font-headline text-5xl font-bold tracking-tight text-white md:text-7xl">See harness drift before it breaks your agent.</h1>
             <p class="max-w-3xl text-[17px] leading-8 text-[#ddc1ae]">
-              HarnessAmp gives AI teams live visibility into wrapper overfitting, tool contract drift, and holdout brittleness across browser, CLI, and exportable reports.
+              HarnessAmp separates the system mission from the mutable wrapper. It shows the intent, contract, benchmark, and wrapper layers side by side, then measures where drift breaks the system.
             </p>
           </div>
           <div class="flex flex-wrap gap-3">
