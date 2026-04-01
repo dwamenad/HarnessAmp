@@ -14,6 +14,13 @@
 
 HarnessAmp is a harness-hardening lab for AI agents. It combines a browser workbench, a terminal CLI, and a shared analysis engine so you can move from bundle to report to exported pack without switching tools.
 
+The browser UI is now structured around four separate layers:
+
+- `intent` - the mission the system is supposed to preserve
+- `contract` - the hard boundaries, role rules, and required behaviors
+- `benchmark` - the cases and assertions that prove the contract
+- `wrapper` - the mutable prompt, tool, schema, and runtime layer under stress test
+
 It is optimized for terminal-first and CLI-first workflows:
 
 - JSON bundles that are easy to generate from shell scripts or Python jobs
@@ -69,6 +76,15 @@ npm run analyze -- examples/cli/quickstart-bundle.json --pack
 Open `npm run dev`, paste a harness bundle, and compare visible variants against hidden holdouts from the inspector panel.
 
 The browser and terminal use the same analysis engine, so the score, gap, and weakest surface stay aligned across both surfaces.
+
+The first read in the browser should be the layer model:
+
+1. Intent
+2. Contract
+3. Benchmark
+4. Wrapper
+
+If the first three layers are still inferred, the drift score is useful as a diagnostic but not strong enough to act as a release gate.
 
 ## Terminal UI
 
