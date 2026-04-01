@@ -32,3 +32,9 @@ Typical trace compiler flow:
 2. Run `npm run compile:traces -- <trace-corpus.json>`.
 3. Review the generated `intent`, `contract`, and `benchmark` draft.
 4. Promote the approved draft into your benchmark source of truth before running wrapper mutations.
+
+Docker workflow:
+
+1. Build the image with `npm run docker:build`.
+2. Run it with `docker run --rm -p 8088:80 harnessamp:local`.
+3. Use the container when you want the production build rather than Vite dev mode.

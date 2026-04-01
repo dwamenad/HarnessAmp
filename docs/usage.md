@@ -33,3 +33,8 @@ The first three should stay fixed. The wrapper is the only layer that should dri
 - Run `npm run compile:traces` for the built-in approved trace demo.
 - Pass a trace corpus file to compile your own approved traces into a draft `intent`, `contract`, and `benchmark`.
 - Use this before mutation testing when you have traces and SOPs but no clean benchmark pack yet.
+
+## Docker
+
+- Run `npm run docker:build` to build the production image.
+- Run `docker run --rm -p 8088:80 harnessamp:local` to serve the static build through Nginx.

@@ -58,6 +58,8 @@ npm run dev
 | Export the generated pack JSON | `npm run analyze -- examples/demo-bundle.json --pack` |
 | Build for production | `npm run build` |
 | Run the tests | `npm test` |
+| Build the Docker image | `npm run docker:build` |
+| Run the Docker image | `npm run docker:run` |
 
 ## Quick start
 
@@ -129,6 +131,17 @@ The compiler produces a draft:
 
 This is the front half of the product: define what the system is supposed to preserve before you start mutating the wrapper around it.
 
+## Docker
+
+To run the production build in a container:
+
+```bash
+PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" npm run docker:build
+PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" docker run --rm -p 8088:80 harnessamp:local
+```
+
+Then open `http://127.0.0.1:8088`.
+
 ## What the product is for
 
 HarnessAmp is not a benchmark runner. It is a harness hardening tool.
@@ -154,6 +167,7 @@ HarnessAmp mutates those surfaces and highlights the widest gaps so you can fix 
 - [Troubleshooting guide](docs/troubleshooting.md)
 - [API reference](docs/reference/api.md)
 - [Architecture guide](docs/architecture.md)
+- [Docker guide](docs/docker.md)
 
 ## Repository layout
 

@@ -3,6 +3,7 @@
 Start here when you want the structure of the project without reading the whole README.
 
 - [Architecture](architecture.md)
+- [Docker](docker.md)
 - [Installation](installation.md)
 - [Usage](usage.md)
 - [CLI](cli.md)
