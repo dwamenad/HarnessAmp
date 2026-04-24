@@ -4,6 +4,8 @@ The example tree is organized by how people usually use the project:
 
 - `examples/basic/` - a ready-to-open demo bundle for the browser UI
 - `examples/cli/` - terminal-first bundles and observed runs
+- `examples/failures/` - failure-corpus examples and collected regressions
+- `examples/packs/` - benchmark-pack examples and compiled contract packs
 - `examples/scenarios/` - focused bundles for specific failure shapes
 - `examples/traces/` - approved traces for the trace-to-contract compiler
 
