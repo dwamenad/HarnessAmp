@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileTraceContract, createDemoTraceCorpus } from '../src/compiler.js';
+import { analyzeBundle } from '../src/engine.js';
 
 test('trace compiler creates a draft contract and benchmark from approved traces', () => {
   const compiled = compileTraceContract(createDemoTraceCorpus());
@@ -24,4 +25,14 @@ test('trace compiler infers tool ownership and final responders', () => {
   assert.ok(specialist);
   assert.ok(specialist.allowedTools.includes('lookup_order'));
   assert.ok(specialist.must.includes('Use only the tools observed for this role unless the contract is updated.'));
+});
+
+test('trace compiler emits a runnable benchmark pack', () => {
+  const compiled = compileTraceContract(createDemoTraceCorpus());
+  const analysis = analyzeBundle(compiled.pack);
+
+  assert.equal(compiled.pack.format, 'harnessamp/benchmark-pack');
+  assert.ok(compiled.wrapper.tools.length >= 1);
+  assert.equal(analysis.bundle.intent.mission, compiled.intent.mission);
+  assert.equal(analysis.exportPack.format, 'harnessamp/benchmark-pack');
 });

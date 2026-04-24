@@ -24,7 +24,7 @@ const compiled = compileTraceContract(corpusInput);
 if (mode === 'json') {
   console.log(JSON.stringify(compiled, null, 2));
 } else if (mode === 'pack') {
-  console.log(JSON.stringify({ intent: compiled.intent, contract: compiled.contract, benchmark: compiled.benchmark }, null, 2));
+  console.log(JSON.stringify(compiled.pack, null, 2));
 } else {
   console.log(compiled.reportText);
 }

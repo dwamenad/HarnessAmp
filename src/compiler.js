@@ -17,6 +17,8 @@ export function compileTraceContract(input, options = {}) {
   const intent = buildIntent(corpus, approvedTraces, agentProfiles);
   const contract = buildContract(corpus, approvedTraces, agentProfiles, topology);
   const benchmark = buildBenchmark(corpus, approvedTraces, agentProfiles, topology, options);
+  const wrapper = buildWrapperScaffold(corpus, intent, contract, benchmark, agentProfiles);
+  const pack = buildBenchmarkPack(corpus, intent, contract, benchmark, wrapper);
   const reportText = formatTraceContractReport(corpus, intent, contract, benchmark);
 
   return {
@@ -24,6 +26,8 @@ export function compileTraceContract(input, options = {}) {
     intent,
     contract,
     benchmark,
+    wrapper,
+    pack,
     reportText,
     summary: {
       approvedTraceCount: approvedTraces.length,
@@ -403,6 +407,84 @@ function buildBenchmark(corpus, traces, agentProfiles, topology) {
   };
 }
 
+function buildWrapperScaffold(corpus, intent, contract, benchmark, agentProfiles) {
+  const toolNames = Array.from(
+    new Set(
+      contract.agents.flatMap((agent) => Array.isArray(agent.allowedTools) ? agent.allowedTools : []),
+    ),
+  ).sort();
+  const finalResponders = Array.isArray(contract.global?.finalResponders) ? contract.global.finalResponders : [];
+  const responderLine = finalResponders.length
+    ? `Only ${finalResponders.join(', ')} may produce the terminal user-facing response.`
+    : 'Only approved final responders may produce the terminal user-facing response.';
+
+  return {
+    agentName: `${corpus.project} workflow`,
+    domain: inferDomain(corpus),
+    systemPrompt: `Preserve the mission: ${intent.mission}`,
+    developerPrompt: `${responderLine} Keep tool ownership and handoffs inside the approved contract.`,
+    tools: toolNames.map((name) => ({
+      name,
+      description: 'Draft tool scaffold derived from approved successful traces.',
+      schema: {
+        type: 'object',
+        properties: {},
+      },
+    })),
+    scenarios: benchmark.cases.map((item) => ({
+      id: item.id,
+      title: item.title,
+      objective: item.input,
+    })),
+    runtime: {
+      responseFormat: 'json',
+      retryPolicy: {
+        maxAttempts: 3,
+        backoffMs: 400,
+        jitterMs: 120,
+      },
+      toolApproval: true,
+      stopSequences: [],
+      messageEnvelope: 'system+developer',
+    },
+  };
+}
+
+function buildBenchmarkPack(corpus, intent, contract, benchmark, wrapper) {
+  return {
+    version: 1,
+    format: 'harnessamp/benchmark-pack',
+    project: corpus.project,
+    description: corpus.mission || `Compiled from ${corpus.traces.length} traces.`,
+    intent,
+    contract,
+    benchmark,
+    wrapper,
+    mutationPolicy: {
+      intensity: 2,
+      semanticGuardrails: ['Preserve mission semantics.', 'Do not alter the approved contract.'],
+      visibleFamilies: [],
+      holdoutFamilies: [],
+    },
+    scorers: [
+      { id: 'mission_success', type: 'rule', target: 'benchmark.case' },
+      { id: 'contract_compliance', type: 'rule', target: 'trace.events' },
+      { id: 'role_boundary', type: 'rule', target: 'trace.events' },
+    ],
+    evidence: {
+      sources: [
+        {
+          type: 'approved_traces',
+          label: 'Approved successful traces',
+          traceCount: benchmark.summary.approvedTraceCount,
+        },
+      ],
+      links: [],
+    },
+    observations: [],
+  };
+}
+
 function buildForbiddenActions(trace, finalResponderIds, allowedHandoffEdges, allowedToolOwners) {
   const actions = new Set([
     'introduce_unapproved_agent_role',
@@ -448,6 +530,15 @@ function inferMission(corpus, traces, agentProfiles) {
     return `Coordinate ${corpus.project} tasks through approved agent handoffs and ${leadingTool}.`;
   }
   return `Complete ${corpus.project} tasks through approved agent handoffs and ${leadingTool}.`;
+}
+
+function inferDomain(corpus) {
+  const project = corpus.project.toLowerCase();
+  if (project.includes('support')) return 'support';
+  if (project.includes('billing')) return 'billing';
+  if (project.includes('sales')) return 'sales';
+  if (project.includes('code')) return 'coding';
+  return 'general';
 }
 
 function inferRole(profile) {
