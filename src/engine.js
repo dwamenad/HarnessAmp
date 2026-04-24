@@ -33,7 +33,7 @@ export function safeJsonParse(text) {
 export function analyzeBundle(bundleInput, observationInput = null, options = {}) {
   const bundle = normalizeBundle(bundleInput);
   const features = inspectHarness(bundle.harness);
-  const intensity = clampInt(options.intensity ?? 2, 1, 4);
+  const intensity = clampInt(options.intensity ?? bundle.mutationPolicy?.intensity ?? 2, 1, 4);
   const pack = buildVariantPack(bundle, features, intensity);
   const providedObservations = normalizeObservations(observationInput ?? bundle.observations);
   const outcomes = matchOutcomes(pack.variants, providedObservations, features, intensity, bundle.project);
@@ -64,7 +64,11 @@ export function analyzeBundle(bundleInput, observationInput = null, options = {}
 
 function normalizeBundle(input) {
   const raw = isObject(input) ? input : {};
-  const harnessSource = raw.harness && isObject(raw.harness) ? raw.harness : raw;
+  const harnessSource = hasStructuredPackFields(raw) && isObject(raw.wrapper)
+    ? raw.wrapper
+    : raw.harness && isObject(raw.harness)
+      ? raw.harness
+      : raw;
   const observationsSource = Array.isArray(raw.observations)
     ? raw.observations
     : Array.isArray(raw.results)
@@ -74,16 +78,28 @@ function normalizeBundle(input) {
         : [];
 
   return {
+    version: clampInt(raw.version ?? 1, 1, 99),
     project: stringOr(raw.project, 'HarnessAmp Demo'),
     description: stringOr(raw.description, ''),
-    harness: normalizeHarness(harnessSource),
+    intent: normalizeIntent(raw, harnessSource),
+    contract: normalizeContract(raw),
+    benchmark: normalizeBenchmark(raw, harnessSource),
+    mutationPolicy: normalizeMutationPolicy(raw),
+    scorers: normalizeScorers(raw),
+    evidence: normalizeEvidence(raw),
+    harness: normalizeHarness(harnessSource, raw.benchmark),
     observations: normalizeObservations(observationsSource),
   };
 }
 
-function normalizeHarness(raw) {
+function normalizeHarness(raw, benchmarkSource = null) {
   const source = isObject(raw) ? raw : {};
-  const wrapper = isObject(source.wrapper) ? source.wrapper : {};
+  const runtime = isObject(source.runtime) ? source.runtime : isObject(source.wrapper) ? source.wrapper : {};
+  const scenarioSource = Array.isArray(source.scenarios) && source.scenarios.length
+    ? source.scenarios
+    : Array.isArray(benchmarkSource?.cases)
+      ? benchmarkSource.cases.map((item, index) => benchmarkCaseToScenario(item, index))
+      : [];
 
   return {
     agentName: stringOr(source.agentName ?? source.name, 'Unnamed agent'),
@@ -91,18 +107,99 @@ function normalizeHarness(raw) {
     systemPrompt: stringOr(source.systemPrompt ?? source.prompt, ''),
     developerPrompt: stringOr(source.developerPrompt ?? source.instructions, ''),
     tools: Array.isArray(source.tools) ? source.tools.map(normalizeTool) : [],
-    scenarios: Array.isArray(source.scenarios) ? source.scenarios.map(normalizeScenario) : [],
+    scenarios: Array.isArray(scenarioSource) ? scenarioSource.map(normalizeScenario) : [],
     wrapper: {
-      responseFormat: stringOr(wrapper.responseFormat ?? source.responseFormat, 'text'),
+      responseFormat: stringOr(runtime.responseFormat ?? source.responseFormat, 'text'),
       retryPolicy: {
-        maxAttempts: clampInt(wrapper.retryPolicy?.maxAttempts ?? source.maxAttempts ?? 3, 1, 8),
-        backoffMs: clampInt(wrapper.retryPolicy?.backoffMs ?? source.backoffMs ?? 400, 0, 5000),
-        jitterMs: clampInt(wrapper.retryPolicy?.jitterMs ?? source.jitterMs ?? 120, 0, 5000),
+        maxAttempts: clampInt(runtime.retryPolicy?.maxAttempts ?? source.maxAttempts ?? 3, 1, 8),
+        backoffMs: clampInt(runtime.retryPolicy?.backoffMs ?? source.backoffMs ?? 400, 0, 5000),
+        jitterMs: clampInt(runtime.retryPolicy?.jitterMs ?? source.jitterMs ?? 120, 0, 5000),
       },
-      toolApproval: Boolean(wrapper.toolApproval ?? source.toolApproval ?? false),
-      stopSequences: normalizeStringArray(wrapper.stopSequences ?? source.stopSequences),
-      messageEnvelope: stringOr(wrapper.messageEnvelope ?? source.messageEnvelope, 'system+developer'),
+      toolApproval: Boolean(runtime.toolApproval ?? source.toolApproval ?? false),
+      stopSequences: normalizeStringArray(runtime.stopSequences ?? source.stopSequences),
+      messageEnvelope: stringOr(runtime.messageEnvelope ?? source.messageEnvelope, 'system+developer'),
     },
+  };
+}
+
+function normalizeIntent(raw, wrapperSource) {
+  if (isObject(raw.intent)) {
+    return deepClone(raw.intent);
+  }
+
+  return {
+    mission: stringOr(raw.description, `${stringOr(wrapperSource.agentName ?? raw.project, 'The agent')} should preserve the intended mission across wrapper drift.`),
+    reviewStatus: 'inferred',
+    successSignals: [],
+  };
+}
+
+function normalizeContract(raw) {
+  if (isObject(raw.contract)) {
+    return deepClone(raw.contract);
+  }
+
+  return {
+    reviewStatus: 'inferred',
+    global: {
+      must: [],
+      mustNot: [],
+      finalResponders: [],
+    },
+    agents: [],
+    handoffs: [],
+  };
+}
+
+function normalizeBenchmark(raw, wrapperSource) {
+  if (isObject(raw.benchmark)) {
+    return deepClone(raw.benchmark);
+  }
+
+  const fallbackCases = Array.isArray(wrapperSource?.scenarios)
+    ? wrapperSource.scenarios.map((item, index) => ({
+        id: stringOr(item.id, `case-${index + 1}`),
+        title: stringOr(item.title ?? item.name, `Scenario ${index + 1}`),
+        input: stringOr(item.objective ?? item.description, ''),
+        assertions: [],
+        expectedMilestones: [],
+        forbiddenActions: [],
+        passRules: [],
+        rubricFields: [],
+        seed: 1000 + index,
+      }))
+    : [];
+
+  return {
+    reviewStatus: 'inferred',
+    cases: fallbackCases,
+    summary: {
+      approvedTraceCount: 0,
+      privateHoldoutRecommendation: Math.max(1, Math.round(fallbackCases.length * 0.2)) || 1,
+      finalResponders: [],
+    },
+  };
+}
+
+function normalizeMutationPolicy(raw) {
+  const source = isObject(raw.mutationPolicy) ? raw.mutationPolicy : {};
+  return {
+    intensity: clampInt(source.intensity ?? 2, 1, 4),
+    semanticGuardrails: normalizeStringArray(source.semanticGuardrails),
+    visibleFamilies: normalizeStringArray(source.visibleFamilies),
+    holdoutFamilies: normalizeStringArray(source.holdoutFamilies),
+  };
+}
+
+function normalizeScorers(raw) {
+  return Array.isArray(raw.scorers) ? raw.scorers.filter(isObject).map((item) => deepClone(item)) : [];
+}
+
+function normalizeEvidence(raw) {
+  const source = isObject(raw.evidence) ? raw.evidence : {};
+  return {
+    links: Array.isArray(source.links) ? source.links.filter(isObject).map((item) => deepClone(item)) : [],
+    sources: Array.isArray(source.sources) ? source.sources.filter(isObject).map((item) => deepClone(item)) : [],
   };
 }
 
@@ -125,6 +222,15 @@ function normalizeScenario(raw, index) {
     id: stringOr(source.id, `case-${String(index + 1).padStart(2, '0')}`),
     title: stringOr(source.title ?? source.name, `Scenario ${index + 1}`),
     objective: stringOr(source.objective ?? source.description, ''),
+  };
+}
+
+function benchmarkCaseToScenario(raw, index) {
+  const source = isObject(raw) ? raw : {};
+  return {
+    id: stringOr(source.id, `case-${String(index + 1).padStart(2, '0')}`),
+    title: stringOr(source.title, `Scenario ${index + 1}`),
+    objective: stringOr(source.input ?? source.objective, ''),
   };
 }
 
@@ -808,46 +914,64 @@ function buildRecommendations(features, familyStats, summary) {
 
 function buildExportPack(bundle, features, pack, familyStats, outcomes, summary, recommendations) {
   return {
-    version: 1,
+    version: 2,
+    format: 'harnessamp/benchmark-pack',
     generatedAt: new Date().toISOString(),
     project: bundle.project,
     description: bundle.description,
-    summary: {
-      overallScore: summary.overallScore,
-      visiblePassRate: summary.visiblePassRate,
-      holdoutPassRate: summary.holdoutPassRate,
-      gap: summary.gap,
-      label: summary.label,
-      mode: summary.modeLabel,
-      hotspot: summary.hotspot,
+    intent: deepClone(bundle.intent),
+    contract: deepClone(bundle.contract),
+    benchmark: deepClone(bundle.benchmark),
+    wrapper: serializeWrapper(bundle.harness),
+    mutationPolicy: {
+      ...deepClone(bundle.mutationPolicy),
+      visibleFamilies: bundle.mutationPolicy.visibleFamilies.length
+        ? bundle.mutationPolicy.visibleFamilies
+        : pack.families.map((family) => family.id),
+      holdoutFamilies: bundle.mutationPolicy.holdoutFamilies.length
+        ? bundle.mutationPolicy.holdoutFamilies
+        : pack.families.map((family) => family.id),
     },
-    features,
-    baseline: bundle.harness,
-    families: familyStats.map((family) => ({
-      id: family.id,
-      label: family.label,
-      summary: family.summary,
-      visibleRate: family.visibleRate,
-      holdoutRate: family.holdoutRate,
-      gap: family.gap,
-      visibleTitle: family.visibleTitle,
-      holdoutTitle: family.holdoutTitle,
-    })),
-    variants: pack.variants.map((variant) => ({
-      id: variant.id,
-      familyId: variant.familyId,
-      familyLabel: variant.familyLabel,
-      tier: variant.tier,
-      title: variant.title,
-      summary: variant.summary,
-      changes: variant.changes,
-      estimatedRisk: variant.estimatedRisk,
-      estimatedPassRate: variant.estimatedPassRate,
-      estimatedLatencyMs: variant.estimatedLatencyMs,
-      harness: variant.harness,
-    })),
-    outcomes,
-    recommendations,
+    scorers: bundle.scorers,
+    evidence: bundle.evidence,
+    observations: bundle.observations,
+    analysis: {
+      summary: {
+        overallScore: summary.overallScore,
+        visiblePassRate: summary.visiblePassRate,
+        holdoutPassRate: summary.holdoutPassRate,
+        gap: summary.gap,
+        label: summary.label,
+        mode: summary.modeLabel,
+        hotspot: summary.hotspot,
+      },
+      features,
+      families: familyStats.map((family) => ({
+        id: family.id,
+        label: family.label,
+        summary: family.summary,
+        visibleRate: family.visibleRate,
+        holdoutRate: family.holdoutRate,
+        gap: family.gap,
+        visibleTitle: family.visibleTitle,
+        holdoutTitle: family.holdoutTitle,
+      })),
+      variants: pack.variants.map((variant) => ({
+        id: variant.id,
+        familyId: variant.familyId,
+        familyLabel: variant.familyLabel,
+        tier: variant.tier,
+        title: variant.title,
+        summary: variant.summary,
+        changes: variant.changes,
+        estimatedRisk: variant.estimatedRisk,
+        estimatedPassRate: variant.estimatedPassRate,
+        estimatedLatencyMs: variant.estimatedLatencyMs,
+        harness: variant.harness,
+      })),
+      outcomes,
+      recommendations,
+    },
   };
 }
 
@@ -1040,6 +1164,28 @@ function cloneHarness(harness) {
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasStructuredPackFields(value) {
+  return isObject(value) && (isObject(value.intent) || isObject(value.contract) || isObject(value.benchmark) || isObject(value.wrapper));
+}
+
+function serializeWrapper(harness) {
+  return {
+    agentName: harness.agentName,
+    domain: harness.domain,
+    systemPrompt: harness.systemPrompt,
+    developerPrompt: harness.developerPrompt,
+    tools: deepClone(harness.tools),
+    scenarios: deepClone(harness.scenarios),
+    runtime: {
+      responseFormat: harness.wrapper.responseFormat,
+      retryPolicy: deepClone(harness.wrapper.retryPolicy),
+      toolApproval: harness.wrapper.toolApproval,
+      stopSequences: deepClone(harness.wrapper.stopSequences),
+      messageEnvelope: harness.wrapper.messageEnvelope,
+    },
+  };
 }
 
 function stringOr(value, fallback) {
