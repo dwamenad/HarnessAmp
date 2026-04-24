@@ -34,6 +34,18 @@ The first three should stay fixed. The wrapper is the only layer that should dri
 - Pass a trace corpus file to compile your own approved traces into a draft `intent`, `contract`, and `benchmark`.
 - Use this before mutation testing when you have traces and SOPs but no clean benchmark pack yet.
 
+## Failure corpus
+
+- Run `npm run collect:failures -- <bundle.json> <observations.json>` to extract failed variants into a reusable corpus.
+- Store the corpus over time and use it to prioritize new mutation families and regression checks.
+- Treat this as the internal moat layer, not just another report artifact.
+
+## Release gate
+
+- Run `npm run release:gate -- <bundle.json> <observations.json>` to enforce thresholds on overall score, holdout pass rate, and visible-vs-holdout gap.
+- Write markdown/json artifacts from the same command for CI and PR review.
+- Use lenient thresholds first, then tighten them as the benchmark pack matures.
+
 ## Docker
 
 - Run `npm run docker:build` to build the production image.

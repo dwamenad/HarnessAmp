@@ -17,6 +17,12 @@
 - Use the trace compiler to draft those sections from approved traces.
 - Do not treat inferred layers as a strong release gate until they are reviewed and promoted.
 
+## The release gate fails in CI
+
+- Check whether the holdout pass threshold is too high for the current maturity of the benchmark pack.
+- Inspect the markdown artifact from `npm run release:gate`.
+- If the pack still uses inferred layers, improve the pack before tightening the threshold.
+
 ## Docker commands are not found
 
 - Docker Desktop can be installed without `docker` being on your shell `PATH`.

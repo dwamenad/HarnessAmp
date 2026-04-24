@@ -13,6 +13,13 @@ For a production build:
 npm run build
 ```
 
+For CI and release gating:
+
+```bash
+npm run collect:failures -- examples/demo-bundle.json examples/cli/observed-runs.json
+npm run release:gate -- examples/demo-bundle.json examples/cli/observed-runs.json
+```
+
 For a containerized production run:
 
 ```bash

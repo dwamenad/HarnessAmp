@@ -10,6 +10,8 @@ npm run analyze -- examples/demo-bundle.json examples/cli/observed-runs.json
 npm run compile:traces
 npm run compile:traces -- examples/traces/approved-support-traces.json
 npm run compile:traces -- examples/traces/approved-support-traces.json --pack
+npm run collect:failures -- examples/demo-bundle.json examples/cli/observed-runs.json
+npm run release:gate -- examples/demo-bundle.json examples/cli/observed-runs.json
 ```
 
 Flags:
@@ -32,6 +34,20 @@ Typical trace compiler flow:
 2. Run `npm run compile:traces -- <trace-corpus.json>`.
 3. Review the generated `intent`, `contract`, and `benchmark` draft.
 4. Promote the approved draft into your benchmark source of truth before running wrapper mutations.
+
+Typical failure corpus flow:
+
+1. Run wrapper mutations against a benchmark pack.
+2. Collect failing variants with `npm run collect:failures -- <bundle.json> <observations.json>`.
+3. Merge the resulting corpus into your running private failure set.
+4. Use repeated failures to justify new mutation families or release thresholds.
+
+Typical release gate flow:
+
+1. Run `npm run release:gate -- <bundle.json> <observations.json>`.
+2. Set thresholds for overall score, holdout pass rate, and max gap.
+3. Publish the markdown/json artifacts in CI.
+4. Block merges when hidden holdouts regress.
 
 Docker workflow:
 
