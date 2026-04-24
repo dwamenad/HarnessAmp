@@ -18,7 +18,7 @@ Important outputs:
 - `pack` - visible and holdout variants
 - `recommendations` - hardening guidance
 - `reportText` - markdown CLI output
-- `exportPack` - JSON bundle for sharing or automation
+- `exportPack` - first-class benchmark pack with `intent`, `contract`, `benchmark`, `wrapper`, mutation policy, and analysis payload
 
 ## `createDemoTraceCorpus()`
 
@@ -33,4 +33,19 @@ Important outputs:
 - `intent` - draft mission and success signals
 - `contract` - global and per-agent constraints inferred from approved traces
 - `benchmark` - executable case drafts built from the trace set
+- `wrapper` - runnable scaffold for mutation testing
+- `pack` - benchmark-pack payload ready for `analyzeBundle`
 - `reportText` - terminal-readable summary of the generated draft
+
+## `collectFailureCorpus(analysis, options)`
+
+Builds a failure corpus from failed visible and holdout variants in an analysis run.
+
+Important outputs:
+
+- `summary` - entry counts, hidden failure counts, and unique surfaces
+- `entries` - concrete regression records with expected vs observed behavior
+
+## `mergeFailureCorpora(...corpora)`
+
+Merges multiple failure corpora while deduplicating entries by id.
