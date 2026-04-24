@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessAmp Trace Corpus",
+  "type": "object",
+  "required": ["project", "traces"],
+  "properties": {
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mission": {
+      "type": "string"
+    },
+    "traces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "input", "events"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string"
+          },
+          "approved": {
+            "type": "boolean"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "maxTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxLatencyMs": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id"],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "agentId": {
+                  "type": "string"
+                },
+                "toAgentId": {
+                  "type": "string"
+                },
+                "toolName": {
+                  "type": "string"
+                },
+                "arguments": {
+                  "type": ["object", "null"]
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

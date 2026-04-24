@@ -8,10 +8,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test",
-    "analyze": "node scripts/analyze.mjs"
+    "analyze": "node scripts/analyze.mjs",
+    "compile:traces": "node scripts/compile-traces.mjs",
+    "collect:failures": "node scripts/collect-failures.mjs",
+    "release:gate": "node scripts/release-gate.mjs",
+    "docker:build": "docker build -t harnessamp:local .",
+    "docker:run": "docker run --rm -p 8088:80 harnessamp:local",
+    "docker:stop": "docker stop harnessamp-local"
   },
   "devDependencies": {
     "vite": "^6.1.0"
   }
 }
-

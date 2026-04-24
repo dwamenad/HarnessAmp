@@ -14,11 +14,21 @@
 
 HarnessAmp is a harness-hardening lab for AI agents. It combines a browser workbench, a terminal CLI, and a shared analysis engine so you can move from bundle to report to exported pack without switching tools.
 
+The browser UI is now structured around four separate layers:
+
+- `intent` - the mission the system is supposed to preserve
+- `contract` - the hard boundaries, role rules, and required behaviors
+- `benchmark` - the cases and assertions that prove the contract
+- `wrapper` - the mutable prompt, tool, schema, and runtime layer under stress test
+
 It is optimized for terminal-first and CLI-first workflows:
 
 - JSON bundles that are easy to generate from shell scripts or Python jobs
 - live reports that can be inspected in the browser or pasted into a terminal window
 - visible and hidden variants that surface wrapper drift before release
+- approved trace corpora that can be compiled into draft intent, contract, and benchmark packs
+- failure corpora that accumulate real wrapper regressions over time
+- release gates that can fail CI on holdout regressions before merge
 
 ## Why use this tool
 
@@ -45,10 +55,15 @@ npm run dev
 | --- | --- |
 | Start the browser workbench | `npm run dev` |
 | Run the terminal report | `npm run analyze` |
+| Compile approved traces into a draft contract | `npm run compile:traces` |
+| Collect a failure corpus | `npm run collect:failures` |
+| Run a release gate | `npm run release:gate` |
 | Analyze a bundle file | `npm run analyze -- examples/demo-bundle.json` |
 | Export the generated pack JSON | `npm run analyze -- examples/demo-bundle.json --pack` |
 | Build for production | `npm run build` |
 | Run the tests | `npm test` |
+| Build the Docker image | `npm run docker:build` |
+| Run the Docker image | `npm run docker:run` |
 
 ## Quick start
 
@@ -67,6 +82,15 @@ npm run analyze -- examples/cli/quickstart-bundle.json --pack
 Open `npm run dev`, paste a harness bundle, and compare visible variants against hidden holdouts from the inspector panel.
 
 The browser and terminal use the same analysis engine, so the score, gap, and weakest surface stay aligned across both surfaces.
+
+The first read in the browser should be the layer model:
+
+1. Intent
+2. Contract
+3. Benchmark
+4. Wrapper
+
+If the first three layers are still inferred, the drift score is useful as a diagnostic but not strong enough to act as a release gate.
 
 ## Terminal UI
 
@@ -93,6 +117,65 @@ The report highlights:
 - the weakest surface family
 - short recommendations for hardening
 
+## Trace-to-contract compiler
+
+When you already have approved traces but do not yet have a clean benchmark pack, use the trace compiler:
+
+```bash
+npm run compile:traces
+npm run compile:traces -- examples/traces/approved-support-traces.json
+npm run compile:traces -- examples/traces/approved-support-traces.json --pack
+```
+
+The compiler produces a draft:
+
+- `intent` section with a mission and success signals
+- `contract` section with per-agent role boundaries and allowed tools
+- `benchmark` section with case drafts, milestones, and assertions
+- `wrapper` scaffold that the mutation engine can execute immediately
+
+This is the front half of the product: define what the system is supposed to preserve before you start mutating the wrapper around it.
+
+## Failure corpus
+
+Collect failed visible and holdout variants into a reusable corpus:
+
+```bash
+npm run collect:failures -- examples/demo-bundle.json examples/cli/observed-runs.json
+npm run collect:failures -- examples/demo-bundle.json examples/cli/observed-runs.json --report
+```
+
+Each entry stores:
+
+- source pack version
+- mutated surface and tier
+- failure type
+- observed versus expected behavior
+- fix candidates
+
+That corpus is where a better mutation library should come from.
+
+## Release gate
+
+Gate CI on holdout performance and score thresholds:
+
+```bash
+npm run release:gate -- examples/demo-bundle.json examples/cli/observed-runs.json --min-holdout-pass 15 --max-gap 60 --min-overall-score 55
+```
+
+The repo now includes a GitHub Actions workflow at `.github/workflows/release-gate.yml` that runs the gate, writes markdown/json artifacts, and uploads them on every pull request.
+
+## Docker
+
+To run the production build in a container:
+
+```bash
+PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" npm run docker:build
+PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" docker run --rm -p 8088:80 harnessamp:local
+```
+
+Then open `http://127.0.0.1:8088`.
+
 ## What the product is for
 
 HarnessAmp is not a benchmark runner. It is a harness hardening tool.
@@ -114,10 +197,12 @@ HarnessAmp mutates those surfaces and highlights the widest gaps so you can fix 
 - [Usage guide](docs/usage.md)
 - [CLI guide](docs/cli.md)
 - [Examples guide](docs/examples.md)
+- [Public data plan](docs/public-data.md)
 - [Testing guide](docs/testing.md)
 - [Troubleshooting guide](docs/troubleshooting.md)
 - [API reference](docs/reference/api.md)
 - [Architecture guide](docs/architecture.md)
+- [Docker guide](docs/docker.md)
 
 ## Repository layout
 

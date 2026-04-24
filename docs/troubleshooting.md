@@ -11,8 +11,24 @@
 - Confirm the bundle contains a `harness` object.
 - Reload the page if localStorage has stale data.
 
+## The layer view shows inferred data
+
+- The bundle is missing explicit `intent`, `contract`, or `benchmark` sections.
+- Use the trace compiler to draft those sections from approved traces.
+- Do not treat inferred layers as a strong release gate until they are reviewed and promoted.
+
+## The release gate fails in CI
+
+- Check whether the holdout pass threshold is too high for the current maturity of the benchmark pack.
+- Inspect the markdown artifact from `npm run release:gate`.
+- If the pack still uses inferred layers, improve the pack before tightening the threshold.
+
+## Docker commands are not found
+
+- Docker Desktop can be installed without `docker` being on your shell `PATH`.
+- Use `PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"` before Docker commands on macOS if needed.
+
 ## Copy buttons do nothing
 
 - Clipboard permissions can be blocked by the browser or host shell.
 - Try the CLI `--pack` output if you need a file instead.
-
