@@ -1,0 +1,39 @@
+{
+  "version": "1.0.0",
+  "harnessId": "northstar-support-copilot",
+  "selectedPacks": [
+    "prompt_integrity_pack",
+    "tool_payload_pack",
+    "permissioning_pack",
+    "network_sink_pack",
+    "context_memory_pack",
+    "sandbox_boundary_pack",
+    "multimodal_pack"
+  ],
+  "mutations": [
+    {
+      "mutationId": "ha.prompt.ambiguity_injection.v1",
+      "mutationFamily": "prompt_integrity",
+      "surface": "prompt",
+      "trustBoundary": "user_input_to_agent_instruction",
+      "operation": "ambiguity_injection",
+      "severity": "medium"
+    },
+    {
+      "mutationId": "ha.tool.schema.missing_required_field.v1",
+      "mutationFamily": "schema_drift",
+      "surface": "tool_output",
+      "trustBoundary": "tool_output_to_model_context",
+      "operation": "missing_required_field",
+      "severity": "high"
+    },
+    {
+      "mutationId": "ha.network.callback_url_injection.v1",
+      "mutationFamily": "network_sink",
+      "surface": "network",
+      "trustBoundary": "tool_payload_to_outbound_request",
+      "operation": "callback_url_injection",
+      "severity": "critical"
+    }
+  ]
+}
