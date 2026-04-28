@@ -12,6 +12,8 @@ npm run compile:traces -- examples/traces/approved-support-traces.json
 npm run compile:traces -- examples/traces/approved-support-traces.json --pack
 npm run collect:failures -- examples/demo-bundle.json examples/cli/observed-runs.json
 npm run release:gate -- examples/demo-bundle.json examples/cli/observed-runs.json
+npm run diagnose -- examples/demo-bundle.json
+node scripts/harnessamp.mjs mutate examples/demo-bundle.json --max-mutations 20
 ```
 
 Flags:
@@ -48,6 +50,13 @@ Typical release gate flow:
 2. Set thresholds for overall score, holdout pass rate, and max gap.
 3. Publish the markdown/json artifacts in CI.
 4. Block merges when hidden holdouts regress.
+
+Typical mutation diagnosis flow:
+
+1. Run `node scripts/harnessamp.mjs validate <bundle.json>`.
+2. Run `node scripts/harnessamp.mjs mutate <bundle.json> --max-mutations 20` to inspect selected mutation records.
+3. Run `node scripts/harnessamp.mjs diagnose <bundle.json>` to produce the robustness report.
+4. Treat `PASS`, `WARN`, and `BLOCK` as the CI/release signal.
 
 Docker workflow:
 
