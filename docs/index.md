@@ -3,6 +3,8 @@
 Start here when you want the structure of the project without reading the whole README.
 
 - [Architecture](architecture.md)
+- [Concepts](concepts/index.md)
+- [Adapter Guide](adapters/index.md)
 - [CI Diagnose Gate](ci-diagnose.md)
 - [Docker](docker.md)
 - [Installation](installation.md)
@@ -10,6 +12,10 @@ Start here when you want the structure of the project without reading the whole 
 - [CLI](cli.md)
 - [Examples](examples.md)
 - [Mutation Engine](mutation-engine.md)
+- [Wrapper Concept](concepts/wrapper.md)
+- [Trust Boundaries](concepts/trust-boundaries.md)
+- [Robustness Gap](concepts/robustness-gap.md)
+- [Runner Contract](adapters/runner-contract.md)
 - [Public Data Plan](public-data.md)
 - [PRD](prd.md)
 - [Testing](testing.md)
