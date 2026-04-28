@@ -101,4 +101,4 @@ node scripts/harnessamp.mjs mutate examples/demo-bundle.json --max-mutations 20
 node scripts/harnessamp.mjs registry
 ```
 
-The default runner is `MockRunner`. Future adapters exist as placeholders for OpenAI, LangChain, LangGraph, CrewAI, AutoGen, custom HTTP agents, and MCP-style runners.
+The default runner is `MockRunner`. Future adapters exist as placeholders for model SDKs, agent frameworks, graph workflows, crew-style workflows, multi-agent runtimes, custom HTTP agents, and MCP-style runners.
