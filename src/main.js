@@ -112,7 +112,7 @@ const state = {
 
 const app = document.querySelector('#app');
 
-app.innerHTML = `
+const legacyMarketingShell = `
   <div class="relative min-h-screen">
     <div class="grain-overlay"></div>
 
@@ -586,6 +586,438 @@ app.innerHTML = `
   <input type="file" id="results-file" accept="application/json,.json" hidden />
 `;
 
+app.innerHTML = renderOperatorConsole();
+
+function renderOperatorConsole() {
+  return `
+    <div class="app-shell">
+      <div class="grain-overlay"></div>
+
+      <header class="command-bar rise-in">
+        <a class="brand-mark" href="#overview" aria-label="HarnessAmp home">
+          <span class="brand-mark__sigil">HA</span>
+          <span>
+            <span class="brand-mark__name">HarnessAmp</span>
+            <span class="brand-mark__sub">agent reliability infrastructure</span>
+          </span>
+        </a>
+
+        <nav class="command-nav" aria-label="Primary navigation">
+          <a href="#workflow">Console</a>
+          <a href="#layers">Contract</a>
+          <a href="#terminal">CLI</a>
+          <a href="#proof">Proof</a>
+        </nav>
+
+        <div class="command-actions">
+          <a class="ghost-button" href="https://github.com/dwamenad/HarnessAmp" target="_blank" rel="noreferrer">
+            <span class="material-symbols-outlined text-sm">code</span>
+            GitHub
+          </a>
+          <a class="primary-button" href="#workflow">
+            <span class="material-symbols-outlined text-sm">play_arrow</span>
+            Run diagnosis
+          </a>
+        </div>
+      </header>
+
+      <aside class="side-rail rise-in" aria-label="Workspace navigation">
+        <div class="side-rail__section">
+          <span class="rail-label">workspace</span>
+          <a href="#overview">01 Overview</a>
+          <a href="#workflow">02 Console</a>
+          <a href="#layers">03 Wrapper map</a>
+          <a href="#terminal">04 Report</a>
+          <a href="#proof">05 Proof</a>
+        </div>
+        <div class="side-rail__section">
+          <span class="rail-label">pipeline</span>
+          <div class="rail-step"><span>Load</span><b>creator harness</b></div>
+          <div class="rail-step"><span>Mutate</span><b>operating conditions</b></div>
+          <div class="rail-step"><span>Classify</span><b>behavioral deltas</b></div>
+          <div class="rail-step"><span>Gate</span><b>release risk</b></div>
+        </div>
+        <div class="rail-callout">
+          <span class="material-symbols-outlined">shield_lock</span>
+          <p>Not another evaluator. This layer asks which conditions make the agent fail.</p>
+        </div>
+      </aside>
+
+      <main class="console-main">
+        <section id="overview" class="hero-console rise-in">
+          <div class="hero-copy">
+            <div class="eyebrow">HarnessAmp / chaos testing for LLM wrappers</div>
+            <h1>Find the exact wrapper condition that breaks your agent.</h1>
+            <p>
+              Load a creator harness, mutate prompts, schemas, tools, permissions, context, and network sinks, then get a diagnostic release signal instead of a vague eval score.
+            </p>
+            <div class="hero-copy__actions">
+              <a class="primary-button" href="#workflow">
+                <span class="material-symbols-outlined text-sm">terminal</span>
+                Open console
+              </a>
+              <a class="ghost-button" href="#proof">
+                <span class="material-symbols-outlined text-sm">analytics</span>
+                View proof
+              </a>
+            </div>
+            <div class="surface-strip" aria-label="Mutation surfaces">
+              <span>prompt integrity</span>
+              <span>tool payload</span>
+              <span>permissioning</span>
+              <span>network sink</span>
+              <span>context memory</span>
+              <span>sandbox boundary</span>
+            </div>
+          </div>
+
+          <section class="hero-diagnosis-panel" aria-label="Live robustness summary">
+            <div class="panel-header">
+              <div>
+                <span class="panel-kicker">current diagnosis</span>
+                <h2 id="hero-mode-label">DEMO SIMULATION</h2>
+              </div>
+              <span class="live-dot">live</span>
+            </div>
+
+            <div class="hero-score-layout">
+              <div class="score-orb">
+                <svg class="-rotate-90 transform" viewBox="0 0 192 192" aria-hidden="true">
+                  <circle class="text-white/5" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-width="2"></circle>
+                  <circle id="hero-score-arc" class="score-ring__progress text-[#ffb77d]" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-dasharray="${SCORE_CIRCUMFERENCE}" stroke-dashoffset="${SCORE_CIRCUMFERENCE}" stroke-width="4"></circle>
+                </svg>
+                <div class="score-orb__label">
+                  <span id="hero-score-value">--</span>
+                  <small>robustness</small>
+                  <em id="hero-score-class">WAITING</em>
+                </div>
+              </div>
+
+              <div class="hero-metrics">
+                <div><span>Visible pass</span><b id="hero-visible-rate">--</b></div>
+                <div><span>Hidden pass</span><b id="hero-holdout-rate">--</b></div>
+                <div><span>Robustness gap</span><b id="hero-gap-rate">--</b></div>
+                <div><span>Mutation families</span><b id="hero-family-count">--</b></div>
+              </div>
+            </div>
+
+            <div class="weakest-surface-row">
+              <span>Weakest surface</span>
+              <b id="hero-hotspot-label">WAITING</b>
+            </div>
+            <div id="hero-flag-list" class="flag-cluster"></div>
+          </section>
+        </section>
+
+        <section id="workflow" class="workspace-section rise-in">
+          <div class="section-title-row">
+            <div>
+              <span class="eyebrow">diagnostics console</span>
+              <h2>Run the harness like a release gate.</h2>
+            </div>
+            <p>JSON in. Deterministic mutations out. Behavioral deltas and hardening recommendations stay attached to the exact mutation that caused them.</p>
+          </div>
+
+          <div class="control-strip">
+            <label class="control-field">
+              <span>Mutation intensity</span>
+              <select id="intensity-select">
+                <option value="1">Light</option>
+                <option value="2" selected>Standard</option>
+                <option value="3">Aggressive</option>
+                <option value="4">Lab</option>
+              </select>
+            </label>
+
+            <label class="control-toggle">
+              <input type="checkbox" id="show-holdouts" checked />
+              <span>Show hidden holdouts</span>
+            </label>
+
+            <div class="control-buttons">
+              <button type="button" class="ghost-button" id="load-demo-btn">
+                <span class="material-symbols-outlined text-sm">bolt</span>
+                Load demo
+              </button>
+              <button type="button" class="ghost-button" id="import-bundle-btn">
+                <span class="material-symbols-outlined text-sm">upload_file</span>
+                Import bundle
+              </button>
+              <button type="button" class="ghost-button" id="import-results-btn">
+                <span class="material-symbols-outlined text-sm">dataset</span>
+                Import runs
+              </button>
+              <button type="button" class="primary-button" id="analyze-btn">
+                <span class="material-symbols-outlined text-sm">network_check</span>
+                Analyze
+              </button>
+              <button type="button" class="ghost-button" id="export-btn">
+                <span class="material-symbols-outlined text-sm">download</span>
+                Export pack
+              </button>
+              <button type="button" class="ghost-button" id="copy-report-btn">
+                <span class="material-symbols-outlined text-sm">content_copy</span>
+                Copy report
+              </button>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <section class="score-card">
+              <div class="score-orb score-orb--small">
+                <svg class="-rotate-90 transform" viewBox="0 0 192 192" aria-hidden="true">
+                  <circle class="text-white/5" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-width="2"></circle>
+                  <circle id="score-arc" class="score-ring__progress text-[#ffb77d]" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-dasharray="${SCORE_CIRCUMFERENCE}" stroke-dashoffset="${SCORE_CIRCUMFERENCE}" stroke-width="4"></circle>
+                </svg>
+                <div class="score-orb__label">
+                  <span id="score-value">--</span>
+                  <small>score</small>
+                  <em id="score-class">WAITING</em>
+                </div>
+              </div>
+            </section>
+
+            <section class="metric-cell"><span>Visible pass</span><b id="visible-rate">--</b></section>
+            <section class="metric-cell"><span>Hidden pass</span><b id="holdout-rate">--</b></section>
+            <section class="metric-cell metric-cell--danger"><span>Robustness gap</span><b id="gap-rate">--</b></section>
+            <section class="metric-cell"><span>Families</span><b id="family-count">--</b></section>
+
+            <section class="insight-cell">
+              <div><span>Mode</span><b id="mode-label">DEMO SIMULATION</b></div>
+              <div><span>Confidence</span><b id="confidence-label">LOW (0.48)</b></div>
+              <div><span>Weakest surface</span><b id="hotspot-label">WAITING</b></div>
+              <div id="flag-list" class="flag-cluster"></div>
+            </section>
+          </div>
+
+          <div class="workspace-grid">
+            <div class="editor-column">
+              <section class="editor-panel">
+                <div class="editor-panel__header">
+                  <div>
+                    <span class="panel-kicker">input contract</span>
+                    <h3>Harness bundle</h3>
+                  </div>
+                  <span id="bundle-status">JSON CONFIGURATION</span>
+                </div>
+                <div class="editor-shell">
+                  <textarea id="bundle-input" spellcheck="false" aria-label="Harness bundle JSON"></textarea>
+                  <div class="editor-actions">
+                    <button type="button" id="bundle-copy-btn" class="icon-button" aria-label="Copy bundle">
+                      <span class="material-symbols-outlined">content_copy</span>
+                    </button>
+                    <button type="button" id="bundle-analyze-btn" class="icon-button" aria-label="Analyze bundle">
+                      <span class="material-symbols-outlined">auto_fix_high</span>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="editor-panel editor-panel--compact">
+                <div class="editor-panel__header">
+                  <div>
+                    <span class="panel-kicker">optional evidence</span>
+                    <h3>Observed runs</h3>
+                  </div>
+                  <span>JSON RESULTS</span>
+                </div>
+                <div class="editor-shell">
+                  <textarea id="results-input" spellcheck="false" aria-label="Observed run JSON"></textarea>
+                </div>
+              </section>
+            </div>
+
+            <aside class="inspector-column">
+              <section id="terminal" class="terminal-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="panel-kicker">terminal report</span>
+                    <h3>CLI-aligned diagnosis</h3>
+                  </div>
+                  <span id="terminal-output-state">WAITING</span>
+                </div>
+                <pre id="terminal-report">Run analyze to see the current report text.</pre>
+              </section>
+
+              <section class="process-panel">
+                <span class="panel-kicker">why this is a harness</span>
+                <div class="process-list">
+                  <div><b>Constrain</b><span>Read contract, tools, permissions, and expected behavior.</span></div>
+                  <div><b>Disturb</b><span>Apply replayable mutations at trust boundaries.</span></div>
+                  <div><b>Verify</b><span>Compare baseline and mutation behavior.</span></div>
+                  <div><b>Diagnose</b><span>Classify failure and recommend engineering controls.</span></div>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section id="layers" class="analysis-section rise-in">
+          <div class="section-title-row">
+            <div>
+              <span class="eyebrow">contract map</span>
+              <h2>Separate the job from the wrapper.</h2>
+            </div>
+            <p id="layer-note">WAITING FOR BUNDLE</p>
+          </div>
+          <div id="system-layer-grid" class="layer-grid">
+            <div class="layer-card">
+              <span>Layer 01</span>
+              <h3>Intent</h3>
+              <p>Load a bundle to see the mission the system is meant to preserve.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="features" class="analysis-section rise-in">
+          <div class="section-title-row">
+            <div>
+              <span class="eyebrow">differentiation</span>
+              <h2>HarnessAmp tests operating conditions, not just answers.</h2>
+            </div>
+            <p>Evaluators tell you what happened. HarnessAmp tells you which wrapper change caused the reliability drop and what control should prevent it.</p>
+          </div>
+          <div class="differentiator-grid">
+            <div>
+              <span>01</span>
+              <h3>Structured mutation packs</h3>
+              <p>Prompt, tool, permission, network, context, sandbox, and multimodal surfaces are mutated as typed objects with deterministic seeds.</p>
+            </div>
+            <div>
+              <span>02</span>
+              <h3>Behavioral delta layer</h3>
+              <p>The report compares original and mutated behavior, then identifies pass-to-fail, hallucination-introduced, tool-loss, approval-bypass, and related deltas.</p>
+            </div>
+            <div>
+              <span>03</span>
+              <h3>Failure-to-fix mapping</h3>
+              <p>Each finding connects to an engineering control: schema validation, egress allowlists, approval checks, retry budgets, or hidden-text quarantine.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="analysis-section rise-in">
+          <div class="section-title-row">
+            <div>
+              <span class="eyebrow">weakest surfaces</span>
+              <h2>Spot issues faster.</h2>
+            </div>
+            <p id="family-note">--</p>
+          </div>
+          <div id="family-list" class="family-list"></div>
+        </section>
+
+        <section class="analysis-section rise-in">
+          <div class="section-title-row section-title-row--tabs">
+            <div>
+              <span class="eyebrow">mutation pack</span>
+              <h2>Visible variants and hidden holdouts.</h2>
+            </div>
+            <div class="variant-tabs">
+              <button type="button" id="visible-variants-tab">VISIBLE VARIANTS <span id="visible-count">00</span></button>
+              <button type="button" id="holdout-variants-tab">HIDDEN HOLDOUTS <span id="holdout-count">00</span></button>
+            </div>
+          </div>
+          <div id="pack-note" class="pack-note">--</div>
+          <div class="variant-table-wrap">
+            <table class="variant-table">
+              <thead>
+                <tr>
+                  <th>Family</th>
+                  <th>Variant title</th>
+                  <th>Summary</th>
+                  <th>Status</th>
+                  <th class="text-right">Score</th>
+                  <th class="text-right">Latency</th>
+                </tr>
+              </thead>
+              <tbody id="variant-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="hardening-panel rise-in">
+          <div class="section-title-row">
+            <div>
+              <span class="eyebrow">hardening plan</span>
+              <h2>Turn failures into controls.</h2>
+            </div>
+            <button type="button" id="generate-patch-btn" class="primary-button">
+              <span class="material-symbols-outlined text-sm">terminal</span>
+              Generate patch repo
+            </button>
+          </div>
+          <div id="recommendation-list" class="recommendation-list"></div>
+        </section>
+
+        <section id="proof" class="analysis-section proof-section rise-in">
+          <div class="section-title-row">
+            <div>
+              <span class="eyebrow">proof of value</span>
+              <h2>The useful number is the gap.</h2>
+            </div>
+            <p>If visible performance is high but holdout performance collapses, the agent learned the wrapper more than the task.</p>
+          </div>
+
+          <div class="proof-grid">
+            <div class="proof-meter">
+              <span>Visible pass</span>
+              <b id="proof-visible-pass">--</b>
+              <p>What most evals report under expected conditions.</p>
+            </div>
+            <div class="proof-meter proof-meter--cold">
+              <span>Hidden pass</span>
+              <b id="proof-holdout-pass">--</b>
+              <p>What happens when the wrapper changes but the task does not.</p>
+            </div>
+            <div class="proof-meter proof-meter--danger">
+              <span>Robustness gap</span>
+              <b id="proof-gap">--</b>
+              <p>The delta that should decide whether this agent is safe to ship.</p>
+            </div>
+          </div>
+
+          <div class="proof-comparison">
+            <div>
+              <span>Without HarnessAmp</span>
+              <p>Teams trust a single clean pass, then discover fragile prompt wording, schema assumptions, approval drift, or unsafe network behavior in production.</p>
+            </div>
+            <div>
+              <span>With HarnessAmp</span>
+              <p>The failure condition is reproducible, typed, linked to a trust boundary, and mapped to the engineering control that reduces the risk.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="open-source" class="analysis-section open-source-section rise-in">
+          <div class="section-title-row">
+            <div>
+              <span class="eyebrow">open source proof</span>
+              <h2>Browser, CLI, and reports share one engine.</h2>
+            </div>
+            <p>Use the UI to explain the product. Use the CLI and JSON artifacts to put it into real release workflows.</p>
+          </div>
+          <div class="resource-row">
+            <a href="https://github.com/dwamenad/HarnessAmp" target="_blank" rel="noreferrer"><span>Repository</span><b>Source + history</b></a>
+            <a href="#workflow"><span>Examples</span><b>Starter packs</b></a>
+            <a href="#terminal"><span>CLI</span><b>Terminal report</b></a>
+            <a href="#proof"><span>Tests</span><b>Gap analysis</b></a>
+          </div>
+        </section>
+      </main>
+
+      <footer class="app-footer">
+        <span>SYSTEM_VERSION: 4.22.0-STABLE</span>
+        <span>KERNEL_HASH: 0xFD8E2</span>
+        <span>© 2026 HARNESSAMP PRECISION LABS</span>
+      </footer>
+    </div>
+
+    <input type="file" id="bundle-file" accept="application/json,.json" hidden />
+    <input type="file" id="results-file" accept="application/json,.json" hidden />
+  `;
+}
+
 const bundleInput = document.querySelector('#bundle-input');
 const resultsInput = document.querySelector('#results-input');
 const intensitySelect = document.querySelector('#intensity-select');
@@ -681,6 +1113,7 @@ function init() {
 
   bindEvents();
   analyzeAndRender();
+  restoreHashScroll();
 }
 
 function bindEvents() {
@@ -723,6 +1156,22 @@ function bindEvents() {
 
   bundleFileInput.addEventListener('change', () => importJsonFile(bundleFileInput, 'bundle'));
   resultsFileInput.addEventListener('change', () => importJsonFile(resultsFileInput, 'observations'));
+  window.addEventListener('hashchange', restoreHashScroll);
+}
+
+function restoreHashScroll() {
+  if (!window.location.hash) return;
+
+  const scrollToHash = () => {
+    const target = document.querySelector(window.location.hash);
+    if (target) {
+      target.scrollIntoView({ block: 'start' });
+    }
+  };
+
+  requestAnimationFrame(scrollToHash);
+  setTimeout(scrollToHash, 120);
+  setTimeout(scrollToHash, 420);
 }
 
 function scheduleAnalyze() {
