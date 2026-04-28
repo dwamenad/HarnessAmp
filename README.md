@@ -7,9 +7,9 @@
 [![JSON Bundles](https://img.shields.io/badge/JSON-bundles-4C78FF)](#quick-start)
 
 <p align="center">
-  <img src="output/playwright/readme-hero.png" alt="HarnessAmp browser workbench overview" width="900">
+  <img src="docs/screenshots/harnessamp-workflow-optimized.png" alt="HarnessAmp diagnostics console" width="900">
   <br/>
-  <em>Browser workbench showing the live robustness score, mutation families, and hidden holdout gap.</em>
+  <em>Diagnostics console showing the release-gate workflow, live robustness score, and hidden holdout gap.</em>
 </p>
 
 HarnessAmp is a harness-hardening lab for AI agents. It combines a browser workbench, a terminal CLI, and a shared analysis engine so you can move from bundle to report to exported pack without switching tools.
@@ -92,6 +92,28 @@ The first read in the browser should be the layer model:
 4. Wrapper
 
 If the first three layers are still inferred, the drift score is useful as a diagnostic but not strong enough to act as a release gate.
+
+## Browser workbench
+
+HarnessAmp now opens as an operator console rather than a generic landing page. The first screen focuses on the controls and evidence an agent team needs during release review:
+
+- mutation intensity and hidden holdout controls
+- bundle import, observed run import, report copy, and pack export actions
+- visible pass rate, hidden pass rate, robustness gap, family count, and weakest surface
+- terminal-aligned diagnostic report text
+- proof section centered on visible performance versus hidden holdout performance
+
+<p align="center">
+  <img src="docs/screenshots/harnessamp-workflow-optimized.png" alt="HarnessAmp optimized workflow console" width="900">
+  <br/>
+  <em>The optimized console keeps the bundle, release-gate controls, and robustness KPIs in one working surface.</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/harnessamp-proof-optimized.png" alt="HarnessAmp optimized proof section" width="900">
+  <br/>
+  <em>The proof section makes the robustness gap the primary decision signal.</em>
+</p>
 
 ## Terminal UI
 
