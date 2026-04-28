@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDemoBundle } from '../src/engine.js';
-import { generateMutationSuite, getMutationRegistry, selectMutationPacks } from '../src/mutation-registry.js';
+import { createDemoBundle } from '../src/core/engine.js';
+import { generateMutationSuite, getMutationRegistry, selectMutationPacks } from '../src/mutations/registry.js';
 
 test('mutation registry exposes production mutation packs', () => {
   const registry = getMutationRegistry();

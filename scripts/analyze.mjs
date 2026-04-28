@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/engine.js';
+import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/core/engine.js';
 
 const args = process.argv.slice(2);
 const positional = args.filter((arg) => !arg.startsWith('--'));

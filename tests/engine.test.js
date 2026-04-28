@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeBundle, createDemoBundle } from '../src/engine.js';
+import { analyzeBundle, createDemoBundle } from '../src/core/engine.js';
 
 test('demo bundle generates a stable analysis', () => {
   const analysis = analyzeBundle(createDemoBundle());
@@ -36,4 +36,3 @@ test('observed runs override the simulated outcomes', () => {
   assert.equal(analysis.summary.modeLabel, 'observed');
   assert.ok(analysis.summary.overallScore >= 95);
 });
-

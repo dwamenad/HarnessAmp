@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/engine.js';
-import { collectFailureCorpus, formatFailureCorpusReport, mergeFailureCorpora } from '../src/failure-corpus.js';
+import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/core/engine.js';
+import { collectFailureCorpus, formatFailureCorpusReport, mergeFailureCorpora } from '../src/reports/failure-corpus.js';
 
 const args = process.argv.slice(2);
 const positional = [];
