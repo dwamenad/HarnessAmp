@@ -1,0 +1,6 @@
+{
+  "agentDomain": "browser_agent",
+  "toolRisk": ["external_network", "email_or_messaging"],
+  "dataSensitivity": ["internal", "pii"],
+  "autonomyLevel": "semi_autonomous"
+}

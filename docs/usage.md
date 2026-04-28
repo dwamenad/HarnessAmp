@@ -46,6 +46,13 @@ The first three should stay fixed. The wrapper is the only layer that should dri
 - Write markdown/json artifacts from the same command for CI and PR review.
 - Use lenient thresholds first, then tighten them as the benchmark pack matures.
 
+## Mutation diagnosis
+
+- Run `npm run diagnose -- <bundle.json>` to generate selected mutation packs, run baseline and mutated tasks through the mock runner, classify failures, and print a diagnostic report.
+- Use `node scripts/harnessamp.mjs registry` to inspect the available mutation packs.
+- Use `node scripts/harnessamp.mjs mutate <bundle.json> --max-mutations 20` to inspect deterministic mutation records before running them.
+- Treat sandbox-boundary mutations as defensive checks only; they describe expected boundary enforcement without procedural exploit steps.
+
 ## Docker
 
 - Run `npm run docker:build` to build the production image.

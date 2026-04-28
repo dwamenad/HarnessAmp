@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessAmp Diagnostic Report",
+  "type": "object",
+  "required": ["version", "suite", "baselineRuns", "mutationRuns", "deltas", "findings", "summary"],
+  "properties": {
+    "version": { "type": "string" },
+    "generatedAt": { "type": "string" },
+    "suite": { "type": "object" },
+    "baselineRuns": { "type": "array", "items": { "type": "object" } },
+    "mutationRuns": { "type": "array", "items": { "type": "object" } },
+    "deltas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["deltaType", "mutationId", "explanation", "severity"],
+        "properties": {
+          "deltaType": { "type": "array", "items": { "type": "string" } },
+          "before": { "type": ["object", "null"] },
+          "after": { "type": "object" },
+          "mutationId": { "type": ["string", "null"] },
+          "explanation": { "type": "string" },
+          "severity": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "mutationId", "failureTypes", "highestSeverity", "recommendation"],
+        "properties": {
+          "id": { "type": "string" },
+          "mutationId": { "type": "string" },
+          "failureTypes": { "type": "array", "items": { "type": "object" } },
+          "highestSeverity": { "type": "string" },
+          "recommendation": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["originalPassRate", "mutatedPassRate", "robustnessDrop", "verdict"],
+      "properties": {
+        "originalPassRate": { "type": "number" },
+        "mutatedPassRate": { "type": "number" },
+        "robustnessDrop": { "type": "number" },
+        "verdict": { "type": "string", "enum": ["pass", "warn", "block"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

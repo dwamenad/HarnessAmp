@@ -1,0 +1,6 @@
+{
+  "agentDomain": "customer_support",
+  "toolRisk": ["read_only", "write_capable", "external_network"],
+  "dataSensitivity": ["internal", "pii", "financial"],
+  "autonomyLevel": "semi_autonomous"
+}

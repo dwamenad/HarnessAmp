@@ -58,6 +58,7 @@ npm run dev
 | Compile approved traces into a draft contract | `npm run compile:traces` |
 | Collect a failure corpus | `npm run collect:failures` |
 | Run a release gate | `npm run release:gate` |
+| Run mutation diagnosis | `npm run diagnose -- examples/demo-bundle.json` |
 | Analyze a bundle file | `npm run analyze -- examples/demo-bundle.json` |
 | Export the generated pack JSON | `npm run analyze -- examples/demo-bundle.json --pack` |
 | Build for production | `npm run build` |
@@ -165,6 +166,30 @@ npm run release:gate -- examples/demo-bundle.json examples/cli/observed-runs.jso
 
 The repo now includes a GitHub Actions workflow at `.github/workflows/release-gate.yml` that runs the gate, writes markdown/json artifacts, and uploads them on every pull request.
 
+## Mutation diagnosis
+
+HarnessAmp now has a production-oriented mutation registry and diagnosis path:
+
+```bash
+node scripts/harnessamp.mjs validate examples/demo-bundle.json
+node scripts/harnessamp.mjs mutate examples/demo-bundle.json --max-mutations 20
+npm run diagnose -- examples/demo-bundle.json
+```
+
+The diagnosis flow runs deterministic mutation packs through the mock runner, computes behavioral deltas, classifies failures, and returns a `PASS`, `WARN`, or `BLOCK` recommendation.
+
+Current mutation packs:
+
+- `prompt_integrity_pack`
+- `tool_payload_pack`
+- `permissioning_pack`
+- `network_sink_pack`
+- `context_memory_pack`
+- `sandbox_boundary_pack`
+- `multimodal_pack`
+
+See [Mutation Engine](docs/mutation-engine.md) for the registry format and risk-profile selection model.
+
 ## Docker
 
 To run the production build in a container:
@@ -197,6 +222,7 @@ HarnessAmp mutates those surfaces and highlights the widest gaps so you can fix 
 - [Usage guide](docs/usage.md)
 - [CLI guide](docs/cli.md)
 - [Examples guide](docs/examples.md)
+- [Mutation engine](docs/mutation-engine.md)
 - [Public data plan](docs/public-data.md)
 - [Testing guide](docs/testing.md)
 - [Troubleshooting guide](docs/troubleshooting.md)
