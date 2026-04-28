@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "harnessamp": "./scripts/harnessamp.mjs"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,6 +15,7 @@
     "compile:traces": "node scripts/compile-traces.mjs",
     "collect:failures": "node scripts/collect-failures.mjs",
     "release:gate": "node scripts/release-gate.mjs",
+    "diagnose": "node scripts/harnessamp.mjs diagnose",
     "docker:build": "docker build -t harnessamp:local .",
     "docker:run": "docker run --rm -p 8088:80 harnessamp:local",
     "docker:stop": "docker stop harnessamp-local"
