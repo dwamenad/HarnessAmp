@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessAmp Risk Profile",
+  "type": "object",
+  "properties": {
+    "agentDomain": {
+      "type": "string",
+      "enum": [
+        "customer_support",
+        "healthcare",
+        "finance",
+        "legal",
+        "ecommerce",
+        "coding_agent",
+        "browser_agent",
+        "internal_ops_agent"
+      ]
+    },
+    "toolRisk": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "read_only",
+          "write_capable",
+          "external_network",
+          "payment_or_refund",
+          "email_or_messaging",
+          "file_system",
+          "database",
+          "code_execution"
+        ]
+      }
+    },
+    "dataSensitivity": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "public",
+          "internal",
+          "confidential",
+          "regulated",
+          "pii",
+          "financial",
+          "medical"
+        ]
+      }
+    },
+    "autonomyLevel": {
+      "type": "string",
+      "enum": [
+        "advisory_only",
+        "human_approval_required",
+        "semi_autonomous",
+        "fully_autonomous"
+      ]
+    }
+  },
+  "additionalProperties": true
+}
