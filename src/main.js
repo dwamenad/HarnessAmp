@@ -1,4 +1,4 @@
-import { analyzeBundle, createDemoBundle, safeJsonParse } from './engine.js';
+import { analyzeBundle, createDemoBundle, safeJsonParse } from './core/engine.js';
 
 const STORAGE_KEYS = {
   bundle: 'harnessamp.bundle',

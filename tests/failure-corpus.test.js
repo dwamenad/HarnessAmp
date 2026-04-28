@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeBundle, createDemoBundle } from '../src/engine.js';
-import { collectFailureCorpus, mergeFailureCorpora } from '../src/failure-corpus.js';
+import { analyzeBundle, createDemoBundle } from '../src/core/engine.js';
+import { collectFailureCorpus, mergeFailureCorpora } from '../src/reports/failure-corpus.js';
 
 test('failure corpus collects failed variants from an analysis run', () => {
   const analysis = analyzeBundle(createDemoBundle(), [

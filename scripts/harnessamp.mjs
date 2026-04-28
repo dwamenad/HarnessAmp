@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/engine.js';
-import { diagnoseHarness } from '../src/diagnose.js';
-import { generateMutationSuite, getMutationRegistry } from '../src/mutation-registry.js';
+import { diagnoseHarness } from '../src/core/diagnose.js';
+import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/core/engine.js';
+import { generateMutationSuite, getMutationRegistry } from '../src/mutations/registry.js';
 
 const [command = 'diagnose', ...rest] = process.argv.slice(2);
 const options = parseArgs(rest);

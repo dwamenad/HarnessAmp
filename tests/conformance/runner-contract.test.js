@@ -1,0 +1,86 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createDemoBundle } from '../../src/core/engine.js';
+import {
+  AgentRunner,
+  AgentFrameworkRunner,
+  CrewWorkflowRunner,
+  CustomHTTPRunner,
+  GraphWorkflowRunner,
+  MCPRunner,
+  MockRunner,
+  ModelSDKRunner,
+  MultiAgentRunner,
+  createRunner,
+} from '../../src/adapters/runners.js';
+import { listCliCommands } from '../../src/cli/index.js';
+
+const REQUIRED_RUN_RESULT_FIELDS = [
+  'runId',
+  'harnessId',
+  'harnessVersion',
+  'agentVersion',
+  'modelVersion',
+  'mutationPackVersion',
+  'mutationId',
+  'mutationSeed',
+  'runnerVersion',
+  'evaluatorVersion',
+  'timestamp',
+  'environment',
+  'toolMode',
+  'taskId',
+  'inputPrompt',
+  'outputText',
+  'toolCalls',
+  'toolOutputs',
+  'errors',
+  'latencyMs',
+  'tokenUsage',
+  'metadata',
+];
+
+test('mock runner satisfies the AgentRunResult conformance shape', async () => {
+  const bundle = createDemoBundle();
+  const runner = createRunner('mock');
+  const result = await runner.run({
+    bundle,
+    task: bundle.harness.scenarios[0],
+    environment: 'conformance',
+  });
+
+  assert.ok(runner instanceof MockRunner);
+  REQUIRED_RUN_RESULT_FIELDS.forEach((field) => {
+    assert.ok(field in result, `missing ${field}`);
+  });
+  assert.equal(result.environment, 'conformance');
+  assert.equal(result.toolMode, 'mock');
+  assert.equal(Array.isArray(result.toolCalls), true);
+  assert.equal(Array.isArray(result.toolOutputs), true);
+  assert.equal(Array.isArray(result.errors), true);
+  assert.equal(typeof result.metadata.passed, 'boolean');
+});
+
+test('future adapter classes are explicit AgentRunner placeholders', async () => {
+  const placeholders = [
+    ModelSDKRunner,
+    AgentFrameworkRunner,
+    GraphWorkflowRunner,
+    CrewWorkflowRunner,
+    MultiAgentRunner,
+    CustomHTTPRunner,
+    MCPRunner,
+  ];
+
+  for (const Runner of placeholders) {
+    const runner = new Runner();
+    assert.ok(runner instanceof AgentRunner);
+    await assert.rejects(() => runner.run({}), /must be implemented/);
+  }
+});
+
+test('CLI manifest exposes the expected harness workflow commands', () => {
+  const commandNames = listCliCommands().map((command) => command.name);
+
+  assert.deepEqual(commandNames, ['validate', 'mutate', 'run', 'diagnose', 'report']);
+});

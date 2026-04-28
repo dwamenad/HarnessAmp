@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { compileTraceContract, createDemoTraceCorpus } from '../src/compiler.js';
-import { safeJsonParse } from '../src/engine.js';
+import { compileTraceContract, createDemoTraceCorpus } from '../src/core/compiler.js';
+import { safeJsonParse } from '../src/core/engine.js';
 
 const args = process.argv.slice(2);
 const positional = args.filter((arg) => !arg.startsWith('--'));

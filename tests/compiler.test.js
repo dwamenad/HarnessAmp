@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileTraceContract, createDemoTraceCorpus } from '../src/compiler.js';
-import { analyzeBundle } from '../src/engine.js';
+import { compileTraceContract, createDemoTraceCorpus } from '../src/core/compiler.js';
+import { analyzeBundle } from '../src/core/engine.js';
 
 test('trace compiler creates a draft contract and benchmark from approved traces', () => {
   const compiled = compileTraceContract(createDemoTraceCorpus());

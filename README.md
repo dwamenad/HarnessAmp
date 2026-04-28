@@ -14,6 +14,30 @@
 
 HarnessAmp is a harness-hardening lab for AI agents. It combines a browser workbench, a terminal CLI, and a shared analysis engine so you can move from bundle to report to exported pack without switching tools.
 
+## Ecosystem
+
+HarnessAmp is not an agent framework. It is the robustness layer around agent frameworks and custom agent harnesses.
+
+```mermaid
+flowchart LR
+  A["Agent frameworks / graph workflows / model SDKs / MCP / custom HTTP"] --> B["HarnessAmp adapters"]
+  B --> C["HarnessAmp core"]
+  C --> D["Mutation packs"]
+  D --> E["Runner"]
+  E --> F["Behavioral deltas"]
+  F --> G["Failure classifier"]
+  G --> H["Robustness report"]
+  H --> I["CI gate"]
+```
+
+The package boundaries mirror that product model:
+
+- `src/core/` - bundle normalization, trace compiler, diagnosis, and failure taxonomy
+- `src/mutations/` - mutation registry, packs, and risk-profile selection
+- `src/adapters/` - runner contract and framework adapters
+- `src/reports/` - failure corpus and report artifacts
+- `src/cli/` - command manifest and CLI coordination surface
+
 The browser UI is now structured around four separate layers:
 
 - `intent` - the mission the system is supposed to preserve
@@ -240,11 +264,14 @@ HarnessAmp mutates those surfaces and highlights the widest gaps so you can fix 
 ## Examples and walkthroughs
 
 - [Documentation home](docs/index.md)
+- [Concepts](docs/concepts/index.md)
+- [Adapter guide](docs/adapters/index.md)
 - [Installation guide](docs/installation.md)
 - [Usage guide](docs/usage.md)
 - [CLI guide](docs/cli.md)
 - [Examples guide](docs/examples.md)
 - [Mutation engine](docs/mutation-engine.md)
+- [Runner contract](docs/adapters/runner-contract.md)
 - [Public data plan](docs/public-data.md)
 - [Testing guide](docs/testing.md)
 - [Troubleshooting guide](docs/troubleshooting.md)
@@ -258,8 +285,13 @@ HarnessAmp mutates those surfaces and highlights the widest gaps so you can fix 
 - `examples/` - starter bundles and example packs
 - `output/playwright/` - README screenshots and browser captures
 - `scripts/` - terminal helpers and report tooling
-- `src/` - the browser UI and shared analysis engine
-- `tests/` - Node test coverage for the scoring logic
+- `src/core/` - shared normalization, compiler, diagnosis, and taxonomy logic
+- `src/mutations/` - deterministic mutation registry and pack selection
+- `src/adapters/` - runner contract and adapter placeholders
+- `src/reports/` - failure corpus and report artifacts
+- `src/cli/` - CLI command manifest
+- `src/main.js` - browser UI
+- `tests/` - Node test coverage for scoring, diagnosis, mutations, and conformance
 
 ## Contributing
 

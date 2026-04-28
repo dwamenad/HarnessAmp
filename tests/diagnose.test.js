@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDemoBundle } from '../src/engine.js';
-import { computeBehavioralDeltas, diagnoseHarness } from '../src/diagnose.js';
-import { getFailureType } from '../src/failure-taxonomy.js';
-import { createRunner, MockRunner, OpenAIRunner } from '../src/runners.js';
+import { computeBehavioralDeltas, diagnoseHarness } from '../src/core/diagnose.js';
+import { createDemoBundle } from '../src/core/engine.js';
+import { getFailureType } from '../src/core/failure-taxonomy.js';
+import { createRunner, MockRunner, ModelSDKRunner } from '../src/adapters/runners.js';
 
 test('diagnose command path produces deltas, findings, and diagnostic report text', async () => {
   const diagnosis = await diagnoseHarness(createDemoBundle(), { maxMutations: 20 });
@@ -33,8 +33,8 @@ test('runner abstraction keeps mock and future adapters separate', async () => {
   const runner = createRunner('mock');
   assert.ok(runner instanceof MockRunner);
 
-  const futureRunner = createRunner('openai');
-  assert.ok(futureRunner instanceof OpenAIRunner);
+  const futureRunner = createRunner('model_sdk');
+  assert.ok(futureRunner instanceof ModelSDKRunner);
   await assert.rejects(() => futureRunner.run({}), /must be implemented/);
 });
 
