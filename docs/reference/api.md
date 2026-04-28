@@ -49,3 +49,25 @@ Important outputs:
 ## `mergeFailureCorpora(...corpora)`
 
 Merges multiple failure corpora while deduplicating entries by id.
+
+## `generateMutationSuite(bundleInput, options)`
+
+Builds deterministic mutation records and mutated harnesses from a creator harness or benchmark pack.
+
+Important outputs:
+
+- `selectedPacks` - mutation packs selected from the risk profile
+- `mutations` - structured mutation objects with trust boundaries, severity, expected failure, and mutated harnesses
+
+## `diagnoseHarness(bundleInput, options)`
+
+Runs the production diagnosis flow with the default mock runner.
+
+Important outputs:
+
+- `baselineRuns` - original task runs
+- `mutationRuns` - mutated task runs
+- `deltas` - behavioral changes between original and mutated runs
+- `findings` - classified failures with recommendations
+- `summary` - pass/warn/block verdict and robustness drop
+- `reportText` - markdown robustness report
