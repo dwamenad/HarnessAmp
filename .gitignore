@@ -4,3 +4,4 @@ dist
 *.log
 .run-preview.png
 .playwright-cli/
+.vercel
