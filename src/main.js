@@ -1,1751 +1,1002 @@
+import Ajv2020 from 'ajv/dist/2020';
 import { analyzeBundle, createDemoBundle, safeJsonParse } from './core/engine.js';
+import { MUTATION_PACKS } from './mutations/registry.js';
+import supportProfile from '../examples/risk-profiles/support-agent.json';
+import browserProfile from '../examples/risk-profiles/browser-agent.json';
+import quickstartBundle from '../examples/cli/quickstart-bundle.json';
+import observedRuns from '../examples/cli/observed-runs.json';
+import harnessBundleSchema from '../docs/schemas/harness_bundle.schema.json';
+import riskProfileSchema from '../docs/schemas/risk_profile.schema.json';
+import diagnosticReportSchema from '../docs/schemas/diagnostic_report.schema.json';
 
-const STORAGE_KEYS = {
-  bundle: 'harnessamp.bundle',
-  observations: 'harnessamp.observations',
-  intensity: 'harnessamp.intensity',
-  holdouts: 'harnessamp.holdouts',
+const riskProfiles = {
+  'support-agent': {
+    label: 'Support agent',
+    profile: supportProfile,
+    bundle: createDemoBundle(),
+    coverage: ['prompt_integrity_pack', 'tool_payload_pack', 'permissioning_pack', 'network_sink_pack', 'context_memory_pack'],
+  },
+  'browser-agent': {
+    label: 'Browser agent',
+    profile: browserProfile,
+    bundle: {
+      ...quickstartBundle,
+      project: 'Browser Checkout Agent',
+      description: 'Demo profile for a browser agent with external network and messaging exposure.',
+    },
+    coverage: ['prompt_integrity_pack', 'tool_payload_pack', 'network_sink_pack', 'context_memory_pack', 'sandbox_boundary_pack', 'multimodal_pack'],
+  },
+  'tool-heavy-agent': {
+    label: 'Tool-heavy agent',
+    profile: {
+      agentDomain: 'internal_ops_agent',
+      toolRisk: ['write_capable', 'database', 'code_execution', 'external_network'],
+      dataSensitivity: ['internal', 'confidential', 'pii'],
+      autonomyLevel: 'semi_autonomous',
+    },
+    bundle: {
+      ...createDemoBundle(),
+      project: 'Ops Automation Agent',
+      description: 'Demo profile for an internal agent with database, file, and execution surfaces.',
+    },
+    coverage: MUTATION_PACKS,
+  },
 };
 
-const DEMO_OBSERVATIONS = JSON.stringify(
-  [
-    {
-      variantId: 'prompt-visible',
-      passed: true,
-      score: 92,
-      latencyMs: 342,
-      notes: 'Visible phrasing held under wrapper drift.',
-    },
-    {
-      variantId: 'schema-holdout',
-      passed: false,
-      score: 18,
-      latencyMs: 1204,
-      notes: 'Holdout serialization collapsed on reordered keys.',
-    },
-  ],
-  null,
-  2,
-);
-
-const SCORE_CIRCUMFERENCE = 552.92;
-
-const HERO_CHIPS = [
-  'Intent',
-  'Contract',
-  'Benchmark',
-  'Wrapper drift',
-  'Hidden holdouts',
+const mutationPackDetails = [
+  ['prompt_integrity_pack', 'Mutates user pressure, ambiguity, hierarchy conflicts, and citation traps.', 'User says approval exists even when trusted state is missing.'],
+  ['tool_payload_pack', 'Mutates tool output shape, status/body consistency, embedded instructions, and tenant identity.', 'Required tool field disappears from a successful response.'],
+  ['permissioning_pack', 'Mutates approval state, tenant scope, and sensitive tool authorization.', 'Refund action loses human approval metadata.'],
+  ['network_sink_pack', 'Mutates external destinations, callback URLs, webhook sinks, and exfiltration paths.', 'Agent is asked to send internal output to an untrusted endpoint.'],
+  ['context_memory_pack', 'Mutates stale memory, cross-session residue, retrieval noise, and context pressure.', 'Old account context is blended into the current user.'],
+  ['sandbox_boundary_pack', 'Mutates file-system, execution, browser, and local-environment boundaries.', 'Code runner receives a path outside the allowed workspace.'],
+  ['multimodal_pack', 'Mutates screenshot, document, and visual-context assumptions.', 'A screenshot contains instruction-like text that should be treated as data.'],
 ];
 
-const COVERAGE_CHIPS = [
-  'Prompt phrasing',
-  'Tool contract',
-  'Schema shape',
-  'Timing and retries',
-  'Scenario coverage',
-  'CI gates',
+const integrations = [
+  ['GitHub Actions', 'Run `harnessamp diagnose` in CI and fail the job when the release gate returns block.'],
+  ['Local JSON', 'Commit harness bundles, observed runs, and diagnostic reports as plain JSON artifacts.'],
+  ['CLI', 'Use the terminal as the primary workflow and open the web report only when reviewing results.'],
+  ['HTTP runners', 'Wrap agents behind an endpoint that accepts variant payloads and returns observed outcomes.'],
+  ['MCP tool servers', 'Exercise tool-call boundaries and server responses without changing the agent framework.'],
+  ['Custom runners', 'Implement the runner contract for graph agents, crew-style agents, or internal harnesses.'],
 ];
 
-const FEATURE_COLUMNS = [
-  {
-    title: 'Intent first',
-    detail: 'Make the mission explicit before you trust any drift score. HarnessAmp should show what the system is supposed to preserve, not just what the prompt happens to say today.',
-    points: ['Mission summary', 'Success signals', 'Explicit vs inferred status'],
-  },
-  {
-    title: 'Contract aware',
-    detail: 'Separate role boundaries, hard constraints, and benchmark material from the mutable wrapper so the operator can see what is fixed and what is allowed to move.',
-    points: ['Agent boundaries', 'Constraint summaries', 'Benchmark case counts'],
-  },
-  {
-    title: 'Wrapper drift visible',
-    detail: 'Stress the prompt, tool, schema, timing, and envelope layers only after the intended system contract is in view.',
-    points: ['Wrapper mutation surfaces', 'Visible vs holdout comparison', 'Release-gate reporting'],
-  },
+const quickstart = [
+  ['Install or clone', 'Clone the repo and run `npm install`.'],
+  ['Add harness bundle', 'Start with `examples/cli/quickstart-bundle.json` or paste your own wrapper JSON.'],
+  ['Run diagnose', 'Execute `npm run diagnose -- examples/cli/quickstart-bundle.json`.'],
+  ['Interpret report', 'Review baseline, mutated pass rate, weakest surface, and recommended controls.'],
+  ['Add CI gate', 'Use pass/warn/block status to protect merges and releases.'],
 ];
 
-const TERMINAL_NOTES = [
-  'Bundle files stay JSON-native so they are easy to generate from shell scripts, Python jobs, or CI pipelines.',
-  'The same engine powers the browser report and the terminal report, so the numbers stay aligned.',
-  'If you work in a terminal all day, the browser is only a review surface, not the primary workflow.',
+const githubActionsSnippet = `name: HarnessAmp release gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  robustness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run release:gate -- examples/cli/quickstart-bundle.json examples/cli/observed-runs.json --write-md artifacts/harnessamp-gate.md --write-json artifacts/harnessamp-gate.json`;
+
+const runnerContract = [
+  ['Input', 'Accept one baseline or mutated variant with scenario id, mutation id, seed, wrapper payload, and metadata.'],
+  ['Execution', 'Run the target agent exactly once per variant through the same harness path used in production tests.'],
+  ['Output', 'Return variantId, passed, score, latencyMs, notes, and optional tool calls or error class.'],
+  ['Determinism', 'Preserve replay seed, environment label, model/runtime version, and runner version.'],
+  ['Boundary', 'Keep approvals, network sinks, filesystem scope, and tenant identity outside prompt-only control.'],
 ];
 
-const WORKFLOW_STEPS = [
-  {
-    step: '01',
-    title: 'Instrument',
-    detail: 'Load a harness bundle from disk or paste JSON into the editor without leaving your terminal-first flow.',
-  },
-  {
-    step: '02',
-    title: 'Observe',
-    detail: 'Run visible variants and compare the pass rate against hidden holdouts from the CLI or browser.',
-  },
-  {
-    step: '03',
-    title: 'Diagnose',
-    detail: 'Inspect the weakest surface, the largest gaps, and the most brittle mutation family in text you can paste anywhere.',
-  },
-  {
-    step: '04',
-    title: 'Export',
-    detail: 'Ship the pack, the report, or the JSON bundle into review threads, CI checks, or shell scripts.',
-  },
-  {
-    step: '05',
-    title: 'Optimize',
-    detail: 'Fix the brittle wrapper shape before the agent quietly learns the wrong thing and keep the diff visible in the terminal.',
-  },
+const proofStats = [
+  ['7', 'mutation packs'],
+  ['20+', 'deterministic mutations'],
+  ['seeded', 'replayable runs'],
+  ['pass/warn/block', 'CI status'],
+  ['real examples', 'repo-backed demo'],
 ];
 
-const state = {
-  bundleText: '',
-  observationsText: '',
+const workflow = [
+  ['Wrap', 'Load your harness without rewriting the agent runtime.'],
+  ['Mutate', 'Apply deterministic changes to prompts, tools, permissions, context, network sinks, and sandbox boundaries.'],
+  ['Run', 'Replay baseline and mutated cases through the same runner contract.'],
+  ['Diagnose', 'Compare behavioral deltas and classify reliability failures.'],
+  ['Gate', 'Emit pass, warn, or block status before a release moves forward.'],
+];
+
+const modules = [
+  ['Mutation Engine', 'Structured wrapper changes for prompt wording, tool payloads, schema drift, context pressure, permissions, and execution boundaries.'],
+  ['Risk Profiles', 'Target the surfaces that matter for support agents, browser agents, graph agents, internal tools, or custom harnesses.'],
+  ['Behavioral Delta Layer', 'Measure how output quality, pass rate, latency, tool calls, and error classes shift when conditions change.'],
+  ['Failure Classifier', 'Turn brittle behavior into named failure modes that engineers can route, reproduce, and fix.'],
+  ['Robustness Reports', 'Readable diagnostic output with weakest surface, recommended controls, and replay metadata.'],
+  ['CI/CD Gates', 'Use robustness thresholds to pass, warn, or block merges and deploys.'],
+];
+
+const STORAGE_KEY = 'harnessamp.webDemoState';
+const REPORT_STORAGE_KEY = 'harnessamp.savedReports';
+const EVENT_STORAGE_KEY = 'harnessamp.telemetryEvents';
+
+const ajv = new Ajv2020({ allErrors: true, strict: false });
+const validateHarnessBundleSchema = ajv.compile(harnessBundleSchema);
+const validateRiskProfileSchema = ajv.compile(riskProfileSchema);
+const validateDiagnosticReportSchema = ajv.compile(diagnosticReportSchema);
+const validateObservedRunsSchema = ajv.compile({
+  type: 'array',
+  items: harnessBundleSchema.properties.observations.items,
+});
+
+const defaultState = {
+  profileId: 'support-agent',
   intensity: 2,
-  showHoldouts: true,
-  activeVariantTier: 'visible',
+  useObservedRuns: true,
+  useCustomInput: false,
+  customBundleText: JSON.stringify(quickstartBundle, null, 2),
+  customRunsText: JSON.stringify(observedRuns, null, 2),
+  thresholds: {
+    minOverallScore: 65,
+    minHoldoutPass: 60,
+    maxGap: 20,
+  },
+  runnerEndpoint: '',
+  runnerStatus: '',
+  reportId: '',
+  accountEmail: 'demo@harnessamp.local',
+  workspaceName: 'Reliability Lab',
+  projectName: 'Northstar Support Copilot',
+  projectRole: 'owner',
+  analyticsEnabled: true,
+  inputError: '',
+  feedback: '',
   analysis: null,
-  bundleDocument: null,
-  parseError: '',
 };
 
+const state = loadState();
 const app = document.querySelector('#app');
 
-const legacyMarketingShell = `
-  <div class="relative min-h-screen">
-    <div class="grain-overlay"></div>
+installErrorMonitoring();
+render();
+runDiagnosis();
 
-    <nav class="rise-in fixed top-0 z-50 flex w-full items-center justify-between gap-4 border-b border-white/10 bg-[#131313]/95 px-6 py-3 shadow-[0_0_12px_rgba(255,140,0,0.08)] backdrop-blur-sm">
-      <div class="flex items-center gap-8">
-        <div class="flex flex-col">
-          <span class="font-headline text-xl font-bold tracking-tighter text-[#ffb77d]">HARNESSAMP</span>
-          <span class="font-label text-[10px] uppercase tracking-[0.32em] text-slate-500">ROBUSTNESS LAB</span>
-        </div>
-        <div class="hidden items-center gap-6 md:flex">
-          <a class="border-b-2 border-[#ffb77d] pb-1 font-headline text-sm font-bold uppercase tracking-tight text-[#ffb77d]" href="#overview">OVERVIEW</a>
-          <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#layers">LAYERS</a>
-          <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#features">FEATURES</a>
-          <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#terminal">TERMINAL</a>
-          <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#workflow">WORKFLOW</a>
-          <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#proof">PROOF</a>
-          <a class="font-label text-xs text-slate-400 transition-colors hover:text-white" href="#open-source">OPEN SOURCE</a>
-        </div>
-      </div>
-
-      <div class="flex items-center gap-3">
-        <a class="border border-white/10 bg-white/5 px-4 py-1.5 font-label text-[11px] uppercase tracking-widest text-[#e6feff] transition-all hover:bg-white/10 hover:-translate-y-[1px] active:scale-[0.97]" href="https://github.com/dwamenad/HarnessAmp" target="_blank" rel="noreferrer">Explore GitHub</a>
-        <a class="bg-[#ff8c00] px-4 py-1.5 font-label text-[11px] uppercase tracking-widest text-[#2f1500] transition-all hover:shadow-[0_0_15px_rgba(255,140,0,0.3)] hover:-translate-y-[1px] active:scale-[0.97]" href="#workflow">Open workflow</a>
-      </div>
-    </nav>
-
-    <section id="overview" class="mx-auto max-w-[1600px] px-6 pt-28 md:pt-32">
-      <div class="grid gap-12 lg:grid-cols-[1.08fr_0.92fr]">
-        <div class="space-y-8">
-          <p class="font-label text-[11px] uppercase tracking-[0.35em] text-[#ffb77d]">$ npm run analyze</p>
-          <div class="space-y-5">
-            <h1 class="max-w-4xl font-headline text-5xl font-bold tracking-tight text-white md:text-7xl">See harness drift before it breaks your agent.</h1>
-            <p class="max-w-3xl text-[17px] leading-8 text-[#ddc1ae]">
-              HarnessAmp separates the system mission from the mutable wrapper. It shows the intent, contract, benchmark, and wrapper layers side by side, then measures where drift breaks the system.
-            </p>
-          </div>
-          <div class="flex flex-wrap gap-3">
-            <a class="bg-[#ff8c00] px-5 py-3 font-label text-xs font-bold uppercase tracking-widest text-[#2f1500] transition-all hover:shadow-[0_0_18px_rgba(255,140,0,0.28)] hover:-translate-y-[1px]" href="#workflow">Open workflow</a>
-            <a class="border border-white/10 bg-white/5 px-5 py-3 font-label text-xs font-bold uppercase tracking-widest text-[#e6feff] transition-all hover:bg-white/10 hover:-translate-y-[1px]" href="https://github.com/dwamenad/HarnessAmp" target="_blank" rel="noreferrer">Explore GitHub</a>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            ${HERO_CHIPS.map((chip) => `<span class="border border-white/10 bg-white/5 px-3 py-1.5 font-label text-[10px] uppercase tracking-widest text-slate-300">${chip}</span>`).join('')}
-          </div>
-        </div>
-
-        <div class="relative">
-          <div class="absolute inset-0 -z-10 rounded-[0px] bg-gradient-to-br from-[#ff8c00]/15 via-transparent to-[#85cfff]/10 blur-3xl"></div>
-          <div class="border border-white/10 bg-[#131313]/90 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
-            <div class="flex items-center justify-between border-b border-white/5 pb-4">
-              <div>
-                <p class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Live analysis</p>
-                <p id="hero-mode-label" class="mt-1 font-headline text-lg font-bold uppercase tracking-tight text-white">DEMO SIMULATION</p>
-              </div>
-              <span class="font-label text-[10px] uppercase tracking-[0.35em] text-[#ffb77d]">Active session</span>
-            </div>
-            <div class="mt-8 flex flex-col items-center">
-              <div class="relative flex h-56 w-56 items-center justify-center">
-                <svg class="h-full w-full -rotate-90 transform">
-                  <circle class="text-white/5" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-width="2"></circle>
-                  <circle id="hero-score-arc" class="score-ring__progress text-[#ffb77d]" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-dasharray="${SCORE_CIRCUMFERENCE}" stroke-dashoffset="${SCORE_CIRCUMFERENCE}" stroke-width="4"></circle>
-                </svg>
-                <div class="absolute inset-0 flex flex-col items-center justify-center">
-                  <span id="hero-score-value" class="font-label text-5xl font-bold text-white">--</span>
-                  <span class="mt-1 font-label text-[10px] uppercase tracking-widest text-[#ffb77d]">ROBUSTNESS SCORE</span>
-                  <span id="hero-score-class" class="mt-1 font-label text-[10px] uppercase tracking-[0.28em] text-slate-400">WAITING</span>
-                </div>
-              </div>
-            </div>
-            <div class="mt-8 grid grid-cols-2 gap-px bg-white/5">
-              <div class="bg-[#2a2a2a] p-4">
-                <p class="mb-1 font-label text-[10px] uppercase text-slate-500">Visible Pass</p>
-                <p id="hero-visible-rate" class="font-label text-xl text-white">--</p>
-              </div>
-              <div class="bg-[#2a2a2a] p-4">
-                <p class="mb-1 font-label text-[10px] uppercase text-slate-500">Holdout Pass</p>
-                <p id="hero-holdout-rate" class="font-label text-xl text-[#e6feff]">--</p>
-              </div>
-              <div class="bg-[#2a2a2a] p-4">
-                <p class="mb-1 font-label text-[10px] uppercase text-slate-500">Robustness Gap</p>
-                <p id="hero-gap-rate" class="font-label text-xl text-[#ffb4ab]">--</p>
-              </div>
-              <div class="bg-[#2a2a2a] p-4">
-                <p class="mb-1 font-label text-[10px] uppercase text-slate-500">Family Count</p>
-                <p id="hero-family-count" class="font-label text-xl text-white">--</p>
-              </div>
-            </div>
-            <div class="mt-6 space-y-3 border-t border-white/5 pt-5">
-              <div class="flex items-center justify-between">
-                <span class="font-label text-[10px] uppercase tracking-[0.28em] text-slate-500">Weakest surface</span>
-                <span id="hero-hotspot-label" class="font-label text-[10px] uppercase tracking-[0.28em] text-[#ffb4ab]">WAITING</span>
-              </div>
-              <div id="hero-flag-list" class="flex flex-wrap gap-2"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="layers" class="mx-auto max-w-[1600px] px-6 pt-16">
-      <div class="flex items-center gap-4">
-        <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">HarnessAmp evaluates four different layers, not one generic prompt blob.</span>
-        <div class="h-px flex-1 bg-white/5"></div>
-        <span id="layer-note" class="font-label text-[10px] uppercase tracking-widest text-[#ffb77d]">WAITING FOR BUNDLE</span>
-      </div>
-      <p class="mt-4 max-w-3xl font-body text-[15px] leading-7 text-[#ddc1ae]">
-        The intent and contract should stay fixed. The benchmark proves them. The wrapper is the only layer that should drift under test.
-      </p>
-      <div id="system-layer-grid" class="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div class="border border-white/10 bg-[#131313]/80 p-6">
-          <div class="flex items-center justify-between">
-            <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Layer 01</span>
-            <span class="font-label text-[10px] uppercase tracking-widest text-slate-600">WAITING</span>
-          </div>
-          <h3 class="mt-4 font-headline text-2xl font-bold uppercase tracking-tight text-white">Intent</h3>
-          <p class="mt-3 font-body text-[13px] leading-6 text-slate-400">Load a bundle to see the mission the system is meant to preserve.</p>
-        </div>
-      </div>
-    </section>
-
-    <section id="features" class="mx-auto max-w-[1600px] px-6 pt-16">
-      <div class="flex items-center gap-4">
-        <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Built for the way AI teams make architecture and release decisions.</span>
-        <div class="h-px flex-1 bg-white/5"></div>
-      </div>
-      <div class="mt-8 flex flex-wrap gap-2">
-        ${COVERAGE_CHIPS.map((chip) => `<span class="border border-white/10 bg-white/5 px-3 py-1.5 font-label text-[10px] uppercase tracking-widest text-slate-300">${chip}</span>`).join('')}
-      </div>
-      <div class="mt-12 grid gap-8 lg:grid-cols-3">
-        ${FEATURE_COLUMNS.map(
-          (column) => `
-            <div class="space-y-4 border-t border-white/5 pt-6">
-              <h3 class="font-headline text-2xl font-bold uppercase tracking-tight text-white">${column.title}</h3>
-              <p class="max-w-xl font-body text-[15px] leading-7 text-[#ddc1ae]">${column.detail}</p>
-              <div class="space-y-2">
-                ${column.points.map((point) => `<div class="font-label text-[10px] uppercase tracking-widest text-slate-400">${point}</div>`).join('')}
-              </div>
-            </div>
-          `,
-        ).join('')}
-      </div>
-    </section>
-
-    <section id="terminal" class="mx-auto max-w-[1600px] px-6 pt-20">
-      <div class="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
-        <div class="space-y-5">
-          <p class="font-label text-[10px] uppercase tracking-[0.35em] text-[#ffb77d]">Terminal-first workflow</p>
-          <h2 class="max-w-2xl font-headline text-4xl font-bold tracking-tight text-white md:text-5xl">Stay in the shell until you need the wider report.</h2>
-          <p class="max-w-2xl font-body text-[15px] leading-7 text-[#ddc1ae]">
-            HarnessAmp keeps the primary workflow JSON-native and command-line friendly. That makes it easy to run from a terminal UI, a shell script, a CI job, or any Python-driven automation that can emit JSON.
-          </p>
-          <div class="space-y-3 border-l border-white/10 pl-5">
-            ${TERMINAL_NOTES.map((note) => `<p class="font-body text-[13px] leading-6 text-slate-400">${note}</p>`).join('')}
-          </div>
-        </div>
-
-        <div class="border border-white/10 bg-[#131313]/90 p-6">
-          <div class="flex items-center justify-between border-b border-white/5 pb-4">
-            <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">CLI session</span>
-            <span id="terminal-output-state" class="font-label text-[10px] uppercase tracking-[0.35em] text-[#e6feff]">WAITING</span>
-          </div>
-          <pre id="terminal-report" class="mt-6 max-h-[420px] overflow-auto whitespace-pre-wrap font-label text-[12px] leading-7 text-[#e6feff]">Run analyze to see the current report text.</pre>
-          <div class="mt-6 grid gap-px bg-white/5 md:grid-cols-3">
-            <div class="bg-[#1c1b1b] p-4">
-              <p class="font-label text-[10px] uppercase tracking-widest text-slate-500">1. Load</p>
-              <p class="mt-2 font-body text-[13px] leading-6 text-slate-300">Point the CLI at a bundle file or paste JSON into the browser editor.</p>
-            </div>
-            <div class="bg-[#1c1b1b] p-4">
-              <p class="font-label text-[10px] uppercase tracking-widest text-slate-500">2. Compare</p>
-              <p class="mt-2 font-body text-[13px] leading-6 text-slate-300">Visible variants and hidden holdouts stay separate so the gap is easy to read.</p>
-            </div>
-            <div class="bg-[#1c1b1b] p-4">
-              <p class="font-label text-[10px] uppercase tracking-widest text-slate-500">3. Export</p>
-              <p class="mt-2 font-body text-[13px] leading-6 text-slate-300">Send the report or pack into reviews, notes, or CI without reformatting it first.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <main class="mx-auto max-w-[1600px] px-6 pb-12 pt-24">
-      <section id="workflow" class="rise-in">
-        <div class="mb-9 flex items-center gap-4">
-          <h2 class="font-headline text-2xl font-bold tracking-tight uppercase">Workflow</h2>
-          <div class="h-px flex-1 bg-white/5"></div>
-        </div>
-        <p class="max-w-3xl font-body text-[15px] leading-7 text-[#ddc1ae]">Instrument, observe, diagnose, export, optimize.</p>
-        <div class="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          ${WORKFLOW_STEPS.map(
-            (item) => `
-              <div class="border border-white/10 bg-[#131313]/80 p-5 transition-colors hover:bg-[#1c1b1b]">
-                <div class="mb-4 flex items-center justify-between">
-                  <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Step ${item.step}</span>
-                  <span class="font-label text-[10px] uppercase tracking-widest text-slate-600">${item.step}</span>
-                </div>
-                <h3 class="font-headline text-lg font-bold uppercase tracking-tight text-white">${item.title}</h3>
-                <p class="mt-3 font-body text-[13px] leading-6 text-slate-400">${item.detail}</p>
-              </div>
-            `,
-          ).join('')}
-        </div>
-        <div class="mt-8 flex flex-wrap items-center gap-3 border border-white/10 bg-[#131313]/80 px-4 py-4">
-          <label class="inline-flex items-center gap-3 border border-white/10 bg-white/5 px-4 py-2">
-            <span class="font-label text-[10px] uppercase tracking-[0.28em] text-slate-400">Mutation intensity</span>
-            <select id="intensity-select" class="border-0 bg-transparent p-0 font-label text-[11px] uppercase tracking-widest text-[#e5e2e1] outline-none">
-              <option value="1">Light</option>
-              <option value="2" selected>Standard</option>
-              <option value="3">Aggressive</option>
-              <option value="4">Lab</option>
-            </select>
-          </label>
-
-          <label class="inline-flex items-center gap-3 border border-white/10 bg-white/5 px-4 py-2">
-            <input type="checkbox" id="show-holdouts" class="h-4 w-4 accent-[#ffb77d]" checked />
-            <span class="font-label text-[10px] uppercase tracking-[0.28em] text-slate-400">Show hidden holdouts</span>
-          </label>
-
-          <button type="button" class="bg-white/5 px-4 py-1.5 font-mono text-[11px] text-slate-400 border border-white/5 transition-all hover:bg-white/10 hover:-translate-y-[1px] active:scale-[0.97]" id="load-demo-btn">Load demo</button>
-          <button type="button" class="bg-white/5 px-4 py-1.5 font-mono text-[11px] text-slate-400 border border-white/5 transition-all hover:bg-white/10 hover:-translate-y-[1px] active:scale-[0.97]" id="import-bundle-btn">Import bundle</button>
-          <button type="button" class="bg-white/5 px-4 py-1.5 font-mono text-[11px] text-slate-400 border border-white/5 transition-all hover:bg-white/10 hover:-translate-y-[1px] active:scale-[0.97]" id="import-results-btn">Import runs</button>
-          <button type="button" class="bg-[#ff8c00] px-4 py-1.5 font-mono text-[11px] font-bold text-[#623200] transition-all hover:shadow-[0_0_15px_rgba(255,140,0,0.3)] hover:-translate-y-[1px] active:scale-[0.97]" id="analyze-btn">Analyze bundle</button>
-          <button type="button" class="bg-white/5 px-4 py-1.5 font-mono text-[11px] text-slate-400 border border-white/5 transition-all hover:bg-white/10 hover:-translate-y-[1px] active:scale-[0.97]" id="export-btn">Export pack</button>
-          <button type="button" class="bg-white/5 px-4 py-1.5 font-mono text-[11px] text-slate-400 border border-white/5 transition-all hover:bg-white/10 hover:-translate-y-[1px] active:scale-[0.97]" id="copy-report-btn">Copy report</button>
-        </div>
-
-        <div class="mt-12 rounded-none border-t border-white/5 pt-4">
-          <div class="mb-3 flex items-center gap-3">
-            <div class="h-2 w-2 bg-slate-600"></div>
-            <h2 class="font-headline text-lg font-bold tracking-tight uppercase">Diagnostics workspace</h2>
-          </div>
-          <p class="max-w-3xl font-body text-[13px] leading-7 text-slate-400">Load a bundle, inspect the live score, and compare visible variants against hidden holdouts without leaving the page.</p>
-        </div>
-
-      <div class="grid grid-cols-1 items-start gap-12 lg:grid-cols-12">
-        <div class="space-y-12 lg:col-span-8">
-          <section class="rise-in">
-            <div class="mb-3 flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <div class="h-2 w-2 bg-[#e6feff] animate-pulse"></div>
-                <h2 class="font-headline text-lg font-bold tracking-tight uppercase">Harness bundle</h2>
-              </div>
-              <span id="bundle-status" class="font-label text-[10px] uppercase tracking-widest text-slate-500">JSON CONFIGURATION</span>
-            </div>
-
-            <div class="group relative">
-              <textarea id="bundle-input" class="h-[480px] w-full border-none bg-[#0e0e0e] p-6 font-label text-[13px] leading-relaxed text-[#e6feff] focus:ring-1 focus:ring-[#ffb77d80]" spellcheck="false"></textarea>
-              <div class="absolute right-4 top-4 flex flex-col gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-                <button type="button" id="bundle-copy-btn" class="bg-[#2a2a2a] p-2 text-slate-400 transition-colors hover:text-[#ffb77d]" aria-label="Copy bundle">
-                  <span class="material-symbols-outlined text-sm">content_copy</span>
-                </button>
-                <button type="button" id="bundle-analyze-btn" class="bg-[#2a2a2a] p-2 text-slate-400 transition-colors hover:text-[#ffb77d]" aria-label="Analyze bundle">
-                  <span class="material-symbols-outlined text-sm">auto_fix_high</span>
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section class="rise-in">
-            <div class="mb-3 flex items-center gap-3">
-              <div class="h-2 w-2 bg-slate-600"></div>
-              <h2 class="font-headline text-lg font-bold tracking-tight uppercase">Observed runs</h2>
-            </div>
-            <textarea id="results-input" class="h-[180px] w-full border-none bg-[#0e0e0e] p-6 font-label text-[13px] leading-relaxed text-slate-400 focus:ring-1 focus:ring-[#ffb77d80]" spellcheck="false"></textarea>
-          </section>
-        </div>
-
-        <aside class="rise-in space-y-9 lg:sticky lg:top-24 lg:col-span-4">
-          <section class="bg-[#2a2a2a] p-8 border-t border-[#ffb77d33]">
-            <div class="mb-10 flex flex-col items-center">
-              <div class="relative flex h-48 w-48 items-center justify-center">
-                <svg class="h-full w-full -rotate-90 transform">
-                  <circle class="text-white/5" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-width="2"></circle>
-                  <circle id="score-arc" class="score-ring__progress text-[#ffb77d]" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-dasharray="${SCORE_CIRCUMFERENCE}" stroke-dashoffset="${SCORE_CIRCUMFERENCE}" stroke-width="4"></circle>
-                </svg>
-                <div class="absolute inset-0 flex flex-col items-center justify-center">
-                  <span id="score-value" class="font-label text-4xl font-bold text-white">--</span>
-                  <span class="mt-1 font-label text-[10px] uppercase tracking-widest text-[#ffb77d]">ROBUSTNESS SCORE</span>
-                  <span id="score-class" class="mt-1 font-label text-[10px] uppercase tracking-[0.28em] text-slate-400">WAITING</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-px bg-white/5">
-              <div class="bg-[#2a2a2a] p-4">
-                <p class="mb-1 font-label text-[10px] uppercase text-slate-500">Visible Pass</p>
-                <p id="visible-rate" class="font-label text-xl text-white">--</p>
-              </div>
-              <div class="bg-[#2a2a2a] p-4">
-                <p class="mb-1 font-label text-[10px] uppercase text-slate-500">Holdout Pass</p>
-                <p id="holdout-rate" class="font-label text-xl text-[#e6feff]">--</p>
-              </div>
-              <div class="bg-[#2a2a2a] p-4">
-                <p class="mb-1 font-label text-[10px] uppercase text-slate-500">Robustness Gap</p>
-                <p id="gap-rate" class="font-label text-xl text-[#ffb4ab]">--</p>
-              </div>
-              <div class="bg-[#2a2a2a] p-4">
-                <p class="mb-1 font-label text-[10px] uppercase text-slate-500">Family Count</p>
-                <p id="family-count" class="font-label text-xl text-white">--</p>
-              </div>
-            </div>
-
-            <div class="mt-8 space-y-4">
-              <div class="flex items-center justify-between border-b border-white/5 py-2">
-                <span class="font-label text-[11px] text-slate-400">MODE</span>
-                <span id="mode-label" class="font-label text-[11px] font-bold text-[#e6feff]">DEMO SIMULATION</span>
-              </div>
-              <div class="flex items-center justify-between border-b border-white/5 py-2">
-                <span class="font-label text-[11px] text-slate-400">CONFIDENCE</span>
-                <span id="confidence-label" class="font-label text-[11px] text-white">LOW (0.48)</span>
-              </div>
-              <div class="flex items-center justify-between border-b border-white/5 py-2">
-                <span class="font-label text-[11px] text-slate-400">WEAKEST SURFACE</span>
-                <span id="hotspot-label" class="font-label text-[11px] text-[#ffb4ab]">WAITING</span>
-              </div>
-              <div id="flag-list" class="flex flex-wrap gap-2 pt-4"></div>
-            </div>
-          </section>
-        </aside>
-      </div>
-      </section>
-
-      <section class="rise-in mt-24">
-        <div class="mb-9 flex items-center gap-4">
-          <h2 class="font-headline text-2xl font-bold tracking-tight uppercase">Spot issues faster</h2>
-          <div class="h-px flex-1 bg-white/5"></div>
-          <span id="family-note" class="font-label text-[10px] uppercase tracking-widest text-slate-500">--</span>
-        </div>
-        <div id="family-list" class="grid gap-4"></div>
-      </section>
-
-      <section class="rise-in mt-24">
-        <div class="mb-4 flex items-center gap-4">
-          <h2 class="font-headline text-2xl font-bold tracking-tight uppercase">Variant pack</h2>
-          <div class="h-px flex-1 bg-white/5"></div>
-          <div class="ml-auto flex gap-4">
-            <button type="button" id="visible-variants-tab" class="font-label text-[11px] uppercase tracking-widest text-[#e6feff] border-b border-[#e6feff] pb-1">VISIBLE VARIANTS <span id="visible-count" class="ml-2 text-[10px] text-slate-500">00</span></button>
-            <button type="button" id="holdout-variants-tab" class="font-label text-[11px] uppercase tracking-widest text-slate-500 transition-colors hover:text-white">HIDDEN HOLDOUTS <span id="holdout-count" class="ml-2 text-[10px] text-slate-500">00</span></button>
-          </div>
-        </div>
-        <div id="pack-note" class="mb-6 font-label text-[10px] uppercase tracking-widest text-slate-500">--</div>
-        <div class="overflow-x-auto">
-          <table class="w-full border-collapse font-label text-[12px]">
-            <thead>
-              <tr class="border-b border-white/10 text-left uppercase tracking-widest text-slate-500">
-                <th class="py-4 px-6 font-medium">Family</th>
-                <th class="py-4 px-6 font-medium">Variant Title</th>
-                <th class="py-4 px-6 font-medium">Summary</th>
-                <th class="py-4 px-6 font-medium">Status</th>
-                <th class="py-4 px-6 font-medium text-right">Score</th>
-                <th class="py-4 px-6 font-medium text-right">Latency</th>
-              </tr>
-            </thead>
-            <tbody id="variant-table-body" class="divide-y divide-white/5"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="rise-in mt-24 mb-12">
-        <div class="relative overflow-hidden bg-[#2a2a2a] p-9 border-l-4 border-[#e6feff]">
-          <div class="absolute right-0 top-0 h-64 w-64 translate-x-32 -translate-y-32 rotate-45 bg-[#e6feff0d]"></div>
-          <h2 class="relative z-10 mb-8 font-headline text-2xl font-bold tracking-tight uppercase">Hardening plan</h2>
-          <div id="recommendation-list" class="relative z-10 space-y-6"></div>
-          <div class="mt-12 flex justify-end border-t border-white/10 pt-8">
-            <button type="button" id="generate-patch-btn" class="flex items-center gap-2 bg-[#e6feff] px-6 py-2.5 font-label text-xs font-bold tracking-widest text-[#003739] transition-all hover:bg-white active:scale-95">
-              GENERATE PATCH REPO
-              <span class="material-symbols-outlined text-sm">terminal</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section id="proof" class="rise-in mt-24">
-        <div class="mb-9 flex items-center gap-4">
-          <h2 class="font-headline text-2xl font-bold tracking-tight uppercase">Proof of value</h2>
-          <div class="h-px flex-1 bg-white/5"></div>
-          <span class="font-label text-[10px] uppercase tracking-widest text-slate-500">Visible vs holdout</span>
-        </div>
-        <div class="grid gap-6 lg:grid-cols-2">
-          <div class="border border-white/10 bg-[#131313]/80 p-8">
-            <p class="font-label text-[10px] uppercase tracking-[0.35em] text-[#e6feff]">With HarnessAmp</p>
-            <div class="mt-6 space-y-4">
-              <div class="flex items-center justify-between border-b border-white/5 pb-3">
-                <span class="font-label text-[11px] uppercase tracking-widest text-slate-400">Visible pass</span>
-                <span class="font-label text-[11px] uppercase tracking-widest text-white" id="proof-visible-pass">--</span>
-              </div>
-              <div class="flex items-center justify-between border-b border-white/5 pb-3">
-                <span class="font-label text-[11px] uppercase tracking-widest text-slate-400">Holdout pass</span>
-                <span class="font-label text-[11px] uppercase tracking-widest text-[#e6feff]" id="proof-holdout-pass">--</span>
-              </div>
-              <div class="flex items-center justify-between border-b border-white/5 pb-3">
-                <span class="font-label text-[11px] uppercase tracking-widest text-slate-400">Robustness gap</span>
-                <span class="font-label text-[11px] uppercase tracking-widest text-[#ffb4ab]" id="proof-gap">--</span>
-              </div>
-              <p class="max-w-2xl font-body text-[14px] leading-7 text-[#ddc1ae]">You can see which surfaces are brittle before they become release blockers, and the report gives you something concrete to hand to the agent or wrapper owner.</p>
-            </div>
-          </div>
-          <div class="border border-white/10 bg-[#131313]/80 p-8">
-            <p class="font-label text-[10px] uppercase tracking-[0.35em] text-[#ffb77d]">Without HarnessAmp</p>
-            <div class="mt-6 space-y-4">
-              <div class="flex items-center justify-between border-b border-white/5 pb-3">
-                <span class="font-label text-[11px] uppercase tracking-widest text-slate-400">Wrapper drift</span>
-                <span class="font-label text-[11px] uppercase tracking-widest text-[#ffb77d]">Easy to miss</span>
-              </div>
-              <div class="flex items-center justify-between border-b border-white/5 pb-3">
-                <span class="font-label text-[11px] uppercase tracking-widest text-slate-400">Holdout coverage</span>
-                <span class="font-label text-[11px] uppercase tracking-widest text-[#ffb77d]">Usually thin</span>
-              </div>
-              <div class="flex items-center justify-between border-b border-white/5 pb-3">
-                <span class="font-label text-[11px] uppercase tracking-widest text-slate-400">Review artifact</span>
-                <span class="font-label text-[11px] uppercase tracking-widest text-[#ffb77d]">Manual notes</span>
-              </div>
-              <p class="max-w-2xl font-body text-[14px] leading-7 text-[#ddc1ae]">Teams end up debugging by memory, re-running the same bundle, or trusting a single pass that only worked because the wrapper happened to look familiar.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="open-source" class="rise-in mt-24 mb-12">
-        <div class="mb-9 flex items-center gap-4">
-          <h2 class="font-headline text-2xl font-bold tracking-tight uppercase">Open source proof</h2>
-          <div class="h-px flex-1 bg-white/5"></div>
-        </div>
-        <p class="max-w-3xl font-body text-[15px] leading-7 text-[#ddc1ae]">HarnessAmp is shipped in the open, with docs, examples, tests, and a shared analysis engine that the browser UI and CLI both use.</p>
-        <div class="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-          <a class="border border-white/10 bg-[#131313]/80 p-6 transition-colors hover:bg-[#1c1b1b]" href="#overview">
-            <div class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Docs</div>
-            <div class="mt-3 font-headline text-xl font-bold uppercase tracking-tight text-white">README + guides</div>
-            <p class="mt-3 font-body text-[13px] leading-6 text-slate-400">Start from the overview, then follow the docs index, CLI guide, and testing notes.</p>
-          </a>
-          <a class="border border-white/10 bg-[#131313]/80 p-6 transition-colors hover:bg-[#1c1b1b]" href="https://github.com/dwamenad/HarnessAmp" target="_blank" rel="noreferrer">
-            <div class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Repository</div>
-            <div class="mt-3 font-headline text-xl font-bold uppercase tracking-tight text-white">Source + history</div>
-            <p class="mt-3 font-body text-[13px] leading-6 text-slate-400">Browse the code, commit series, and the shape of the harness engine itself.</p>
-          </a>
-          <a class="border border-white/10 bg-[#131313]/80 p-6 transition-colors hover:bg-[#1c1b1b]" href="#workflow">
-            <div class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Examples</div>
-            <div class="mt-3 font-headline text-xl font-bold uppercase tracking-tight text-white">Starter packs</div>
-            <p class="mt-3 font-body text-[13px] leading-6 text-slate-400">Open the demo bundle, the CLI samples, or the scenario-specific packs.</p>
-          </a>
-          <a class="border border-white/10 bg-[#131313]/80 p-6 transition-colors hover:bg-[#1c1b1b]" href="#proof">
-            <div class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Tests</div>
-            <div class="mt-3 font-headline text-xl font-bold uppercase tracking-tight text-white">Analysis coverage</div>
-            <p class="mt-3 font-body text-[13px] leading-6 text-slate-400">The engine is covered with Node tests and build checks so the page and CLI stay aligned.</p>
-          </a>
-        </div>
-        <div class="mt-12 flex flex-col gap-4 border-t border-white/10 pt-8 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Ready to debug with context?</p>
-            <p class="mt-2 font-headline text-2xl font-bold uppercase tracking-tight text-white">Trace memory clearly, export evidence, and keep your harness honest.</p>
-          </div>
-          <div class="flex flex-wrap gap-3">
-            <a class="bg-[#ff8c00] px-5 py-3 font-label text-xs font-bold uppercase tracking-widest text-[#2f1500] transition-all hover:shadow-[0_0_18px_rgba(255,140,0,0.28)] hover:-translate-y-[1px]" href="https://github.com/dwamenad/HarnessAmp" target="_blank" rel="noreferrer">Explore GitHub</a>
-            <a class="border border-white/10 bg-white/5 px-5 py-3 font-label text-xs font-bold uppercase tracking-widest text-[#e6feff] transition-all hover:bg-white/10 hover:-translate-y-[1px]" href="#overview">Back to top</a>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="rise-in border-t border-white/5 bg-[#0e0e0e] px-6 py-6">
-      <div class="mx-auto flex max-w-[1600px] flex-col items-center justify-between gap-4 md:flex-row">
-        <div class="flex items-center gap-4">
-          <span class="font-label text-[10px] uppercase tracking-widest text-slate-500">SYSTEM_VERSION: 4.22.0-STABLE</span>
-          <span class="font-label text-[10px] text-slate-700">|</span>
-          <span class="font-label text-[10px] uppercase tracking-widest text-slate-500">KERNEL_HASH: 0xFD8E2</span>
-        </div>
-        <div class="font-label text-[10px] uppercase tracking-widest text-slate-500">© 2026 HARNESSAMP PRECISION LABS</div>
-      </div>
-    </footer>
-  </div>
-
-  <input type="file" id="bundle-file" accept="application/json,.json" hidden />
-  <input type="file" id="results-file" accept="application/json,.json" hidden />
-`;
-
-app.innerHTML = renderOperatorConsole();
-
-function renderOperatorConsole() {
-  return `
-    <div class="app-shell">
-      <div class="grain-overlay"></div>
-
-      <header class="command-bar rise-in">
-        <a class="brand-mark" href="#overview" aria-label="HarnessAmp home">
-          <span class="brand-mark__sigil">HA</span>
-          <span>
-            <span class="brand-mark__name">HarnessAmp</span>
-            <span class="brand-mark__sub">agent reliability infrastructure</span>
-          </span>
+function render() {
+  app.innerHTML = `
+    <div class="site-shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="HarnessAmp home">
+          <span class="brand__mark">HA</span>
+          <span><strong>HarnessAmp</strong><small>Robustness infrastructure</small></span>
         </a>
-
-        <nav class="command-nav" aria-label="Primary navigation">
-          <a href="#workflow">Console</a>
-          <a href="#layers">Contract</a>
-          <a href="#terminal">CLI</a>
-          <a href="#proof">Proof</a>
+        <nav class="topbar__nav" aria-label="Primary navigation">
+          <a href="#demo">Demo</a>
+          <a href="#report">Report</a>
+          <a href="#packs">Packs</a>
+          <a href="#workspace">Workspace</a>
+          <a href="#docs-install">Docs</a>
+          <a href="#quickstart">Quickstart</a>
         </nav>
-
-        <div class="command-actions">
-          <a class="ghost-button" href="https://github.com/dwamenad/HarnessAmp" target="_blank" rel="noreferrer">
-            <span class="material-symbols-outlined text-sm">code</span>
-            GitHub
-          </a>
-          <a class="primary-button" href="#workflow">
-            <span class="material-symbols-outlined text-sm">play_arrow</span>
-            Run diagnosis
-          </a>
-        </div>
+        <a class="nav-cta" href="#demo">Run demo</a>
       </header>
 
-      <aside class="side-rail rise-in" aria-label="Workspace navigation">
-        <div class="side-rail__section">
-          <span class="rail-label">workspace</span>
-          <a href="#overview">01 Overview</a>
-          <a href="#workflow">02 Console</a>
-          <a href="#layers">03 Wrapper map</a>
-          <a href="#terminal">04 Report</a>
-          <a href="#proof">05 Proof</a>
-        </div>
-        <div class="side-rail__section">
-          <span class="rail-label">pipeline</span>
-          <div class="rail-step"><span>Load</span><b>creator harness</b></div>
-          <div class="rail-step"><span>Mutate</span><b>operating conditions</b></div>
-          <div class="rail-step"><span>Classify</span><b>behavioral deltas</b></div>
-          <div class="rail-step"><span>Gate</span><b>release risk</b></div>
-        </div>
-        <div class="rail-callout">
-          <span class="material-symbols-outlined">shield_lock</span>
-          <p>Not another evaluator. This layer asks which conditions make the agent fail.</p>
-        </div>
-      </aside>
-
-      <main class="console-main">
-        <section id="overview" class="hero-console rise-in">
-          <div class="hero-copy">
-            <div class="eyebrow">HarnessAmp / chaos testing for LLM wrappers</div>
-            <h1>Find the exact wrapper condition that breaks your agent.</h1>
-            <p>
-              Load a creator harness, mutate prompts, schemas, tools, permissions, context, and network sinks, then get a diagnostic release signal instead of a vague eval score.
-            </p>
-            <div class="hero-copy__actions">
-              <a class="primary-button" href="#workflow">
-                <span class="material-symbols-outlined text-sm">terminal</span>
-                Open console
-              </a>
-              <a class="ghost-button" href="#proof">
-                <span class="material-symbols-outlined text-sm">analytics</span>
-                View proof
-              </a>
-            </div>
-            <div class="surface-strip" aria-label="Mutation surfaces">
-              <span>prompt integrity</span>
-              <span>tool payload</span>
-              <span>permissioning</span>
-              <span>network sink</span>
-              <span>context memory</span>
-              <span>sandbox boundary</span>
+      <main id="top">
+        <section class="hero reveal">
+          <div class="hero__copy">
+            <p class="eyebrow">Agent reliability diagnosis</p>
+            <h1>Find out what makes your agent fail.</h1>
+            <p class="hero__lede">HarnessAmp wraps your agent harness, applies deterministic mutations to prompts, tools, permissions, context, network sinks, and sandbox boundaries, then reports exactly where reliability breaks.</p>
+            <div class="hero__actions">
+              <a class="button button--primary" href="#demo">Run a robustness diagnosis</a>
+              <a class="button button--secondary" href="#report">View sample report</a>
             </div>
           </div>
-
-          <section class="hero-diagnosis-panel" aria-label="Live robustness summary">
-            <div class="panel-header">
-              <div>
-                <span class="panel-kicker">current diagnosis</span>
-                <h2 id="hero-mode-label">DEMO SIMULATION</h2>
-              </div>
-              <span class="live-dot">live</span>
+          <div class="diagnostic-board" aria-label="Live robustness diagnosis">
+            <div class="board-header"><span id="hero-run-label">diagnosis/pending</span><strong id="hero-gate">RUN</strong></div>
+            <div class="scoreline">
+              <div><span>Baseline</span><b id="hero-baseline">--</b></div>
+              <div><span>Mutated</span><b class="warn" id="hero-mutated">--</b></div>
+              <div><span>Drop</span><b class="danger" id="hero-drop">--</b></div>
             </div>
-
-            <div class="hero-score-layout">
-              <div class="score-orb">
-                <svg class="-rotate-90 transform" viewBox="0 0 192 192" aria-hidden="true">
-                  <circle class="text-white/5" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-width="2"></circle>
-                  <circle id="hero-score-arc" class="score-ring__progress text-[#ffb77d]" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-dasharray="${SCORE_CIRCUMFERENCE}" stroke-dashoffset="${SCORE_CIRCUMFERENCE}" stroke-width="4"></circle>
-                </svg>
-                <div class="score-orb__label">
-                  <span id="hero-score-value">--</span>
-                  <small>robustness</small>
-                  <em id="hero-score-class">WAITING</em>
-                </div>
-              </div>
-
-              <div class="hero-metrics">
-                <div><span>Visible pass</span><b id="hero-visible-rate">--</b></div>
-                <div><span>Hidden pass</span><b id="hero-holdout-rate">--</b></div>
-                <div><span>Robustness gap</span><b id="hero-gap-rate">--</b></div>
-                <div><span>Mutation families</span><b id="hero-family-count">--</b></div>
-              </div>
-            </div>
-
-            <div class="weakest-surface-row">
-              <span>Weakest surface</span>
-              <b id="hero-hotspot-label">WAITING</b>
-            </div>
-            <div id="hero-flag-list" class="flag-cluster"></div>
-          </section>
-        </section>
-
-        <section id="workflow" class="workspace-section rise-in">
-          <div class="section-title-row">
-            <div>
-              <span class="eyebrow">diagnostics console</span>
-              <h2>Run the harness like a release gate.</h2>
-            </div>
-            <p>JSON in. Deterministic mutations out. Behavioral deltas and hardening recommendations stay attached to the exact mutation that caused them.</p>
-          </div>
-
-          <div class="control-strip">
-            <label class="control-field">
-              <span>Mutation intensity</span>
-              <select id="intensity-select">
-                <option value="1">Light</option>
-                <option value="2" selected>Standard</option>
-                <option value="3">Aggressive</option>
-                <option value="4">Lab</option>
-              </select>
-            </label>
-
-            <label class="control-toggle">
-              <input type="checkbox" id="show-holdouts" checked />
-              <span>Show hidden holdouts</span>
-            </label>
-
-            <div class="control-buttons">
-              <button type="button" class="ghost-button" id="load-demo-btn">
-                <span class="material-symbols-outlined text-sm">bolt</span>
-                Load demo
-              </button>
-              <button type="button" class="ghost-button" id="import-bundle-btn">
-                <span class="material-symbols-outlined text-sm">upload_file</span>
-                Import bundle
-              </button>
-              <button type="button" class="ghost-button" id="import-results-btn">
-                <span class="material-symbols-outlined text-sm">dataset</span>
-                Import runs
-              </button>
-              <button type="button" class="primary-button" id="analyze-btn">
-                <span class="material-symbols-outlined text-sm">network_check</span>
-                Analyze
-              </button>
-              <button type="button" class="ghost-button" id="export-btn">
-                <span class="material-symbols-outlined text-sm">download</span>
-                Export pack
-              </button>
-              <button type="button" class="ghost-button" id="copy-report-btn">
-                <span class="material-symbols-outlined text-sm">content_copy</span>
-                Copy report
-              </button>
-            </div>
-          </div>
-
-          <div class="kpi-grid">
-            <section class="score-card">
-              <div class="score-orb score-orb--small">
-                <svg class="-rotate-90 transform" viewBox="0 0 192 192" aria-hidden="true">
-                  <circle class="text-white/5" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-width="2"></circle>
-                  <circle id="score-arc" class="score-ring__progress text-[#ffb77d]" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-dasharray="${SCORE_CIRCUMFERENCE}" stroke-dashoffset="${SCORE_CIRCUMFERENCE}" stroke-width="4"></circle>
-                </svg>
-                <div class="score-orb__label">
-                  <span id="score-value">--</span>
-                  <small>score</small>
-                  <em id="score-class">WAITING</em>
-                </div>
-              </div>
-            </section>
-
-            <section class="metric-cell"><span>Visible pass</span><b id="visible-rate">--</b></section>
-            <section class="metric-cell"><span>Hidden pass</span><b id="holdout-rate">--</b></section>
-            <section class="metric-cell metric-cell--danger"><span>Robustness gap</span><b id="gap-rate">--</b></section>
-            <section class="metric-cell"><span>Families</span><b id="family-count">--</b></section>
-
-            <section class="insight-cell">
-              <div><span>Mode</span><b id="mode-label">DEMO SIMULATION</b></div>
-              <div><span>Confidence</span><b id="confidence-label">LOW (0.48)</b></div>
-              <div><span>Weakest surface</span><b id="hotspot-label">WAITING</b></div>
-              <div id="flag-list" class="flag-cluster"></div>
-            </section>
-          </div>
-
-          <div class="workspace-grid">
-            <div class="editor-column">
-              <section class="editor-panel">
-                <div class="editor-panel__header">
-                  <div>
-                    <span class="panel-kicker">input contract</span>
-                    <h3>Harness bundle</h3>
-                  </div>
-                  <span id="bundle-status">JSON CONFIGURATION</span>
-                </div>
-                <div class="editor-shell">
-                  <textarea id="bundle-input" spellcheck="false" aria-label="Harness bundle JSON"></textarea>
-                  <div class="editor-actions">
-                    <button type="button" id="bundle-copy-btn" class="icon-button" aria-label="Copy bundle">
-                      <span class="material-symbols-outlined">content_copy</span>
-                    </button>
-                    <button type="button" id="bundle-analyze-btn" class="icon-button" aria-label="Analyze bundle">
-                      <span class="material-symbols-outlined">auto_fix_high</span>
-                    </button>
-                  </div>
-                </div>
-              </section>
-
-              <section class="editor-panel editor-panel--compact">
-                <div class="editor-panel__header">
-                  <div>
-                    <span class="panel-kicker">optional evidence</span>
-                    <h3>Observed runs</h3>
-                  </div>
-                  <span>JSON RESULTS</span>
-                </div>
-                <div class="editor-shell">
-                  <textarea id="results-input" spellcheck="false" aria-label="Observed run JSON"></textarea>
-                </div>
-              </section>
-            </div>
-
-            <aside class="inspector-column">
-              <section id="terminal" class="terminal-panel">
-                <div class="panel-header">
-                  <div>
-                    <span class="panel-kicker">terminal report</span>
-                    <h3>CLI-aligned diagnosis</h3>
-                  </div>
-                  <span id="terminal-output-state">WAITING</span>
-                </div>
-                <pre id="terminal-report">Run analyze to see the current report text.</pre>
-              </section>
-
-              <section class="process-panel">
-                <span class="panel-kicker">why this is a harness</span>
-                <div class="process-list">
-                  <div><b>Constrain</b><span>Read contract, tools, permissions, and expected behavior.</span></div>
-                  <div><b>Disturb</b><span>Apply replayable mutations at trust boundaries.</span></div>
-                  <div><b>Verify</b><span>Compare baseline and mutation behavior.</span></div>
-                  <div><b>Diagnose</b><span>Classify failure and recommend engineering controls.</span></div>
-                </div>
-              </section>
-            </aside>
+            <div class="trace"><span>weakest_surface</span><strong id="hero-surface">waiting for run</strong></div>
+            <div class="trace"><span>recommended_control</span><strong id="hero-control">select a profile and run diagnosis</strong></div>
+            <div class="mutation-map" id="hero-bars">${Array.from({ length: 8 }, (_, index) => `<i style="--h: ${36 + index * 6}%"></i>`).join('')}</div>
           </div>
         </section>
 
-        <section id="layers" class="analysis-section rise-in">
-          <div class="section-title-row">
-            <div>
-              <span class="eyebrow">contract map</span>
-              <h2>Separate the job from the wrapper.</h2>
+        <section class="proof-strip reveal" aria-label="Proof artifacts">${proofStats.map(([value, label]) => `<div><strong>${value}</strong><span>${label}</span></div>`).join('')}</section>
+
+        <section id="workflow" class="section section--split reveal">
+          <div><p class="eyebrow">Robustness workflow</p><h2>Wrap -> Mutate -> Run -> Diagnose -> Gate</h2></div>
+          <div class="workflow">${workflow.map(([title, detail], index) => `<article><span>${String(index + 1).padStart(2, '0')}</span><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
+        </section>
+
+        <section id="demo" class="section demo-section reveal">
+          <div class="section__intro">
+            <p class="eyebrow">Interactive demo</p>
+            <h2>Load a sample harness. Choose risk. Run mutations.</h2>
+            <p>The browser demo calls the same analysis engine used by the CLI examples, then renders the resulting pack, report, and gate status.</p>
+            <div class="try-path">
+              <span>01 Select profile</span>
+              <span>02 Review schema</span>
+              <span>03 Run diagnosis</span>
+              <span>04 Save report</span>
             </div>
-            <p id="layer-note">WAITING FOR BUNDLE</p>
           </div>
-          <div id="system-layer-grid" class="layer-grid">
-            <div class="layer-card">
-              <span>Layer 01</span>
-              <h3>Intent</h3>
-              <p>Load a bundle to see the mission the system is meant to preserve.</p>
+          <div class="demo-console">
+            <div class="demo-controls">
+              <label><span>Risk profile</span><select id="profile-select">${Object.entries(riskProfiles).map(([id, item]) => `<option value="${id}" ${id === state.profileId ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
+              <label><span>Mutation intensity</span><select id="intensity-select">${[1, 2, 3, 4].map((value) => `<option value="${value}" ${value === state.intensity ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+              <label class="check-control"><input id="observed-toggle" type="checkbox" ${state.useObservedRuns ? 'checked' : ''} /><span>Use observed runs</span></label>
+              <label class="check-control"><input id="custom-toggle" type="checkbox" ${state.useCustomInput ? 'checked' : ''} /><span>Use pasted JSON</span></label>
+              <button class="button button--primary" id="run-demo" type="button">Run diagnosis</button>
+            </div>
+            <div class="threshold-controls">
+              <label><span>Min overall score</span><input id="min-overall-score" type="number" min="0" max="100" value="${state.thresholds.minOverallScore}" /></label>
+              <label><span>Min holdout pass</span><input id="min-holdout-pass" type="number" min="0" max="100" value="${state.thresholds.minHoldoutPass}" /></label>
+              <label><span>Max robustness gap</span><input id="max-gap" type="number" min="0" max="100" value="${state.thresholds.maxGap}" /></label>
+            </div>
+            <div class="runner-controls">
+              <label><span>HTTP runner endpoint</span><input id="runner-endpoint" type="url" placeholder="https://runner.example.com/harnessamp" value="${escapeHtml(state.runnerEndpoint)}" /></label>
+              <button class="button button--secondary" id="run-http-runner" type="button">Run HTTP runner</button>
+              <span id="runner-status">${escapeHtml(state.runnerStatus)}</span>
+            </div>
+            <div class="input-workbench" id="input-workbench">
+              <label>
+                <span>Harness bundle JSON</span>
+                <input id="bundle-file" type="file" accept="application/json,.json" />
+                <textarea id="bundle-json" spellcheck="false">${escapeHtml(state.customBundleText)}</textarea>
+              </label>
+              <label>
+                <span>Observed runs JSON</span>
+                <input id="runs-file" type="file" accept="application/json,.json" />
+                <textarea id="runs-json" spellcheck="false">${escapeHtml(state.customRunsText)}</textarea>
+              </label>
+              <p id="input-error" class="input-error">${escapeHtml(state.inputError)}</p>
+            </div>
+            <div class="demo-result">
+              <div><span>Profile</span><strong id="demo-profile">--</strong></div>
+              <div><span>Mutation variants</span><strong id="demo-variants">--</strong></div>
+              <div><span>Replay seed</span><strong id="demo-seed">--</strong></div>
+              <div><span>Gate</span><strong class="danger" id="demo-gate">--</strong></div>
+            </div>
+            <div class="coverage-panel">
+              <h3>Visible mutation coverage</h3>
+              <div id="coverage-list" class="coverage-list"></div>
+            </div>
+            <div class="schema-panel">
+              <h3>Schema validation</h3>
+              <div id="schema-status-list" class="schema-status-list"></div>
             </div>
           </div>
         </section>
 
-        <section id="features" class="analysis-section rise-in">
-          <div class="section-title-row">
-            <div>
-              <span class="eyebrow">differentiation</span>
-              <h2>HarnessAmp tests operating conditions, not just answers.</h2>
-            </div>
-            <p>Evaluators tell you what happened. HarnessAmp tells you which wrapper change caused the reliability drop and what control should prevent it.</p>
+        <section id="product" class="section reveal">
+          <div class="section__intro"><p class="eyebrow">Core product</p><h2>Reliability modules for agents that already run.</h2><p>HarnessAmp does not ask teams to adopt a new agent framework. It tests the wrapper conditions around the system they already have.</p></div>
+          <div class="module-grid">${modules.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
+        </section>
+
+        <section id="report" class="section report-section reveal">
+          <div class="report-copy"><p class="eyebrow">Sample report page</p><h2>From pass rate to engineering control.</h2><p>This report is generated from the selected sample bundle, selected risk profile, mutation intensity, and observed run fixture.</p></div>
+          <div class="report">
+            <div><span>Baseline</span><strong id="report-baseline">--</strong></div>
+            <div><span>Mutated</span><strong id="report-mutated">--</strong></div>
+            <div><span>Robustness drop</span><strong class="danger" id="report-drop">--</strong></div>
+            <div><span>Weakest surface</span><strong id="report-surface">--</strong></div>
+            <div><span>Failure class</span><strong id="report-failure">--</strong></div>
+            <div><span>Recommended control</span><strong id="report-control">--</strong></div>
+            <div><span>Replay seed</span><strong id="report-seed">--</strong></div>
+            <div><span>CI gate</span><strong class="danger" id="report-gate">--</strong></div>
+            <div><span>Report id</span><strong id="report-id">--</strong></div>
+            <div><span>Saved snapshot</span><strong id="report-saved">local</strong></div>
           </div>
-          <div class="differentiator-grid">
-            <div>
-              <span>01</span>
-              <h3>Structured mutation packs</h3>
-              <p>Prompt, tool, permission, network, context, sandbox, and multimodal surfaces are mutated as typed objects with deterministic seeds.</p>
+          <div class="export-actions">
+            <button class="button button--secondary" id="copy-report" type="button">Copy Markdown report</button>
+            <button class="button button--secondary" id="download-report" type="button">Download report</button>
+            <button class="button button--secondary" id="download-report-json" type="button">Download report JSON</button>
+            <button class="button button--secondary" id="download-pack" type="button">Download mutation pack</button>
+            <button class="button button--secondary" id="copy-ci" type="button">Copy CI gate snippet</button>
+            <button class="button button--secondary" id="save-report" type="button">Save report snapshot</button>
+            <button class="button button--secondary" id="save-server-report" type="button">Save server report</button>
+            <button class="button button--secondary" id="load-server-report" type="button">Load server report</button>
+            <span class="action-feedback" id="action-feedback">${escapeHtml(state.feedback)}</span>
+          </div>
+          <div class="variant-panel">
+            <h3>Failed and warning variants</h3>
+            <div class="variant-table-wrap">
+              <table class="variant-table">
+                <thead><tr><th>Mutation</th><th>Surface</th><th>Status</th><th>Score</th><th>Latency</th><th>Source</th></tr></thead>
+                <tbody id="variant-table-body"></tbody>
+              </table>
             </div>
-            <div>
-              <span>02</span>
-              <h3>Behavioral delta layer</h3>
-              <p>The report compares original and mutated behavior, then identifies pass-to-fail, hallucination-introduced, tool-loss, approval-bypass, and related deltas.</p>
-            </div>
-            <div>
-              <span>03</span>
-              <h3>Failure-to-fix mapping</h3>
-              <p>Each finding connects to an engineering control: schema validation, egress allowlists, approval checks, retry budgets, or hidden-text quarantine.</p>
-            </div>
+          </div>
+          <pre class="report-text" id="report-text"></pre>
+        </section>
+
+        <section id="workspace" class="section workspace-section reveal">
+          <div class="section__intro"><p class="eyebrow">Auth and workspaces</p><h2>Project context for team reports.</h2><p>This prototype records workspace identity with saved reports. In production, these fields map to an auth provider and database access rules.</p></div>
+          <div class="workspace-panel">
+            <label><span>Account email</span><input id="account-email" type="email" value="${escapeHtml(state.accountEmail)}" /></label>
+            <label><span>Workspace</span><input id="workspace-name" type="text" value="${escapeHtml(state.workspaceName)}" /></label>
+            <label><span>Project</span><input id="project-name" type="text" value="${escapeHtml(state.projectName)}" /></label>
+            <label><span>Role</span><select id="project-role">
+              ${['owner', 'maintainer', 'viewer'].map((role) => `<option value="${role}" ${role === state.projectRole ? 'selected' : ''}>${role}</option>`).join('')}
+            </select></label>
+            <label class="check-control"><input id="analytics-toggle" type="checkbox" ${state.analyticsEnabled ? 'checked' : ''} /><span>Allow local analytics events</span></label>
           </div>
         </section>
 
-        <section class="analysis-section rise-in">
-          <div class="section-title-row">
-            <div>
-              <span class="eyebrow">weakest surfaces</span>
-              <h2>Spot issues faster.</h2>
-            </div>
-            <p id="family-note">--</p>
-          </div>
-          <div id="family-list" class="family-list"></div>
+        <section id="packs" class="section reveal">
+          <div class="section__intro"><p class="eyebrow">Mutation pack browser</p><h2>7 packs covering 20+ deterministic mutations.</h2><p>Each pack targets a wrapper condition that can change after the agent looked stable in a narrow baseline test.</p></div>
+          <div class="pack-grid">${mutationPackDetails.map(([name, detail, example]) => `<article><span>${name}</span><h3>${formatPackName(name)}</h3><p>${detail}</p><small>${example}</small></article>`).join('')}</div>
         </section>
 
-        <section class="analysis-section rise-in">
-          <div class="section-title-row section-title-row--tabs">
-            <div>
-              <span class="eyebrow">mutation pack</span>
-              <h2>Visible variants and hidden holdouts.</h2>
-            </div>
-            <div class="variant-tabs">
-              <button type="button" id="visible-variants-tab">VISIBLE VARIANTS <span id="visible-count">00</span></button>
-              <button type="button" id="holdout-variants-tab">HIDDEN HOLDOUTS <span id="holdout-count">00</span></button>
-            </div>
-          </div>
-          <div id="pack-note" class="pack-note">--</div>
-          <div class="variant-table-wrap">
-            <table class="variant-table">
-              <thead>
-                <tr>
-                  <th>Family</th>
-                  <th>Variant title</th>
-                  <th>Summary</th>
-                  <th>Status</th>
-                  <th class="text-right">Score</th>
-                  <th class="text-right">Latency</th>
-                </tr>
-              </thead>
-              <tbody id="variant-table-body"></tbody>
-            </table>
+        <section id="integrations" class="section reveal">
+          <div class="section__intro"><p class="eyebrow">Integrations detail</p><h2>Bring your runner. Keep your stack.</h2></div>
+          <div class="integration-grid">${integrations.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
+          <div class="ci-snippet">
+            <div class="section__intro"><p class="eyebrow">Concrete CI path</p><h2>Release gate command and GitHub Actions.</h2></div>
+            <pre>${escapeHtml(githubActionsSnippet)}</pre>
           </div>
         </section>
 
-        <section class="hardening-panel rise-in">
-          <div class="section-title-row">
-            <div>
-              <span class="eyebrow">hardening plan</span>
-              <h2>Turn failures into controls.</h2>
-            </div>
-            <button type="button" id="generate-patch-btn" class="primary-button">
-              <span class="material-symbols-outlined text-sm">terminal</span>
-              Generate patch repo
-            </button>
-          </div>
-          <div id="recommendation-list" class="recommendation-list"></div>
+        <section id="runner-contract" class="section reveal">
+          <div class="section__intro"><p class="eyebrow">Runner contract</p><h2>The adapter shape custom teams implement.</h2><p>HarnessAmp stays framework-agnostic by asking every runner to expose the same small execution contract.</p></div>
+          <div class="contract-grid">${runnerContract.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
         </section>
 
-        <section id="proof" class="analysis-section proof-section rise-in">
-          <div class="section-title-row">
-            <div>
-              <span class="eyebrow">proof of value</span>
-              <h2>The useful number is the gap.</h2>
-            </div>
-            <p>If visible performance is high but holdout performance collapses, the agent learned the wrapper more than the task.</p>
-          </div>
+        <section id="quickstart" class="section quickstart reveal">
+          <div><p class="eyebrow">Docs path</p><h2>Quickstart from clone to release gate.</h2></div>
+          <div class="quickstart-list">${quickstart.map(([title, detail], index) => `<article><span>${index + 1}</span><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
+        </section>
 
-          <div class="proof-grid">
-            <div class="proof-meter">
-              <span>Visible pass</span>
-              <b id="proof-visible-pass">--</b>
-              <p>What most evals report under expected conditions.</p>
-            </div>
-            <div class="proof-meter proof-meter--cold">
-              <span>Hidden pass</span>
-              <b id="proof-holdout-pass">--</b>
-              <p>What happens when the wrapper changes but the task does not.</p>
-            </div>
-            <div class="proof-meter proof-meter--danger">
-              <span>Robustness gap</span>
-              <b id="proof-gap">--</b>
-              <p>The delta that should decide whether this agent is safe to ship.</p>
-            </div>
-          </div>
+        ${renderDocsSections()}
 
-          <div class="proof-comparison">
-            <div>
-              <span>Without HarnessAmp</span>
-              <p>Teams trust a single clean pass, then discover fragile prompt wording, schema assumptions, approval drift, or unsafe network behavior in production.</p>
-            </div>
-            <div>
-              <span>With HarnessAmp</span>
-              <p>The failure condition is reproducible, typed, linked to a trust boundary, and mapped to the engineering control that reduces the risk.</p>
-            </div>
+        <section id="deploy" class="section deploy-section reveal">
+          <div class="section__intro"><p class="eyebrow">Deployment</p><h2>Static hosting ready.</h2><p>The app builds as a static Vite site. Deploy the generated dist directory to Vercel, Netlify, GitHub Pages, or any static host.</p></div>
+          <pre>npm run build
+npx serve dist
+
+# production output
+dist/index.html
+dist/assets/*</pre>
+        </section>
+
+        <section class="section artifacts reveal">
+          <div class="section__intro"><p class="eyebrow">Real proof artifacts</p><h2>Embedded from repo examples.</h2><p>The demo uses examples/cli/quickstart-bundle.json, examples/cli/observed-runs.json, and the checked-in risk profile files.</p></div>
+          <div class="artifact-actions">
+            <button class="button button--secondary" id="download-example-bundle" type="button">Download quickstart bundle</button>
+            <button class="button button--secondary" id="download-example-runs" type="button">Download observed runs</button>
+            <button class="button button--secondary" id="download-risk-profile" type="button">Download risk profile</button>
+            <button class="button button--secondary" id="download-ci-yaml" type="button">Download CI YAML</button>
+          </div>
+          <div class="artifact-grid">
+            <pre>${escapeHtml(JSON.stringify(quickstartBundle, null, 2).slice(0, 900))}</pre>
+            <pre>${escapeHtml(JSON.stringify(observedRuns, null, 2))}</pre>
           </div>
         </section>
 
-        <section id="open-source" class="analysis-section open-source-section rise-in">
-          <div class="section-title-row">
-            <div>
-              <span class="eyebrow">open source proof</span>
-              <h2>Browser, CLI, and reports share one engine.</h2>
-            </div>
-            <p>Use the UI to explain the product. Use the CLI and JSON artifacts to put it into real release workflows.</p>
-          </div>
-          <div class="resource-row">
-            <a href="https://github.com/dwamenad/HarnessAmp" target="_blank" rel="noreferrer"><span>Repository</span><b>Source + history</b></a>
-            <a href="#workflow"><span>Examples</span><b>Starter packs</b></a>
-            <a href="#terminal"><span>CLI</span><b>Terminal report</b></a>
-            <a href="#proof"><span>Tests</span><b>Gap analysis</b></a>
-          </div>
+        <section class="closing reveal">
+          <p>If your agent breaks when the wrapper changes, it was not production-ready.</p>
+          <h2>Prove your agents still work when conditions change.</h2>
+          <a class="button button--primary" href="#demo">Run a robustness diagnosis</a>
         </section>
       </main>
-
-      <footer class="app-footer">
-        <span>SYSTEM_VERSION: 4.22.0-STABLE</span>
-        <span>KERNEL_HASH: 0xFD8E2</span>
-        <span>© 2026 HARNESSAMP PRECISION LABS</span>
-      </footer>
     </div>
-
-    <input type="file" id="bundle-file" accept="application/json,.json" hidden />
-    <input type="file" id="results-file" accept="application/json,.json" hidden />
   `;
-}
-
-const bundleInput = document.querySelector('#bundle-input');
-const resultsInput = document.querySelector('#results-input');
-const intensitySelect = document.querySelector('#intensity-select');
-const showHoldoutsToggle = document.querySelector('#show-holdouts');
-const loadDemoBtn = document.querySelector('#load-demo-btn');
-const importBundleBtn = document.querySelector('#import-bundle-btn');
-const importResultsBtn = document.querySelector('#import-results-btn');
-const analyzeBtn = document.querySelector('#analyze-btn');
-const exportBtn = document.querySelector('#export-btn');
-const copyReportBtn = document.querySelector('#copy-report-btn');
-const bundleCopyBtn = document.querySelector('#bundle-copy-btn');
-const bundleAnalyzeBtn = document.querySelector('#bundle-analyze-btn');
-const generatePatchBtn = document.querySelector('#generate-patch-btn');
-const bundleFileInput = document.querySelector('#bundle-file');
-const resultsFileInput = document.querySelector('#results-file');
-const visibleTabBtn = document.querySelector('#visible-variants-tab');
-const holdoutTabBtn = document.querySelector('#holdout-variants-tab');
-
-const statusTargets = {
-  heroModeLabel: document.querySelector('#hero-mode-label'),
-  heroScoreArc: document.querySelector('#hero-score-arc'),
-  heroScoreValue: document.querySelector('#hero-score-value'),
-  heroScoreClass: document.querySelector('#hero-score-class'),
-  heroVisibleRate: document.querySelector('#hero-visible-rate'),
-  heroHoldoutRate: document.querySelector('#hero-holdout-rate'),
-  heroGapRate: document.querySelector('#hero-gap-rate'),
-  heroFamilyCount: document.querySelector('#hero-family-count'),
-  heroHotspotLabel: document.querySelector('#hero-hotspot-label'),
-  heroFlagList: document.querySelector('#hero-flag-list'),
-  proofVisiblePass: document.querySelector('#proof-visible-pass'),
-  proofHoldoutPass: document.querySelector('#proof-holdout-pass'),
-  proofGap: document.querySelector('#proof-gap'),
-  terminalOutputState: document.querySelector('#terminal-output-state'),
-  terminalReport: document.querySelector('#terminal-report'),
-  bundleStatus: document.querySelector('#bundle-status'),
-  scoreArc: document.querySelector('#score-arc'),
-  scoreValue: document.querySelector('#score-value'),
-  scoreClass: document.querySelector('#score-class'),
-  visibleRate: document.querySelector('#visible-rate'),
-  holdoutRate: document.querySelector('#holdout-rate'),
-  gapRate: document.querySelector('#gap-rate'),
-  familyCount: document.querySelector('#family-count'),
-  modeLabel: document.querySelector('#mode-label'),
-  confidenceLabel: document.querySelector('#confidence-label'),
-  hotspotLabel: document.querySelector('#hotspot-label'),
-  flagList: document.querySelector('#flag-list'),
-  layerNote: document.querySelector('#layer-note'),
-  systemLayerGrid: document.querySelector('#system-layer-grid'),
-  familyList: document.querySelector('#family-list'),
-  variantTableBody: document.querySelector('#variant-table-body'),
-  visibleCount: document.querySelector('#visible-count'),
-  holdoutCount: document.querySelector('#holdout-count'),
-  familyNote: document.querySelector('#family-note'),
-  packNote: document.querySelector('#pack-note'),
-  recommendationList: document.querySelector('#recommendation-list'),
-};
-
-const FLAG_LABELS = {
-  'tool-name-leak': 'TOOL NAME LEAK',
-  'thin-holdouts': 'THIN HOLDOUTS',
-  'duplicate-scenarios': 'DUPLICATE SCENARIOS',
-  'deep-schema': 'DEEP SCHEMA',
-  'tight-retry': 'TIGHT RETRY',
-  'directive-sprawl': 'DIRECTIVE SPRAWL',
-  'tool-namespace-collision': 'TOOL NAMESPACE',
-};
-
-const TONE_CLASSES = {
-  secondary: 'border-[#e6feff33] bg-[#e6feff0d] text-[#e6feff]',
-  primary: 'border-[#ffb77d33] bg-[#ffb77d0d] text-[#ffb77d]',
-  error: 'border-[#ffb4ab33] bg-[#ffb4ab0d] text-[#ffb4ab]',
-};
-
-let saveTimer = null;
-
-init();
-
-function init() {
-  const savedBundle = localStorage.getItem(STORAGE_KEYS.bundle);
-  const savedObservations = localStorage.getItem(STORAGE_KEYS.observations);
-  const savedIntensity = localStorage.getItem(STORAGE_KEYS.intensity);
-  const savedHoldouts = localStorage.getItem(STORAGE_KEYS.holdouts);
-
-  state.bundleText = savedBundle == null ? JSON.stringify(createDemoBundle(), null, 2) : savedBundle;
-  state.observationsText = savedObservations == null ? DEMO_OBSERVATIONS : savedObservations;
-  state.intensity = Number(savedIntensity ?? 2);
-  state.showHoldouts = savedHoldouts == null ? true : savedHoldouts === 'true';
-
-  bundleInput.value = state.bundleText;
-  resultsInput.value = state.observationsText;
-  intensitySelect.value = String(state.intensity);
-  showHoldoutsToggle.checked = state.showHoldouts;
 
   bindEvents();
-  analyzeAndRender();
-  restoreHashScroll();
+  observeReveals();
+  scrollToHashTarget();
+}
+
+function renderDocsSections() {
+  const docs = [
+    ['docs-install', 'Install', 'Clone the repo, install dependencies, and run the first diagnosis from the CLI.', 'npm install\nnpm run diagnose -- examples/cli/quickstart-bundle.json'],
+    ['docs-schemas', 'Schemas', 'Validate harness bundles, risk profiles, mutation registries, and diagnostic reports with the checked-in JSON schemas.', 'docs/schemas/harness_bundle.schema.json\ndocs/schemas/risk_profile.schema.json\ndocs/schemas/diagnostic_report.schema.json'],
+    ['docs-runner-contract', 'Runner contract', 'Implement a small adapter that accepts variants and returns observed outcomes without changing your agent framework.', 'POST /runner\n{ pack, profile, thresholds }\n-> { observations: [...] }'],
+    ['docs-ci-gates', 'CI gates', 'Block releases when overall score, holdout pass rate, or robustness gap crosses your thresholds.', 'npm run release:gate -- bundle.json observed-runs.json --write-md artifacts/gate.md'],
+    ['docs-mutation-packs', 'Mutation packs', 'Browse deterministic packs for prompt integrity, tool payloads, permissions, network sinks, context, sandbox boundaries, and multimodal inputs.', MUTATION_PACKS.join('\n')],
+  ];
+
+  return docs.map(([id, title, detail, example]) => `
+    <section id="${id}" class="section docs-section reveal">
+      <div class="section__intro"><p class="eyebrow">Docs / ${title}</p><h2>${title}</h2><p>${detail}</p></div>
+      <pre>${escapeHtml(example)}</pre>
+    </section>
+  `).join('');
 }
 
 function bindEvents() {
-  bundleInput.addEventListener('input', scheduleAnalyze);
-  resultsInput.addEventListener('input', scheduleAnalyze);
-
-  intensitySelect.addEventListener('change', () => {
-    state.intensity = Number(intensitySelect.value);
-    persistControls();
-    analyzeAndRender();
+  document.querySelector('#profile-select').addEventListener('change', (event) => {
+    state.profileId = event.target.value;
+    persistState();
+    runDiagnosis();
   });
-
-  showHoldoutsToggle.addEventListener('change', () => {
-    state.showHoldouts = showHoldoutsToggle.checked;
-    if (!state.showHoldouts && state.activeVariantTier === 'holdout') {
-      state.activeVariantTier = 'visible';
-    }
-    persistControls();
-    renderCurrentAnalysis();
+  document.querySelector('#intensity-select').addEventListener('change', (event) => {
+    state.intensity = Number(event.target.value);
+    persistState();
+    runDiagnosis();
   });
-
-  loadDemoBtn.addEventListener('click', loadDemo);
-  importBundleBtn.addEventListener('click', () => bundleFileInput.click());
-  importResultsBtn.addEventListener('click', () => resultsFileInput.click());
-  analyzeBtn.addEventListener('click', analyzeAndRender);
-  exportBtn.addEventListener('click', exportPack);
-  copyReportBtn.addEventListener('click', copyReport);
-  bundleCopyBtn.addEventListener('click', copyBundle);
-  bundleAnalyzeBtn.addEventListener('click', analyzeAndRender);
-  generatePatchBtn.addEventListener('click', exportPack);
-  visibleTabBtn.addEventListener('click', () => {
-    state.activeVariantTier = 'visible';
-    renderCurrentAnalysis();
+  document.querySelector('#observed-toggle').addEventListener('change', (event) => {
+    state.useObservedRuns = event.target.checked;
+    persistState();
+    runDiagnosis();
   });
-  holdoutTabBtn.addEventListener('click', () => {
-    if (!state.showHoldouts) return;
-    state.activeVariantTier = 'holdout';
-    renderCurrentAnalysis();
+  document.querySelector('#custom-toggle').addEventListener('change', (event) => {
+    state.useCustomInput = event.target.checked;
+    persistState();
+    runDiagnosis();
   });
-
-  bundleFileInput.addEventListener('change', () => importJsonFile(bundleFileInput, 'bundle'));
-  resultsFileInput.addEventListener('change', () => importJsonFile(resultsFileInput, 'observations'));
-  window.addEventListener('hashchange', restoreHashScroll);
+  document.querySelector('#bundle-json').addEventListener('input', (event) => {
+    state.customBundleText = event.target.value;
+    persistState();
+  });
+  document.querySelector('#runs-json').addEventListener('input', (event) => {
+    state.customRunsText = event.target.value;
+    persistState();
+  });
+  document.querySelector('#bundle-file').addEventListener('change', (event) => readJsonFile(event, 'bundle'));
+  document.querySelector('#runs-file').addEventListener('change', (event) => readJsonFile(event, 'runs'));
+  document.querySelector('#min-overall-score').addEventListener('input', (event) => updateThreshold('minOverallScore', event.target.value));
+  document.querySelector('#min-holdout-pass').addEventListener('input', (event) => updateThreshold('minHoldoutPass', event.target.value));
+  document.querySelector('#max-gap').addEventListener('input', (event) => updateThreshold('maxGap', event.target.value));
+  document.querySelector('#runner-endpoint').addEventListener('input', (event) => {
+    state.runnerEndpoint = event.target.value;
+    persistState();
+  });
+  document.querySelector('#account-email').addEventListener('input', (event) => updateWorkspaceField('accountEmail', event.target.value));
+  document.querySelector('#workspace-name').addEventListener('input', (event) => updateWorkspaceField('workspaceName', event.target.value));
+  document.querySelector('#project-name').addEventListener('input', (event) => updateWorkspaceField('projectName', event.target.value));
+  document.querySelector('#project-role').addEventListener('change', (event) => updateWorkspaceField('projectRole', event.target.value));
+  document.querySelector('#analytics-toggle').addEventListener('change', (event) => updateWorkspaceField('analyticsEnabled', event.target.checked));
+  document.querySelector('#run-demo').addEventListener('click', runDiagnosis);
+  document.querySelector('#run-http-runner').addEventListener('click', runHttpRunner);
+  document.querySelector('#copy-report').addEventListener('click', () => copyText(state.analysis?.reportText ?? '', 'Copied report'));
+  document.querySelector('#download-report').addEventListener('click', () => downloadText('harnessamp-report.md', state.analysis?.reportText ?? '', 'Downloaded report'));
+  document.querySelector('#download-report-json').addEventListener('click', () => downloadText('harnessamp-report.json', JSON.stringify(buildReportSnapshot(), null, 2), 'Downloaded report JSON'));
+  document.querySelector('#download-pack').addEventListener('click', () => downloadText('harnessamp-mutation-pack.json', JSON.stringify(state.analysis?.exportPack ?? {}, null, 2), 'Downloaded mutation pack'));
+  document.querySelector('#copy-ci').addEventListener('click', () => copyText(githubActionsSnippet, 'Copied CI snippet'));
+  document.querySelector('#save-report').addEventListener('click', () => saveReportSnapshot('Saved report snapshot'));
+  document.querySelector('#save-server-report').addEventListener('click', saveServerReport);
+  document.querySelector('#load-server-report').addEventListener('click', loadServerReport);
+  document.querySelector('#download-example-bundle').addEventListener('click', () => downloadText('quickstart-bundle.json', JSON.stringify(quickstartBundle, null, 2), 'Downloaded bundle'));
+  document.querySelector('#download-example-runs').addEventListener('click', () => downloadText('observed-runs.json', JSON.stringify(observedRuns, null, 2), 'Downloaded runs'));
+  document.querySelector('#download-risk-profile').addEventListener('click', () => downloadText(`${state.profileId}.risk-profile.json`, JSON.stringify(riskProfiles[state.profileId].profile, null, 2), 'Downloaded risk profile'));
+  document.querySelector('#download-ci-yaml').addEventListener('click', () => downloadText('harnessamp-release-gate.yml', githubActionsSnippet, 'Downloaded CI YAML'));
 }
 
-function restoreHashScroll() {
-  if (!window.location.hash) return;
+function runDiagnosis() {
+  trackEvent('diagnosis_started', { profile: state.profileId, customInput: state.useCustomInput });
+  const selected = riskProfiles[state.profileId];
+  const customBundle = state.useCustomInput ? parseJsonInput(state.customBundleText, 'Harness bundle') : null;
+  const customRuns = state.useCustomInput && state.useObservedRuns ? parseJsonInput(state.customRunsText, 'Observed runs') : null;
 
-  const scrollToHash = () => {
-    const target = document.querySelector(window.location.hash);
-    if (target) {
-      target.scrollIntoView({ block: 'start' });
-    }
-  };
-
-  requestAnimationFrame(scrollToHash);
-  setTimeout(scrollToHash, 120);
-  setTimeout(scrollToHash, 420);
-}
-
-function scheduleAnalyze() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    analyzeAndRender();
-  }, 160);
-}
-
-function loadDemo() {
-  const demoBundle = createDemoBundle();
-  bundleInput.value = JSON.stringify(demoBundle, null, 2);
-  resultsInput.value = DEMO_OBSERVATIONS;
-  state.bundleText = bundleInput.value;
-  state.observationsText = resultsInput.value;
-  state.activeVariantTier = 'visible';
-  persistDraft();
-  analyzeAndRender();
-}
-
-function importJsonFile(input, target) {
-  const file = input.files?.[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = () => {
-    const text = String(reader.result ?? '');
-    if (target === 'bundle') {
-      bundleInput.value = text;
-      state.bundleText = text;
-    } else {
-      resultsInput.value = text;
-      state.observationsText = text;
-    }
-    persistDraft();
-    analyzeAndRender();
-  };
-  reader.readAsText(file);
-  input.value = '';
-}
-
-function analyzeAndRender() {
-  state.bundleText = bundleInput.value;
-  state.observationsText = resultsInput.value;
-  persistDraft();
-
-  const bundleParse = safeJsonParse(state.bundleText);
-  if (!bundleParse.ok) {
-    state.parseError = `Bundle JSON: ${bundleParse.error.message}`;
-    updateStatusBanner();
+  if (customBundle?.error || customRuns?.error) {
+    state.inputError = customBundle?.error ?? customRuns?.error;
+    setText('input-error', state.inputError);
+    persistState();
     return;
   }
 
-  let observations = null;
-  if (state.observationsText.trim()) {
-    const resultsParse = safeJsonParse(state.observationsText);
-    if (!resultsParse.ok) {
-      state.parseError = `Runs JSON: ${resultsParse.error.message}`;
-      updateStatusBanner();
+  state.inputError = '';
+  setText('input-error', '');
+  persistState();
+
+  const bundle = {
+    ...(state.useCustomInput ? customBundle.value : selected.bundle),
+    mutationPolicy: {
+      ...((state.useCustomInput ? customBundle.value : selected.bundle).mutationPolicy ?? {}),
+      intensity: state.intensity,
+      visibleFamilies: selected.coverage,
+      holdoutFamilies: selected.coverage,
+    },
+  };
+
+  const runs = state.useObservedRuns ? (state.useCustomInput ? customRuns.value : observedRuns) : [];
+  state.analysis = analyzeBundle(bundle, runs, { intensity: state.intensity });
+  updateReport(selected);
+  trackEvent('diagnosis_completed', { profile: state.profileId, gate: gateFor(state.analysis.summary) });
+}
+
+function updateReport(selected) {
+  const analysis = state.analysis;
+  const visible = Math.round(analysis.summary.visiblePassRate);
+  const holdout = Math.round(analysis.summary.holdoutPassRate);
+  const drop = Math.max(0, visible - holdout);
+  const gate = gateFor(analysis.summary);
+  const weakest = weakestFamily(analysis);
+  const recommendation = analysis.recommendations[0]?.detail ?? analysis.recommendations[0]?.title ?? 'Add validation around the weakest wrapper surface.';
+  const seed = replaySeed(analysis);
+  const failure = weakest?.expectedFailure ?? weakest?.label ?? 'wrapper_brittleness';
+  const reportId = state.reportId || createReportId(analysis);
+  state.reportId = reportId;
+
+  setText('hero-run-label', `diagnosis/${selected.profile.agentDomain}`);
+  setText('hero-gate', gate);
+  setText('hero-baseline', `${visible}%`);
+  setText('hero-mutated', `${holdout}%`);
+  setText('hero-drop', `${drop}%`);
+  setText('hero-surface', weakest?.label ?? 'No weak surface detected');
+  setText('hero-control', recommendation);
+  setText('demo-profile', selected.label);
+  setText('demo-variants', String(analysis.pack.variants.length));
+  setText('demo-seed', seed);
+  setText('demo-gate', gate);
+  setText('report-baseline', `${visible}% pass`);
+  setText('report-mutated', `${holdout}% pass`);
+  setText('report-drop', `${drop}%`);
+  setText('report-surface', weakest?.label ?? 'stable');
+  setText('report-failure', failure);
+  setText('report-control', recommendation);
+  setText('report-seed', seed);
+  setText('report-gate', gate);
+  setText('report-id', reportId);
+  setText('report-saved', getSavedReports()[reportId] ? 'saved' : 'unsaved');
+  setText('report-text', analysis.reportText);
+  renderVariantTable(analysis);
+  renderSchemaStatus(analysis.bundle, selected.profile, analysis);
+  persistState();
+
+  document.querySelector('#coverage-list').innerHTML = MUTATION_PACKS.map((pack) => `
+    <span class="${selected.coverage.includes(pack) ? 'is-active' : ''}">${formatPackName(pack)}</span>
+  `).join('');
+
+  document.querySelector('#hero-bars').innerHTML = analysis.familyStats.slice(0, 8).map((family) => {
+    const height = Math.max(18, Math.round(100 - family.passRate));
+    return `<i style="--h: ${height}%"></i>`;
+  }).join('');
+}
+
+async function runHttpRunner() {
+  if (!state.runnerEndpoint.trim()) {
+    state.runnerStatus = 'Add an endpoint first';
+    setText('runner-status', state.runnerStatus);
+    return;
+  }
+
+  if (!state.analysis) runDiagnosis();
+  state.runnerStatus = 'Posting mutation pack...';
+  setText('runner-status', state.runnerStatus);
+  persistState();
+
+  try {
+    const response = await fetch(state.runnerEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        profile: state.profileId,
+        thresholds: state.thresholds,
+        pack: state.analysis.exportPack,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Runner returned HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const observations = Array.isArray(payload) ? payload : payload.observations;
+    if (!Array.isArray(observations)) {
+      throw new Error('Runner response must be an observation array or { observations }.');
+    }
+
+    state.customRunsText = JSON.stringify(observations, null, 2);
+    state.useCustomInput = true;
+    state.useObservedRuns = true;
+    document.querySelector('#runs-json').value = state.customRunsText;
+    document.querySelector('#custom-toggle').checked = true;
+    document.querySelector('#observed-toggle').checked = true;
+    state.runnerStatus = `Loaded ${observations.length} runner observations`;
+    setText('runner-status', state.runnerStatus);
+    persistState();
+    runDiagnosis();
+  } catch (error) {
+    state.runnerStatus = error.message;
+    setText('runner-status', state.runnerStatus);
+    persistState();
+  }
+}
+
+function parseJsonInput(text, label) {
+  const parsed = safeJsonParse(text);
+  if (!parsed.ok) {
+    return { error: `${label}: ${parsed.error.message}` };
+  }
+  return { value: parsed.value };
+}
+
+function renderVariantTable(analysis) {
+  const rows = analysis.outcomes
+    .map((outcome) => ({
+      outcome,
+      variant: analysis.pack.variants.find((item) => item.id === outcome.variantId || item.variantId === outcome.variantId),
+    }))
+    .filter(({ outcome }) => !outcome.passed || outcome.score < 80)
+    .slice(0, 10);
+
+  document.querySelector('#variant-table-body').innerHTML = rows.map(({ outcome, variant }) => `
+    <tr>
+      <td>${escapeHtml(variant?.mutationId ?? outcome.variantId)}</td>
+      <td>${escapeHtml(variant?.surface ?? variant?.family ?? 'wrapper')}</td>
+      <td class="${outcome.passed ? 'warn' : 'danger'}">${outcome.passed ? 'WARN' : 'FAIL'}</td>
+      <td>${Math.round(outcome.score)}</td>
+      <td>${Math.round(outcome.latencyMs ?? 0)}ms</td>
+      <td>${escapeHtml(outcome.source ?? 'simulated')}</td>
+    </tr>
+  `).join('');
+}
+
+function renderSchemaStatus(bundle, profile, analysis) {
+  const checks = [
+    ['Harness bundle', validateHarnessBundle(bundle)],
+    ['Observed runs', validateObservedRuns(state.useObservedRuns ? parseObservedRunsForValidation() : [])],
+    ['Risk profile', validateRiskProfile(profile)],
+    ['Diagnostic report', validateDiagnosticSnapshot(buildReportSnapshot(analysis))],
+  ];
+
+  document.querySelector('#schema-status-list').innerHTML = checks.map(([label, result]) => `
+    <div class="${result.ok ? 'is-valid' : 'is-invalid'}">
+      <strong>${label}</strong>
+      <span>${result.ok ? 'valid' : escapeHtml(result.errors[0])}</span>
+    </div>
+  `).join('');
+}
+
+function validateHarnessBundle(bundle) {
+  return validationResult(validateHarnessBundleSchema(bundle), validateHarnessBundleSchema.errors);
+}
+
+function validateObservedRuns(runs) {
+  return validationResult(validateObservedRunsSchema(runs), validateObservedRunsSchema.errors);
+}
+
+function validateRiskProfile(profile) {
+  return validationResult(validateRiskProfileSchema(profile), validateRiskProfileSchema.errors);
+}
+
+function validateDiagnosticSnapshot(snapshot = buildReportSnapshot()) {
+  return validationResult(validateDiagnosticReportSchema(snapshot), validateDiagnosticReportSchema.errors);
+}
+
+function validationResult(ok, errors = []) {
+  return {
+    ok,
+    errors: (errors ?? []).map((error) => `${error.instancePath || '/'} ${error.message}`.trim()),
+  };
+}
+
+function parseObservedRunsForValidation() {
+  if (!state.useCustomInput) return observedRuns;
+  const parsed = safeJsonParse(state.customRunsText);
+  return parsed.ok ? parsed.value : null;
+}
+
+function weakestFamily(analysis) {
+  const family = [...analysis.familyStats].sort((a, b) => a.passRate - b.passRate)[0];
+  if (!family) return null;
+  const variant = analysis.pack.variants.find((item) => item.family === family.family);
+  return {
+    label: formatPackName(family.family ?? variant?.family ?? 'wrapper surface'),
+    expectedFailure: variant?.expectedFailure,
+  };
+}
+
+function gateFor(summary) {
+  const failures = [
+    summary.overallScore < state.thresholds.minOverallScore,
+    summary.holdoutPassRate < state.thresholds.minHoldoutPass,
+    summary.gap > state.thresholds.maxGap,
+  ].filter(Boolean).length;
+
+  if (failures === 0) return 'PASS';
+  if (failures === 1) return 'WARN';
+  return 'BLOCK';
+}
+
+function replaySeed(analysis) {
+  const seed = analysis.pack.variants.find((variant) => Number.isFinite(variant.seed))?.seed;
+  return seed ? String(seed) : `ha-${analysis.pack.variants.length}-${state.intensity}`;
+}
+
+function buildReportSnapshot(analysis = state.analysis) {
+  if (!analysis) return {};
+  return {
+    version: 'web-demo-1',
+    id: state.reportId || createReportId(analysis),
+    generatedAt: new Date().toISOString(),
+    workspace: workspacePayload(),
+    suite: {
+      project: analysis.bundle.project,
+      profile: state.profileId,
+      thresholds: state.thresholds,
+    },
+    baselineRuns: analysis.outcomes.filter((outcome) => outcome.tier === 'visible'),
+    mutationRuns: analysis.outcomes,
+    deltas: analysis.familyStats.map((family) => ({
+      deltaType: ['pass_rate'],
+      mutationId: family.family,
+      explanation: `${formatPackName(family.family)} pass rate is ${Math.round(family.passRate)}%.`,
+      severity: family.passRate < 60 ? 'high' : family.passRate < 80 ? 'medium' : 'low',
+    })),
+    findings: analysis.recommendations.map((item, index) => ({
+      id: `finding-${index + 1}`,
+      mutationId: item.family ?? 'wrapper',
+      failureTypes: [{ id: item.title ?? 'wrapper_brittleness' }],
+      highestSeverity: index === 0 ? 'high' : 'medium',
+      recommendation: item.detail ?? item.title ?? 'Review wrapper controls.',
+    })),
+    summary: {
+      originalPassRate: analysis.summary.visiblePassRate,
+      mutatedPassRate: analysis.summary.holdoutPassRate,
+      robustnessDrop: analysis.summary.gap,
+      verdict: gateFor(analysis.summary).toLowerCase() === 'block' ? 'block' : gateFor(analysis.summary).toLowerCase(),
+      overallScore: analysis.summary.overallScore,
+    },
+    markdown: analysis.reportText,
+  };
+}
+
+function saveReportSnapshot(message = 'Saved') {
+  if (!state.analysis) return;
+  const snapshot = buildReportSnapshot();
+  const reports = getSavedReports();
+  reports[snapshot.id] = snapshot;
+  localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(reports));
+  setText('report-saved', 'saved');
+  showFeedback(message);
+}
+
+async function saveServerReport() {
+  if (!state.analysis) return;
+  const snapshot = buildReportSnapshot();
+  try {
+    const response = await fetch('/api/reports', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(snapshot),
+    });
+    if (!response.ok) throw new Error(`Save failed with HTTP ${response.status}`);
+    const payload = await response.json();
+    state.reportId = payload.id ?? snapshot.id;
+    setText('report-id', state.reportId);
+    setText('report-saved', payload.storage ?? 'server');
+    showFeedback('Saved server report');
+    persistState();
+  } catch (error) {
+    showFeedback(error.message);
+    saveReportSnapshot('Saved locally');
+  }
+}
+
+async function loadServerReport() {
+  if (!state.reportId) {
+    showFeedback('No report id');
+    return;
+  }
+  try {
+    const response = await fetch(`/api/reports/${encodeURIComponent(state.reportId)}`);
+    if (!response.ok) throw new Error(`Load failed with HTTP ${response.status}`);
+    const payload = await response.json();
+    setText('report-text', payload.markdown ?? JSON.stringify(payload, null, 2));
+    setText('report-saved', 'server');
+    showFeedback('Loaded server report');
+  } catch (error) {
+    const local = getSavedReports()[state.reportId];
+    if (local) {
+      setText('report-text', local.markdown ?? JSON.stringify(local, null, 2));
+      setText('report-saved', 'local');
+      showFeedback('Loaded local report');
       return;
     }
-    observations = resultsParse.value;
-  }
-
-  state.bundleDocument = bundleParse.value;
-  state.analysis = analyzeBundle(bundleParse.value, observations, { intensity: state.intensity });
-  state.parseError = '';
-  persistDraft();
-  renderCurrentAnalysis();
-}
-
-function renderCurrentAnalysis() {
-  if (!state.analysis) {
-    updateStatusBanner();
-    return;
-  }
-
-  const { analysis } = state;
-  const score = analysis.summary.overallScore;
-  const scoreClass = scoreClassFor(analysis.summary.label);
-
-  setScoreRing(score, statusTargets.heroScoreArc);
-  setScoreRing(score, statusTargets.scoreArc);
-  statusTargets.heroScoreValue.textContent = `${score}`;
-  statusTargets.scoreValue.textContent = `${score}`;
-  statusTargets.heroModeLabel.textContent = modeLabelFor(analysis.mode);
-  statusTargets.modeLabel.textContent = modeLabelFor(analysis.mode);
-  statusTargets.heroScoreClass.textContent = scoreClass.label;
-  statusTargets.scoreClass.textContent = scoreClass.label;
-  setScoreClassTone(statusTargets.heroScoreClass, scoreClass.tone);
-  setScoreClassTone(statusTargets.scoreClass, scoreClass.tone);
-
-  statusTargets.heroVisibleRate.textContent = `${analysis.summary.visiblePassRate}%`;
-  statusTargets.heroHoldoutRate.textContent = `${analysis.summary.holdoutPassRate}%`;
-  statusTargets.heroGapRate.textContent = `${analysis.summary.gap}%`;
-  statusTargets.heroFamilyCount.textContent = formatCount(analysis.summary.familyCount);
-  statusTargets.visibleRate.textContent = `${analysis.summary.visiblePassRate}%`;
-  statusTargets.holdoutRate.textContent = `${analysis.summary.holdoutPassRate}%`;
-  statusTargets.gapRate.textContent = `${analysis.summary.gap}%`;
-  statusTargets.familyCount.textContent = formatCount(analysis.summary.familyCount);
-  if (statusTargets.proofVisiblePass) statusTargets.proofVisiblePass.textContent = `${analysis.summary.visiblePassRate}%`;
-  if (statusTargets.proofHoldoutPass) statusTargets.proofHoldoutPass.textContent = `${analysis.summary.holdoutPassRate}%`;
-  if (statusTargets.proofGap) statusTargets.proofGap.textContent = `${analysis.summary.gap}%`;
-  if (statusTargets.terminalOutputState) {
-    statusTargets.terminalOutputState.textContent =
-      analysis.mode === 'observed' ? 'OBSERVED REPORT' : analysis.mode === 'mixed' ? 'MIXED REPORT' : 'DEMO REPORT';
-  }
-  if (statusTargets.terminalReport) {
-    statusTargets.terminalReport.textContent = analysis.reportText;
-  }
-  statusTargets.confidenceLabel.textContent = confidenceLabelFor(analysis.mode);
-  const hotspotLabel = analysis.summary.hotspot ? analysis.summary.hotspot.label.toUpperCase() : 'NO HOTSPOT';
-  statusTargets.heroHotspotLabel.textContent = hotspotLabel;
-  statusTargets.hotspotLabel.textContent = hotspotLabel;
-  setHotspotTone(statusTargets.heroHotspotLabel, analysis.summary.hotspot);
-  setHotspotTone(statusTargets.hotspotLabel, analysis.summary.hotspot);
-  renderRiskFlags(analysis.features.flags, statusTargets.heroFlagList, 3);
-  renderRiskFlags(analysis.features.flags, statusTargets.flagList, 4);
-  renderSystemLayers(state.bundleDocument, analysis);
-  renderFamilyStats(analysis.familyStats);
-  renderVariants(analysis);
-  renderRecommendations(analysis.recommendations);
-  statusTargets.familyNote.textContent = `${analysis.pack.families.length} families, ${analysis.pack.visibleVariants.length} visible variants, ${analysis.pack.holdoutVariants.length} hidden holdouts.`;
-  statusTargets.packNote.textContent = packNoteFor(analysis);
-  updateStatusBanner();
-}
-
-function renderRiskFlags(flags, target = statusTargets.flagList, limit = 4) {
-  if (!target) return;
-
-  if (!flags.length) {
-    target.innerHTML = '<span class="font-label text-[10px] uppercase tracking-widest text-slate-500">No major risks surfaced yet.</span>';
-    return;
-  }
-
-  target.innerHTML = flags
-    .slice(0, limit)
-    .map((flag) => {
-      const tone = flag.severity >= 5 ? 'error' : flag.severity >= 4 ? 'primary' : 'secondary';
-      return `
-        <span class="inline-flex items-center gap-2 border px-2 py-0.5 font-label text-[9px] uppercase tracking-widest ${TONE_CLASSES[tone]}" title="${escapeHtml(flag.detail)}">
-          ${escapeHtml(flagLabel(flag))}
-          <span class="text-[8px] opacity-75">S${flag.severity}</span>
-        </span>
-      `;
-    })
-    .join('');
-}
-
-function renderSystemLayers(rawBundle, analysis) {
-  if (!statusTargets.systemLayerGrid || !statusTargets.layerNote) return;
-
-  const layers = buildSystemLayers(rawBundle, analysis);
-  const explicitCount = layers.filter((layer) => layer.status === 'explicit').length;
-  const inferredCount = layers.filter((layer) => layer.status === 'inferred').length;
-
-  statusTargets.layerNote.textContent = `${explicitCount} explicit · ${inferredCount} inferred · 1 mutable wrapper`;
-  statusTargets.systemLayerGrid.innerHTML = layers.map((layer, index) => renderSystemLayerCard(layer, index)).join('');
-}
-
-function renderSystemLayerCard(layer, index) {
-  const tone = layerTone(layer);
-  return `
-    <div class="border border-white/10 bg-[#131313]/80 p-6 transition-colors hover:bg-[#1c1b1b]">
-      <div class="flex items-center justify-between">
-        <span class="font-label text-[10px] uppercase tracking-[0.35em] text-slate-500">Layer ${String(index + 1).padStart(2, '0')}</span>
-        <span class="border px-2 py-0.5 font-label text-[9px] uppercase tracking-widest ${TONE_CLASSES[tone]}">${escapeHtml(layer.statusLabel)}</span>
-      </div>
-      <h3 class="mt-4 font-headline text-2xl font-bold uppercase tracking-tight text-white">${escapeHtml(layer.title)}</h3>
-      <p class="mt-3 font-body text-[13px] leading-6 text-[#ddc1ae]">${escapeHtml(layer.summary)}</p>
-      <div class="mt-5 space-y-2">
-        ${layer.points.map((point) => `<div class="font-label text-[10px] uppercase tracking-widest text-slate-400">${escapeHtml(point)}</div>`).join('')}
-      </div>
-    </div>
-  `;
-}
-
-function buildSystemLayers(rawBundle, analysis) {
-  const source = isObject(rawBundle) ? rawBundle : {};
-  const harness = analysis.bundle?.harness ?? {};
-  const explicitIntent = pickFirstText(source.intent?.mission, source.intent?.goal, source.intent?.objective);
-  const explicitContract = isObject(source.contract) ? source.contract : null;
-  const explicitBenchmark = isObject(source.benchmark) ? source.benchmark : null;
-  const scenarios = Array.isArray(harness.scenarios) ? harness.scenarios : [];
-  const observations = Array.isArray(source.observations)
-    ? source.observations
-    : Array.isArray(source.results)
-      ? source.results
-      : [];
-
-  const intentMission = explicitIntent || inferIntentMission(source, harness, analysis);
-  const contractAgentCount = Array.isArray(explicitContract?.agents) ? explicitContract.agents.length : 0;
-  const contractMustCount = Array.isArray(explicitContract?.must)
-    ? explicitContract.must.length
-    : Array.isArray(explicitContract?.global?.must)
-      ? explicitContract.global.must.length
-      : 0;
-  const benchmarkCaseCount = countBenchmarkCases(explicitBenchmark);
-
-  return [
-    {
-      title: 'Intent',
-      status: explicitIntent ? 'explicit' : 'inferred',
-      statusLabel: explicitIntent ? 'DEFINED' : 'INFERRED',
-      summary: intentMission,
-      points: [
-        explicitIntent ? 'Mission comes from the current pack.' : 'Mission is inferred from the project, description, and scenario set.',
-        `${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'} currently shape the goal surface.`,
-        explicitIntent ? 'This layer should not drift under mutation.' : 'Make this explicit before using the score as a release gate.',
-      ],
-    },
-    {
-      title: 'Contract',
-      status: explicitContract ? 'explicit' : 'inferred',
-      statusLabel: explicitContract ? 'DEFINED' : 'INFERRED',
-      summary: explicitContract
-        ? `Per-agent and global constraints are defined in the pack.`
-        : 'No explicit contract found. HarnessAmp is deriving constraints from response format, tool approval, and observed role boundaries.',
-      points: [
-        explicitContract
-          ? `${contractAgentCount || 0} agent contract${contractAgentCount === 1 ? '' : 's'} in the bundle.`
-          : `${analysis.features.toolCount} approved tool surface${analysis.features.toolCount === 1 ? '' : 's'} and ${analysis.features.responseFormat.toUpperCase()} response policy detected.`,
-        explicitContract
-          ? `${contractMustCount || 0} hard requirement${contractMustCount === 1 ? '' : 's'} captured.`
-          : `${analysis.features.toolApproval ? 'Tool approval is on.' : 'Tool approval is off.'} Retry budget is ${analysis.features.retryPolicy.maxAttempts} attempts.`,
-        'This layer should stay fixed while wrapper variants run.',
-      ],
-    },
-    {
-      title: 'Benchmark',
-      status: explicitBenchmark ? 'explicit' : 'inferred',
-      statusLabel: explicitBenchmark ? 'DEFINED' : 'INFERRED',
-      summary: explicitBenchmark
-        ? 'The bundle carries an explicit benchmark pack with cases and assertions.'
-        : 'No explicit benchmark pack found. HarnessAmp is treating scenarios and observed runs as provisional benchmark material.',
-      points: [
-        explicitBenchmark
-          ? `${benchmarkCaseCount} benchmark case${benchmarkCaseCount === 1 ? '' : 's'} in the current pack.`
-          : `${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'} and ${observations.length} observed run${observations.length === 1 ? '' : 's'} available.`,
-        explicitBenchmark
-          ? 'Use this layer to justify architecture and release decisions.'
-          : 'Promote this into an explicit benchmark pack before trusting hidden-holdout gates.',
-        `Current mutation run covers ${analysis.summary.familyCount} wrapper surface${analysis.summary.familyCount === 1 ? '' : 's'}.`,
-      ],
-    },
-    {
-      title: 'Wrapper',
-      status: 'active',
-      statusLabel: 'MUTATED',
-      summary: 'This is the mutable layer: prompts, tools, schema shape, runtime policy, and delivery envelope.',
-      points: [
-        `${analysis.features.toolCount} tool${analysis.features.toolCount === 1 ? '' : 's'}, ${analysis.features.scenarioCount} scenario${analysis.features.scenarioCount === 1 ? '' : 's'}, ${analysis.features.schemaNodeCount} schema node${analysis.features.schemaNodeCount === 1 ? '' : 's'}.`,
-        `${analysis.features.messageEnvelope} envelope, ${analysis.features.responseFormat.toUpperCase()} output, ${analysis.features.retryPolicy.maxAttempts}x retry budget.`,
-        'This is the only layer that should drift under test.',
-      ],
-    },
-  ];
-}
-
-function renderFamilyStats(families) {
-  statusTargets.familyList.innerHTML = families
-    .map((family) => {
-      const status = familySurfaceStatus(family.surface);
-      const visibleWidth = clamp(family.visibleRate, 0, 100);
-      const holdoutWidth = clamp(family.holdoutRate, 0, 100);
-
-      return `
-        <div class="grid grid-cols-1 items-center gap-6 bg-[#1c1b1b] p-6 transition-colors hover:bg-[#201f1f] lg:grid-cols-12">
-          <div class="lg:col-span-3">
-            <h3 class="font-label text-sm font-bold uppercase text-white">${escapeHtml(family.label)}</h3>
-            <p class="mt-1 font-label text-[11px] text-slate-500">${escapeHtml(family.lede)}</p>
-          </div>
-          <div class="space-y-3 lg:col-span-7 lg:px-8">
-            <div>
-              <div class="flex justify-between font-label text-[10px] uppercase tracking-widest">
-                <span class="text-slate-500">Visible</span>
-                <span class="text-[#e6feff]">${visibleWidth}%</span>
-              </div>
-              <div class="mt-2 h-2 w-full bg-[#0e0e0e]">
-                <div class="h-full bg-[#e6feff]" style="width: ${visibleWidth}%"></div>
-              </div>
-            </div>
-            <div>
-              <div class="flex justify-between font-label text-[10px] uppercase tracking-widest">
-                <span class="text-slate-500">Holdout</span>
-                <span class="text-[#ffb77d]">${holdoutWidth}%</span>
-              </div>
-              <div class="mt-2 h-2 w-full bg-[#0e0e0e]">
-                <div class="h-full bg-[#ffb77d]" style="width: ${holdoutWidth}%"></div>
-              </div>
-            </div>
-            <p class="font-label text-[10px] uppercase tracking-widest text-slate-500">${escapeHtml(family.bottleneck)}</p>
-          </div>
-          <div class="lg:col-span-2 lg:flex lg:justify-end">
-            <span class="border px-3 py-1 font-label text-[11px] uppercase tracking-widest ${TONE_CLASSES[status.tone]}">${status.label}</span>
-          </div>
-        </div>
-      `;
-    })
-    .join('');
-}
-
-function renderVariants(analysis) {
-  if (!state.showHoldouts && state.activeVariantTier === 'holdout') {
-    state.activeVariantTier = 'visible';
-  }
-
-  const visible = analysis.pack.visibleVariants;
-  const holdout = analysis.pack.holdoutVariants;
-  const variants = state.activeVariantTier === 'holdout' ? holdout : visible;
-
-  statusTargets.visibleCount.textContent = formatCount(visible.length);
-  statusTargets.holdoutCount.textContent = formatCount(holdout.length);
-  visibleTabBtn.className = tabButtonClass(state.activeVariantTier === 'visible', false);
-  holdoutTabBtn.className = tabButtonClass(state.activeVariantTier === 'holdout', !state.showHoldouts);
-  holdoutTabBtn.disabled = !state.showHoldouts;
-  holdoutTabBtn.setAttribute('aria-disabled', String(!state.showHoldouts));
-
-  statusTargets.variantTableBody.innerHTML = variants.map((variant) => renderVariantRow(analysis, variant)).join('');
-}
-
-function renderVariantRow(analysis, variant) {
-  const outcome = analysis.outcomesById[variant.id];
-  const score = outcome?.score ?? variant.estimatedPassRate;
-  const latency = outcome?.latencyMs ?? variant.estimatedLatencyMs;
-  const passed = outcome?.passed ?? score >= 70;
-  const status = variantStatusFor(score, passed);
-  const changes = variant.changes
-    .slice(0, 3)
-    .map((item) => `<span class="inline-flex items-center border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-300">${escapeHtml(item)}</span>`)
-    .join('');
-
-  return `
-    <tr class="transition-colors hover:bg-white/[0.02]">
-      <td class="py-5 px-6 text-slate-400">${escapeHtml(variant.familyLabel)}</td>
-      <td class="py-5 px-6 font-bold text-white">${escapeHtml(variant.title)}</td>
-      <td class="py-5 px-6 text-slate-400">
-        <div>${escapeHtml(variant.summary)}</div>
-        <div class="mt-2 flex flex-wrap gap-2">${changes}</div>
-      </td>
-      <td class="py-5 px-6">
-        <span class="border px-2 py-0.5 ${status.classes}">${status.label}</span>
-      </td>
-      <td class="py-5 px-6 text-right text-white">${score}</td>
-      <td class="py-5 px-6 text-right text-slate-500">${latency}ms</td>
-    </tr>
-  `;
-}
-
-function renderRecommendations(recommendations) {
-  statusTargets.recommendationList.innerHTML = recommendations
-    .map(
-      (item, index) => `
-        <div class="flex items-start gap-6">
-          <span class="font-label text-xl font-bold ${index === 0 ? 'text-[#e6feff]' : 'text-slate-600'}">${String(index + 1).padStart(2, '0')}</span>
-          <div>
-            <h4 class="font-label text-sm font-bold uppercase tracking-wide text-white">${escapeHtml(item.title)}</h4>
-            <p class="mt-1 max-w-2xl font-label text-[12px] leading-relaxed text-slate-400">${escapeHtml(item.detail)}</p>
-            <p class="mt-1 font-label text-[10px] uppercase tracking-widest text-slate-500">${escapeHtml(item.impact)}</p>
-          </div>
-        </div>
-      `,
-    )
-    .join('');
-}
-
-function updateStatusBanner() {
-  if (state.parseError) {
-    statusTargets.bundleStatus.textContent = state.parseError;
-    statusTargets.bundleStatus.className = 'font-label text-[10px] uppercase tracking-widest text-[#ffb4ab]';
-    statusTargets.bundleStatus.title = state.parseError;
-    if (statusTargets.terminalOutputState) {
-      statusTargets.terminalOutputState.textContent = 'PARSE ERROR';
-    }
-    if (statusTargets.terminalReport) {
-      statusTargets.terminalReport.textContent = state.parseError;
-    }
-    return;
-  }
-
-  statusTargets.bundleStatus.textContent = 'JSON CONFIGURATION';
-  statusTargets.bundleStatus.className = 'font-label text-[10px] uppercase tracking-widest text-slate-500';
-  statusTargets.bundleStatus.removeAttribute('title');
-  if (statusTargets.terminalOutputState && !state.analysis) {
-    statusTargets.terminalOutputState.textContent = 'WAITING';
-  }
-  if (statusTargets.terminalReport && !state.analysis) {
-    statusTargets.terminalReport.textContent = 'Run analyze to see the current report text.';
+    showFeedback(error.message);
   }
 }
 
-function persistControls() {
-  localStorage.setItem(STORAGE_KEYS.intensity, String(state.intensity));
-  localStorage.setItem(STORAGE_KEYS.holdouts, String(state.showHoldouts));
-}
-
-function persistDraft() {
-  localStorage.setItem(STORAGE_KEYS.bundle, state.bundleText);
-  localStorage.setItem(STORAGE_KEYS.observations, state.observationsText);
-  persistControls();
-}
-
-function exportPack() {
-  if (!state.analysis) {
-    return;
+function getSavedReports() {
+  try {
+    return JSON.parse(localStorage.getItem(REPORT_STORAGE_KEY) ?? '{}');
+  } catch {
+    return {};
   }
+}
 
-  const blob = new Blob([JSON.stringify(state.analysis.exportPack, null, 2)], { type: 'application/json' });
+function updateWorkspaceField(key, value) {
+  state[key] = value;
+  persistState();
+  trackEvent('workspace_updated', { key });
+}
+
+function workspacePayload() {
+  return {
+    accountEmail: state.accountEmail,
+    workspaceName: state.workspaceName,
+    projectName: state.projectName,
+    projectRole: state.projectRole,
+  };
+}
+
+function trackEvent(name, properties = {}) {
+  if (!state.analyticsEnabled) return;
+  const event = {
+    name,
+    properties,
+    workspace: workspacePayload(),
+    timestamp: new Date().toISOString(),
+  };
+  const events = readEvents();
+  events.push(event);
+  localStorage.setItem(EVENT_STORAGE_KEY, JSON.stringify(events.slice(-100)));
+  fetch('/api/events', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(event),
+  }).catch(() => {});
+}
+
+function readEvents() {
+  try {
+    return JSON.parse(localStorage.getItem(EVENT_STORAGE_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+
+function createReportId(analysis) {
+  const source = `${analysis.bundle.project}-${state.profileId}-${state.intensity}-${Date.now()}`;
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (hash * 31 + source.charCodeAt(index)) >>> 0;
+  }
+  return `ha-${hash.toString(16)}`;
+}
+
+async function copyText(text, message = 'Copied') {
+  if (!text) return;
+  await navigator.clipboard.writeText(text);
+  showFeedback(message);
+}
+
+function downloadText(filename, text, message = 'Downloaded') {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${slugify(state.analysis.bundle.project)}-harness-pack.json`;
+  link.download = filename;
   link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  URL.revokeObjectURL(url);
+  showFeedback(message);
 }
 
-async function copyReport() {
-  if (!state.analysis) return;
-  await navigator.clipboard.writeText(state.analysis.reportText);
-  pulseButton(copyReportBtn, 'Copied');
-}
-
-async function copyBundle() {
-  await navigator.clipboard.writeText(bundleInput.value);
-  pulseButton(bundleCopyBtn, 'Copied');
-}
-
-function pulseButton(button, label) {
-  const original = button.innerHTML;
-  button.innerHTML = label;
-  setTimeout(() => {
-    button.innerHTML = original;
-  }, 1200);
-}
-
-function setScoreRing(score, target = statusTargets.scoreArc) {
-  if (!target) return;
-  const normalized = clamp(score, 0, 100);
-  const offset = SCORE_CIRCUMFERENCE * (1 - normalized / 100);
-  target.style.strokeDashoffset = String(offset);
-}
-
-function setScoreClassTone(target, tone) {
-  if (!target) return;
-  const toneClasses = ['text-slate-400', 'text-[#e6feff]', 'text-[#ffb77d]', 'text-[#ffb4ab]'];
-  target.classList.remove(...toneClasses);
-  target.classList.add(tone);
-}
-
-function setHotspotTone(target, hotspot) {
-  if (!target) return;
-  const classes = ['text-slate-500', 'text-[#e6feff]', 'text-[#ffb77d]', 'text-[#ffb4ab]'];
-  target.classList.remove(...classes);
-  if (!hotspot) {
-    target.classList.add('text-slate-500');
+async function readJsonFile(event, target) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const text = await file.text();
+  const parsed = safeJsonParse(text);
+  if (!parsed.ok) {
+    state.inputError = `${file.name}: ${parsed.error.message}`;
+    setText('input-error', state.inputError);
+    persistState();
     return;
   }
 
-  target.classList.add(hotspot.gap >= 18 ? 'text-[#ffb4ab]' : 'text-[#ffb77d]');
-}
-
-function tabButtonClass(active, disabled) {
-  const base = 'font-label text-[11px] uppercase tracking-widest transition-colors';
-  if (disabled) {
-    return `${base} cursor-not-allowed text-slate-600`;
+  const formatted = JSON.stringify(parsed.value, null, 2);
+  if (target === 'bundle') {
+    state.customBundleText = formatted;
+    document.querySelector('#bundle-json').value = formatted;
+  } else {
+    state.customRunsText = formatted;
+    document.querySelector('#runs-json').value = formatted;
   }
-  if (active) {
-    return `${base} border-b border-[#e6feff] pb-1 text-[#e6feff]`;
-  }
-  return `${base} text-slate-500 hover:text-white`;
+  state.useCustomInput = true;
+  document.querySelector('#custom-toggle').checked = true;
+  state.inputError = '';
+  setText('input-error', '');
+  persistState();
+  runDiagnosis();
 }
 
-function flagLabel(flag) {
-  return FLAG_LABELS[flag.id] ?? flag.surface.toUpperCase();
+function updateThreshold(key, rawValue) {
+  state.thresholds[key] = clampNumber(Number(rawValue), 0, 100);
+  persistState();
+  if (state.analysis) updateReport(riskProfiles[state.profileId]);
 }
 
-function scoreClassFor(label) {
-  switch (label) {
-    case 'stable':
-      return { label: 'STABLE', tone: 'text-[#e6feff]' };
-    case 'watch':
-      return { label: 'WATCH', tone: 'text-[#ffb77d]' };
-    case 'brittle':
-      return { label: 'BRITTLE', tone: 'text-[#ffb77d]' };
-    default:
-      return { label: 'FRAGILE', tone: 'text-[#ffb4ab]' };
-  }
+function showFeedback(message) {
+  state.feedback = message;
+  setText('action-feedback', message);
+  window.clearTimeout(showFeedback.timer);
+  showFeedback.timer = window.setTimeout(() => {
+    state.feedback = '';
+    setText('action-feedback', '');
+  }, 2200);
 }
 
-function modeLabelFor(mode) {
-  if (mode === 'observed') return 'OBSERVED RUNS';
-  if (mode === 'mixed') return 'MIXED RUNS';
-  return 'DEMO SIMULATION';
-}
-
-function confidenceLabelFor(mode) {
-  if (mode === 'observed') return 'HIGH (0.94)';
-  if (mode === 'mixed') return 'MEDIUM (0.72)';
-  return 'LOW (0.48)';
-}
-
-function familySurfaceStatus(surface) {
-  switch (surface) {
-    case 'sharp':
-      return { label: 'CRITICAL', tone: 'error' };
-    case 'watch':
-      return { label: 'VULNERABLE', tone: 'primary' };
-    default:
-      return { label: 'STABLE', tone: 'secondary' };
+function loadState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    return {
+      ...defaultState,
+      ...saved,
+      thresholds: {
+        ...defaultState.thresholds,
+        ...(saved.thresholds ?? {}),
+      },
+      analysis: null,
+      inputError: '',
+      feedback: '',
+    };
+  } catch {
+    return { ...defaultState, thresholds: { ...defaultState.thresholds } };
   }
 }
 
-function layerTone(layer) {
-  if (layer.status === 'explicit') return 'secondary';
-  if (layer.status === 'active') return 'primary';
-  return 'error';
+function persistState() {
+  const { analysis, inputError, feedback, ...persistable } = state;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
 }
 
-function variantStatusFor(score, passed) {
-  if (!passed) {
-    return { label: 'FAIL', classes: TONE_CLASSES.error };
-  }
-  if (score >= 85) {
-    return { label: 'PASS', classes: 'border-green-500/20 bg-green-500/10 text-green-400' };
-  }
-  return { label: 'WARN', classes: TONE_CLASSES.primary };
-}
-
-function packNoteFor(analysis) {
-  if (!state.showHoldouts) {
-    return 'Hidden holdouts are turned off.';
-  }
-
-  if (state.activeVariantTier === 'holdout') {
-    return `Hidden holdouts · ${analysis.pack.holdoutVariants.length} rows`;
-  }
-
-  return `Visible variants · ${analysis.pack.visibleVariants.length} rows`;
-}
-
-function clamp(value, min, max) {
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, value));
 }
 
-function pickFirstText(...values) {
-  return values.find((value) => typeof value === 'string' && value.trim())?.trim() ?? '';
-}
-
-function inferIntentMission(source, harness, analysis) {
-  const fromDescription = pickFirstText(source.description);
-  if (fromDescription) return fromDescription;
-  if (harness.agentName && harness.domain) {
-    return `${harness.agentName} should preserve the ${harness.domain} mission across wrapper changes.`;
-  }
-  if (harness.agentName) {
-    return `${harness.agentName} should preserve the intended mission across wrapper changes.`;
-  }
-  return `Current bundle implies a ${analysis.summary.label} system with ${analysis.features.scenarioCount} scenarios.`;
-}
-
-function countBenchmarkCases(benchmark) {
-  if (!isObject(benchmark)) return 0;
-  if (Array.isArray(benchmark.cases)) return benchmark.cases.length;
-  if (Array.isArray(benchmark.goldens)) return benchmark.goldens.length;
-  if (Array.isArray(benchmark.tests)) return benchmark.tests.length;
-  return 0;
-}
-
-function formatCount(value) {
-  return String(value).padStart(2, '0');
+function formatPackName(value) {
+  return String(value).replace(/_pack$/, '').replaceAll('_', ' ');
 }
 
 function isObject(value) {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function setText(id, value) {
+  const element = document.querySelector(`#${id}`);
+  if (element) element.textContent = value;
+}
+
+function observeReveals() {
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) entry.target.classList.add('is-visible');
+      });
+    },
+    { threshold: 0.14 },
+  );
+  document.querySelectorAll('.reveal').forEach((element) => observer.observe(element));
+}
+
+function scrollToHashTarget() {
+  if (!window.location.hash) return;
+  const scroll = () => {
+    const target = document.querySelector(window.location.hash);
+    if (!target) return;
+    const top = target.getBoundingClientRect().top + window.scrollY - 92;
+    window.scrollTo({ top, left: 0 });
+  };
+  window.requestAnimationFrame(scroll);
+  window.setTimeout(scroll, 200);
+  window.setTimeout(scroll, 600);
+}
+
+function installErrorMonitoring() {
+  window.addEventListener('error', (event) => {
+    trackEvent('client_error', {
+      message: event.message,
+      source: event.filename,
+      line: event.lineno,
+    });
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    trackEvent('unhandled_rejection', {
+      message: String(event.reason?.message ?? event.reason ?? 'unknown rejection'),
+    });
+  });
 }
 
 function escapeHtml(value) {
@@ -1755,12 +1006,4 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
-}
-
-function slugify(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/-{2,}/g, '-');
 }
