@@ -1,6 +1,6 @@
-import { methodNotAllowed, serverError, unauthorized } from '../_http.js';
+import { badRequest, methodNotAllowed, serverError, unauthorized } from '../_http.js';
 import { readSessionContext } from '../_session.js';
-import { getReport } from '../_store.js';
+import { getRunnerJob } from '../_store.js';
 
 export default async function handler(request, response) {
   if (request.method !== 'GET') {
@@ -15,16 +15,22 @@ export default async function handler(request, response) {
       return;
     }
 
-    const report = await getReport({
-      id: request.query.id,
-      userId: session.user.id,
-    });
-    if (!report) {
-      response.status(404).json({ error: 'Report not found' });
+    const jobId = request.query?.id;
+    if (!jobId) {
+      badRequest(response, 'Job id is required');
       return;
     }
 
-    response.status(200).json(report.snapshot);
+    const job = await getRunnerJob({
+      jobId,
+      userId: session.user.id,
+    });
+    if (!job) {
+      response.status(404).json({ error: 'Job not found' });
+      return;
+    }
+
+    response.status(200).json(job);
   } catch (error) {
     serverError(response, error);
   }
