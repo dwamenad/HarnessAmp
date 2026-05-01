@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import sessionHandler from '../api/session.js';
-import createReportHandler from '../api/reports/index.js';
-import getReportHandler from '../api/reports/[id].js';
+import authHandler from '../api/auth.js';
+import reportsHandler from '../api/reports.js';
 import { analyzeBundle, createDemoBundle } from '../src/core/engine.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
 import { seedDevSession } from '../api/_store.js';
@@ -45,7 +44,7 @@ test('report writes require authentication', async () => {
   };
   const response = createMockResponse();
 
-  await createReportHandler(request, response);
+  await reportsHandler(request, response);
   assert.equal(response.statusCode, 401);
 });
 
@@ -58,7 +57,8 @@ test('dev-auth session endpoint returns a seeded user context', async () => {
   };
   const response = createMockResponse();
 
-  await sessionHandler(request, response);
+  request.query = { action: 'session' };
+  await authHandler(request, response);
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.user.login, 'dev-user');
   assert.ok(Array.isArray(response.body.workspaces));
@@ -97,7 +97,7 @@ test('server report save and load round-trips through the API handlers', async (
     },
   };
   const createResponse = createMockResponse();
-  await createReportHandler(createRequest, createResponse);
+  await reportsHandler(createRequest, createResponse);
 
   assert.equal(createResponse.statusCode, 200);
   assert.equal(createResponse.body.id, 'report_roundtrip');
@@ -108,7 +108,7 @@ test('server report save and load round-trips through the API handlers', async (
     query: { id: 'report_roundtrip' },
   };
   const getResponse = createMockResponse();
-  await getReportHandler(getRequest, getResponse);
+  await reportsHandler(getRequest, getResponse);
 
   assert.equal(getResponse.statusCode, 200);
   assert.equal(getResponse.body.id, 'report_roundtrip');
