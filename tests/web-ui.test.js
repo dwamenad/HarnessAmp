@@ -6,6 +6,7 @@ const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8'
 
 test('web demo exposes production demo controls', () => {
   [
+    'bundle-preset-select',
     'profile-select',
     'intensity-select',
     'custom-toggle',
@@ -34,10 +35,13 @@ test('web report exposes export and persistence actions', () => {
 test('web demo includes validation, docs, runner, and deploy sections', () => {
   [
     'schema-status-list',
+    'benchmark-contract-panel',
+    'benchmark-case-list',
     'Runner contract',
     'Docs /',
     'Static hosting ready',
     'validateHarnessBundle',
+    'validateBenchmarkPack',
     'validateRiskProfile',
     'validateDiagnosticSnapshot',
     'runHttpRunner',
