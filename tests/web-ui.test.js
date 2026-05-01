@@ -17,6 +17,9 @@ test('web demo exposes production demo controls', () => {
     'min-overall-score',
     'min-holdout-pass',
     'max-gap',
+    'workspace-select',
+    'project-select',
+    'runner-select',
   ].forEach((id) => assert.match(source, new RegExp(`id="${id}"`)));
 });
 
@@ -29,6 +32,9 @@ test('web report exposes export and persistence actions', () => {
     'report-id',
     'report-saved',
     'action-feedback',
+    'copy-report-link',
+    'report-path',
+    'case-results',
   ].forEach((id) => assert.match(source, new RegExp(`id="${id}"`)));
 });
 
@@ -38,13 +44,15 @@ test('web demo includes validation, docs, runner, and deploy sections', () => {
     'benchmark-contract-panel',
     'benchmark-case-list',
     'Runner contract',
-    'Docs /',
+    '/docs/install',
+    '/report/',
     'Static hosting ready',
     'validateHarnessBundle',
     'validateBenchmarkPack',
     'validateRiskProfile',
     'validateDiagnosticSnapshot',
     'runHttpRunner',
+    'browser-mvp-benchmark',
   ].forEach((text) => assert.match(source, new RegExp(text)));
 });
 

@@ -19,6 +19,13 @@ test('switches to the support benchmark preset and shows benchmark details', asy
   await expect(page.locator('#benchmark-case-list')).toContainText('Duplicate charge with complete evidence');
 });
 
+test('switches to the browser benchmark preset and shows browser cases', async ({ page }) => {
+  await page.locator('#bundle-preset-select').selectOption('browser-mvp-benchmark');
+  await expect(page.locator('#profile-select')).toBeDisabled();
+  await expect(page.locator('#benchmark-summary-meta')).toContainText('Browser MVP Robustness Benchmark');
+  await expect(page.locator('#benchmark-case-list')).toContainText('Checkout button on unexpected origin');
+});
+
 test('changes thresholds and persists them', async ({ page }) => {
   await page.locator('#min-overall-score').fill('90');
   await page.reload();
@@ -36,6 +43,17 @@ test('supports report export actions and local snapshot save', async ({ page }) 
   await page.locator('#report').scrollIntoViewIfNeeded();
   await page.getByRole('button', { name: 'Save report snapshot' }).click();
   await expect(page.locator('#action-feedback')).toContainText('Saved report snapshot');
+});
+
+test('docs routes resolve to the install section', async ({ page }) => {
+  await page.goto('/docs/install');
+  await expect(page.locator('#docs-install')).toContainText('Clone the repository');
+});
+
+test('report pathname routes still render the shared report section', async ({ page }) => {
+  await page.goto('/report/demo-shared');
+  await expect(page.locator('#report')).toBeVisible();
+  await expect(page.locator('#report')).toContainText('From pass rate to engineering control.');
 });
 
 test('renders mobile demo controls without hiding the primary action', async ({ page, isMobile }) => {
