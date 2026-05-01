@@ -1,15 +1,23 @@
 import Ajv2020 from 'ajv/dist/2020';
 import { analyzeBundle, createDemoBundle, safeJsonParse } from './core/engine.js';
+import { buildReportSnapshot as createReportSnapshot } from './shared/report-snapshot.js';
 import { MUTATION_PACKS } from './mutations/registry.js';
 import supportProfile from '../examples/risk-profiles/support-agent.json';
 import browserProfile from '../examples/risk-profiles/browser-agent.json';
 import quickstartBundle from '../examples/cli/quickstart-bundle.json';
 import observedRuns from '../examples/cli/observed-runs.json';
 import supportMvpBenchmarkPack from '../examples/benchmarks/support-mvp/benchmark-pack.json';
+import browserMvpBenchmarkPack from '../examples/benchmarks/browser-mvp/benchmark-pack.json';
 import harnessBundleSchema from '../docs/schemas/harness_bundle.schema.json';
 import riskProfileSchema from '../docs/schemas/risk_profile.schema.json';
 import diagnosticReportSchema from '../docs/schemas/diagnostic_report.schema.json';
 import benchmarkPackSchema from '../docs/schemas/benchmark_pack.schema.json';
+import docsInstall from '../docs/install.md?raw';
+import docsSchemas from '../docs/schemas.md?raw';
+import docsRunnerContract from '../docs/runner-contract.md?raw';
+import docsCiGates from '../docs/ci-gates.md?raw';
+import docsMutationPacks from '../docs/mutation-packs.md?raw';
+import docsBenchmarks from '../docs/benchmarks.md?raw';
 
 const riskProfiles = {
   'support-agent': {
@@ -57,6 +65,13 @@ const bundlePresets = {
     description: 'Loads the checked-in intent, contract, benchmark cases, and wrapper for the support release gate.',
     lockedProfileId: 'support-agent',
     bundle: supportMvpBenchmarkPack,
+  },
+  'browser-mvp-benchmark': {
+    label: 'Browser MVP benchmark pack',
+    type: 'benchmark',
+    description: 'Loads the browser-agent benchmark with origin, download, and cross-origin failure modes.',
+    lockedProfileId: 'browser-agent',
+    bundle: browserMvpBenchmarkPack,
   },
 };
 
@@ -118,7 +133,16 @@ const proofStats = [
   ['20+', 'deterministic mutations'],
   ['seeded', 'replayable runs'],
   ['pass/warn/block', 'CI status'],
-  ['real examples', 'repo-backed demo'],
+  ['2 benchmark lanes', 'support + browser'],
+];
+
+const docPages = [
+  { slug: 'install', id: 'docs-install', title: 'Install', body: docsInstall },
+  { slug: 'schemas', id: 'docs-schemas', title: 'Schemas', body: docsSchemas },
+  { slug: 'runner-contract', id: 'docs-runner-contract', title: 'Runner contract', body: docsRunnerContract },
+  { slug: 'ci-gates', id: 'docs-ci-gates', title: 'CI gates', body: docsCiGates },
+  { slug: 'mutation-packs', id: 'docs-mutation-packs', title: 'Mutation packs', body: docsMutationPacks },
+  { slug: 'benchmarks', id: 'docs-benchmarks', title: 'Benchmarks', body: docsBenchmarks },
 ];
 
 const workflow = [
@@ -168,11 +192,27 @@ const defaultState = {
   runnerEndpoint: '',
   runnerStatus: '',
   reportId: '',
+  reportPath: '',
   accountEmail: 'demo@harnessamp.local',
   workspaceName: 'Reliability Lab',
   projectName: 'Northstar Support Copilot',
   projectRole: 'owner',
   analyticsEnabled: true,
+  sessionStatus: 'loading',
+  selectedWorkspaceId: '',
+  selectedProjectId: '',
+  selectedRunnerId: '',
+  workspaceDraftName: 'Reliability Lab',
+  projectDraftName: 'Northstar Support Copilot',
+  runnerRegistrationName: 'Primary runner',
+  runnerRegistrationEndpoint: '',
+  runnerRegistrationSecret: '',
+  workspaceProjects: [],
+  projectReports: [],
+  projectRunners: [],
+  activeJobId: '',
+  activeJobStatus: '',
+  loadedServerReport: null,
   inputError: '',
   feedback: '',
   analysis: null,
@@ -181,33 +221,45 @@ const defaultState = {
 const state = loadState();
 const app = document.querySelector('#app');
 
-if (!state.useCustomInput) syncCustomEditorsToPreset();
-
 installErrorMonitoring();
-render();
-runDiagnosis();
+initializeApp().catch((error) => {
+  console.error(error);
+});
+
+async function initializeApp() {
+  if (!state.useCustomInput) syncCustomEditorsToPreset();
+  await refreshSession();
+  render();
+  runDiagnosis();
+  await hydrateRouteState();
+  window.addEventListener('hashchange', scrollToRouteTarget);
+}
 
 function render() {
   const preset = getSelectedBundlePreset();
   const profile = getSelectedRiskProfile(preset);
   const profileLocked = Boolean(preset.lockedProfileId);
+  const route = getRoute();
+  const isAuthed = state.sessionStatus === 'authenticated' && state.session?.user;
+  const activeReportPath = state.reportPath || (state.reportId ? reportPathFor(state.selectedProjectId, state.reportId) : '');
 
   app.innerHTML = `
     <div class="site-shell">
       <header class="topbar">
-        <a class="brand" href="#top" aria-label="HarnessAmp home">
+        <a class="brand" href="/" aria-label="HarnessAmp home">
           <span class="brand__mark">HA</span>
           <span><strong>HarnessAmp</strong><small>Robustness infrastructure</small></span>
         </a>
         <nav class="topbar__nav" aria-label="Primary navigation">
-          <a href="#demo">Demo</a>
-          <a href="#report">Report</a>
-          <a href="#packs">Packs</a>
-          <a href="#workspace">Workspace</a>
-          <a href="#docs-install">Docs</a>
-          <a href="#quickstart">Quickstart</a>
+          <a href="/" ${route.kind === 'home' ? 'aria-current="page"' : ''}>Product</a>
+          <a href="/app" ${route.kind === 'app' || route.kind === 'report' || route.kind === 'project-report' ? 'aria-current="page"' : ''}>App</a>
+          <a href="/docs/install" ${route.kind === 'docs' ? 'aria-current="page"' : ''}>Docs</a>
+          <a href="/app#report">Reports</a>
+          <a href="/app#packs">Packs</a>
         </nav>
-        <a class="nav-cta" href="#demo">Run demo</a>
+        ${isAuthed
+          ? `<button class="nav-cta nav-cta--button" id="logout-button" type="button">Log out</button>`
+          : `<a class="nav-cta" href="${escapeHtml(authStartHref())}">GitHub login</a>`}
       </header>
 
       <main id="top">
@@ -337,6 +389,7 @@ function render() {
             <div><span>Replay seed</span><strong id="report-seed">--</strong></div>
             <div><span>CI gate</span><strong class="danger" id="report-gate">--</strong></div>
             <div><span>Report id</span><strong id="report-id">--</strong></div>
+            <div><span>Shareable route</span><strong id="report-path">${activeReportPath ? escapeHtml(activeReportPath) : '--'}</strong></div>
             <div><span>Saved snapshot</span><strong id="report-saved">local</strong></div>
           </div>
           <div class="export-actions">
@@ -348,6 +401,7 @@ function render() {
             <button class="button button--secondary" id="save-report" type="button">Save report snapshot</button>
             <button class="button button--secondary" id="save-server-report" type="button">Save server report</button>
             <button class="button button--secondary" id="load-server-report" type="button">Load server report</button>
+            <button class="button button--secondary" id="copy-report-link" type="button">Copy report link</button>
             <span class="action-feedback" id="action-feedback">${escapeHtml(state.feedback)}</span>
           </div>
           <div class="variant-panel">
@@ -359,19 +413,68 @@ function render() {
               </table>
             </div>
           </div>
+          <div class="case-panel">
+            <h3>Case-level reporting</h3>
+            <div id="case-results" class="case-results"></div>
+          </div>
           <pre class="report-text" id="report-text"></pre>
         </section>
 
         <section id="workspace" class="section workspace-section reveal">
-          <div class="section__intro"><p class="eyebrow">Auth and workspaces</p><h2>Project context for team reports.</h2><p>This prototype records workspace identity with saved reports. In production, these fields map to an auth provider and database access rules.</p></div>
-          <div class="workspace-panel">
-            <label><span>Account email</span><input id="account-email" type="email" value="${escapeHtml(state.accountEmail)}" /></label>
-            <label><span>Workspace</span><input id="workspace-name" type="text" value="${escapeHtml(state.workspaceName)}" /></label>
-            <label><span>Project</span><input id="project-name" type="text" value="${escapeHtml(state.projectName)}" /></label>
-            <label><span>Role</span><select id="project-role">
-              ${['owner', 'maintainer', 'viewer'].map((role) => `<option value="${role}" ${role === state.projectRole ? 'selected' : ''}>${role}</option>`).join('')}
-            </select></label>
-            <label class="check-control"><input id="analytics-toggle" type="checkbox" ${state.analyticsEnabled ? 'checked' : ''} /><span>Allow local analytics events</span></label>
+          <div class="section__intro"><p class="eyebrow">Auth and workspaces</p><h2>Project context for team reports and runner jobs.</h2><p>Anonymous visitors can use the demo. Saving team reports, registering runners, and dispatching jobs requires GitHub auth and a selected project.</p></div>
+          <div class="workspace-grid">
+            <div class="workspace-panel workspace-panel--auth">
+              <h3>Session</h3>
+              ${isAuthed ? `
+                <div class="session-card">
+                  <strong>${escapeHtml(state.session.user.name)}</strong>
+                  <span>${escapeHtml(state.session.user.login)}</span>
+                  <small>${escapeHtml(state.session.user.email ?? 'no public email')}</small>
+                </div>
+                <label><span>Workspace</span><select id="workspace-select">${renderWorkspaceOptions()}</select></label>
+                <label><span>Project</span><select id="project-select">${renderProjectOptions()}</select></label>
+                <label><span>Project role</span><input id="project-role-display" type="text" value="${escapeHtml(activeProjectRole())}" disabled /></label>
+                <div class="inline-actions">
+                  <label><span>New workspace</span><input id="workspace-draft-name" type="text" value="${escapeHtml(state.workspaceDraftName)}" /></label>
+                  <button class="button button--secondary" id="create-workspace" type="button">Create workspace</button>
+                </div>
+                <div class="inline-actions">
+                  <label><span>New project</span><input id="project-draft-name" type="text" value="${escapeHtml(state.projectDraftName)}" /></label>
+                  <button class="button button--secondary" id="create-project" type="button">Create project</button>
+                </div>
+              ` : `
+                <div class="session-empty">
+                  <p>GitHub auth enables saved reports, project membership, runner registration, and cross-device report routes.</p>
+                  <a class="button button--primary" href="${escapeHtml(authStartHref())}">Sign in with GitHub</a>
+                </div>
+              `}
+              <label class="check-control"><input id="analytics-toggle" type="checkbox" ${state.analyticsEnabled ? 'checked' : ''} /><span>Allow client analytics events</span></label>
+            </div>
+            <div class="workspace-panel">
+              <h3>Runner control plane</h3>
+              ${isAuthed ? `
+                <label><span>Runner name</span><input id="runner-registration-name" type="text" value="${escapeHtml(state.runnerRegistrationName)}" /></label>
+                <label><span>Runner endpoint</span><input id="runner-registration-endpoint" type="url" value="${escapeHtml(state.runnerRegistrationEndpoint)}" placeholder="https://runner.example.com/harnessamp" /></label>
+                <label><span>Runner secret</span><input id="runner-registration-secret" type="password" value="${escapeHtml(state.runnerRegistrationSecret)}" placeholder="Optional bearer token" /></label>
+                <div class="inline-actions">
+                  <button class="button button--secondary" id="register-runner" type="button">Register runner</button>
+                  <button class="button button--secondary" id="dispatch-job" type="button">Dispatch job</button>
+                </div>
+                <label><span>Registered runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>
+                <p class="runner-state" id="job-state">${escapeHtml(state.activeJobStatus || 'No runner job dispatched')}</p>
+              ` : `
+                <p class="session-muted">Sign in to register project-scoped runners and dispatch async jobs.</p>
+              `}
+            </div>
+            <div class="workspace-panel">
+              <h3>Project reports</h3>
+              ${isAuthed ? `
+                <p class="session-muted">Saved reports live under the selected project and open at pathname routes.</p>
+                <div id="project-report-list" class="project-report-list">${renderProjectReportList()}</div>
+              ` : `
+                <p class="session-muted">Anonymous mode keeps reports in the browser only.</p>
+              `}
+            </div>
           </div>
         </section>
 
@@ -412,11 +515,12 @@ dist/assets/*</pre>
         </section>
 
         <section class="section artifacts reveal">
-          <div class="section__intro"><p class="eyebrow">Real proof artifacts</p><h2>Embedded from repo examples.</h2><p>The demo uses examples/cli/quickstart-bundle.json, examples/cli/observed-runs.json, examples/benchmarks/support-mvp/benchmark-pack.json, and the checked-in risk profile files.</p></div>
+          <div class="section__intro"><p class="eyebrow">Real proof artifacts</p><h2>Embedded from repo examples.</h2><p>The demo uses examples/cli/quickstart-bundle.json, examples/cli/observed-runs.json, examples/benchmarks/support-mvp/benchmark-pack.json, examples/benchmarks/browser-mvp/benchmark-pack.json, and the checked-in risk profile files.</p></div>
           <div class="artifact-actions">
             <button class="button button--secondary" id="download-example-bundle" type="button">Download quickstart bundle</button>
             <button class="button button--secondary" id="download-example-runs" type="button">Download observed runs</button>
             <button class="button button--secondary" id="download-example-benchmark" type="button">Download benchmark pack</button>
+            <button class="button button--secondary" id="download-browser-benchmark" type="button">Download browser benchmark</button>
             <button class="button button--secondary" id="download-risk-profile" type="button">Download risk profile</button>
             <button class="button button--secondary" id="download-ci-yaml" type="button">Download CI YAML</button>
           </div>
@@ -424,6 +528,7 @@ dist/assets/*</pre>
             <pre>${escapeHtml(JSON.stringify(quickstartBundle, null, 2).slice(0, 900))}</pre>
             <pre>${escapeHtml(JSON.stringify(observedRuns, null, 2))}</pre>
             <pre>${escapeHtml(JSON.stringify(supportMvpBenchmarkPack, null, 2).slice(0, 1500))}</pre>
+            <pre>${escapeHtml(JSON.stringify(browserMvpBenchmarkPack, null, 2).slice(0, 1500))}</pre>
           </div>
         </section>
 
@@ -438,28 +543,20 @@ dist/assets/*</pre>
 
   bindEvents();
   observeReveals();
-  scrollToHashTarget();
+  scrollToRouteTarget();
 }
 
 function renderDocsSections() {
-  const docs = [
-    ['docs-install', 'Install', 'Clone the repo, install dependencies, and run the first diagnosis from the CLI.', 'npm install\nnpm run diagnose -- examples/cli/quickstart-bundle.json'],
-    ['docs-schemas', 'Schemas', 'Validate harness bundles, benchmark packs, risk profiles, mutation registries, and diagnostic reports with the checked-in JSON schemas.', 'docs/schemas/harness_bundle.schema.json\ndocs/schemas/benchmark_pack.schema.json\ndocs/schemas/risk_profile.schema.json\ndocs/schemas/diagnostic_report.schema.json'],
-    ['docs-runner-contract', 'Runner contract', 'Implement a small adapter that accepts variants and returns observed outcomes without changing your agent framework.', 'POST /runner\n{ pack, profile, thresholds }\n-> { observations: [...] }'],
-    ['docs-ci-gates', 'CI gates', 'Block releases when overall score, holdout pass rate, or robustness gap crosses your thresholds.', 'npm run release:gate -- bundle.json observed-runs.json --write-md artifacts/gate.md'],
-    ['docs-mutation-packs', 'Mutation packs', 'Browse deterministic packs for prompt integrity, tool payloads, permissions, network sinks, context, sandbox boundaries, and multimodal inputs.', MUTATION_PACKS.join('\n')],
-  ];
-
-  return docs.map(([id, title, detail, example]) => `
-    <section id="${id}" class="section docs-section reveal">
-      <div class="section__intro"><p class="eyebrow">Docs / ${title}</p><h2>${title}</h2><p>${detail}</p></div>
-      <pre>${escapeHtml(example)}</pre>
+  return docPages.map((page) => `
+    <section id="${page.id}" class="section docs-section reveal">
+      <div class="section__intro"><p class="eyebrow">Docs / ${page.title}</p><h2>${page.title}</h2><p>Route: /docs/${page.slug}</p></div>
+      <pre>${escapeHtml(page.body.trim())}</pre>
     </section>
   `).join('');
 }
 
 function bindEvents() {
-  document.querySelector('#bundle-preset-select').addEventListener('change', (event) => {
+  bindIfPresent('#bundle-preset-select', 'change', (event) => {
     state.bundlePresetId = event.target.value;
     const preset = getSelectedBundlePreset();
     if (preset.lockedProfileId) state.profileId = preset.lockedProfileId;
@@ -468,68 +565,109 @@ function bindEvents() {
     render();
     runDiagnosis();
   });
-  document.querySelector('#profile-select').addEventListener('change', (event) => {
+  bindIfPresent('#profile-select', 'change', (event) => {
     state.profileId = event.target.value;
     if (!state.useCustomInput) syncCustomEditorsToPreset();
     persistState();
     runDiagnosis();
   });
-  document.querySelector('#intensity-select').addEventListener('change', (event) => {
+  bindIfPresent('#intensity-select', 'change', (event) => {
     state.intensity = Number(event.target.value);
     persistState();
     runDiagnosis();
   });
-  document.querySelector('#observed-toggle').addEventListener('change', (event) => {
+  bindIfPresent('#observed-toggle', 'change', (event) => {
     state.useObservedRuns = event.target.checked;
     persistState();
     runDiagnosis();
   });
-  document.querySelector('#custom-toggle').addEventListener('change', (event) => {
+  bindIfPresent('#custom-toggle', 'change', (event) => {
     if (event.target.checked) syncCustomEditorsToPreset();
     state.useCustomInput = event.target.checked;
     persistState();
     runDiagnosis();
   });
-  document.querySelector('#bundle-json').addEventListener('input', (event) => {
+  bindIfPresent('#bundle-json', 'input', (event) => {
     state.customBundleText = event.target.value;
     persistState();
   });
-  document.querySelector('#runs-json').addEventListener('input', (event) => {
+  bindIfPresent('#runs-json', 'input', (event) => {
     state.customRunsText = event.target.value;
     persistState();
   });
-  document.querySelector('#bundle-file').addEventListener('change', (event) => readJsonFile(event, 'bundle'));
-  document.querySelector('#runs-file').addEventListener('change', (event) => readJsonFile(event, 'runs'));
-  document.querySelector('#min-overall-score').addEventListener('input', (event) => updateThreshold('minOverallScore', event.target.value));
-  document.querySelector('#min-holdout-pass').addEventListener('input', (event) => updateThreshold('minHoldoutPass', event.target.value));
-  document.querySelector('#max-gap').addEventListener('input', (event) => updateThreshold('maxGap', event.target.value));
-  document.querySelector('#runner-endpoint').addEventListener('input', (event) => {
+  bindIfPresent('#bundle-file', 'change', (event) => readJsonFile(event, 'bundle'));
+  bindIfPresent('#runs-file', 'change', (event) => readJsonFile(event, 'runs'));
+  bindIfPresent('#min-overall-score', 'input', (event) => updateThreshold('minOverallScore', event.target.value));
+  bindIfPresent('#min-holdout-pass', 'input', (event) => updateThreshold('minHoldoutPass', event.target.value));
+  bindIfPresent('#max-gap', 'input', (event) => updateThreshold('maxGap', event.target.value));
+  bindIfPresent('#runner-endpoint', 'input', (event) => {
     state.runnerEndpoint = event.target.value;
     persistState();
   });
-  document.querySelector('#account-email').addEventListener('input', (event) => updateWorkspaceField('accountEmail', event.target.value));
-  document.querySelector('#workspace-name').addEventListener('input', (event) => updateWorkspaceField('workspaceName', event.target.value));
-  document.querySelector('#project-name').addEventListener('input', (event) => updateWorkspaceField('projectName', event.target.value));
-  document.querySelector('#project-role').addEventListener('change', (event) => updateWorkspaceField('projectRole', event.target.value));
-  document.querySelector('#analytics-toggle').addEventListener('change', (event) => updateWorkspaceField('analyticsEnabled', event.target.checked));
-  document.querySelector('#run-demo').addEventListener('click', runDiagnosis);
-  document.querySelector('#run-http-runner').addEventListener('click', runHttpRunner);
-  document.querySelector('#copy-report').addEventListener('click', () => copyText(state.analysis?.reportText ?? '', 'Copied report'));
-  document.querySelector('#download-report').addEventListener('click', () => downloadText('harnessamp-report.md', state.analysis?.reportText ?? '', 'Downloaded report'));
-  document.querySelector('#download-report-json').addEventListener('click', () => downloadText('harnessamp-report.json', JSON.stringify(buildReportSnapshot(), null, 2), 'Downloaded report JSON'));
-  document.querySelector('#download-pack').addEventListener('click', () => downloadText('harnessamp-mutation-pack.json', JSON.stringify(state.analysis?.exportPack ?? {}, null, 2), 'Downloaded mutation pack'));
-  document.querySelector('#copy-ci').addEventListener('click', () => copyText(githubActionsSnippet, 'Copied CI snippet'));
-  document.querySelector('#save-report').addEventListener('click', () => saveReportSnapshot('Saved report snapshot'));
-  document.querySelector('#save-server-report').addEventListener('click', saveServerReport);
-  document.querySelector('#load-server-report').addEventListener('click', loadServerReport);
-  document.querySelector('#download-example-bundle').addEventListener('click', () => downloadText('quickstart-bundle.json', JSON.stringify(quickstartBundle, null, 2), 'Downloaded bundle'));
-  document.querySelector('#download-example-runs').addEventListener('click', () => downloadText('observed-runs.json', JSON.stringify(observedRuns, null, 2), 'Downloaded runs'));
-  document.querySelector('#download-example-benchmark').addEventListener('click', () => downloadText('support-mvp-benchmark-pack.json', JSON.stringify(supportMvpBenchmarkPack, null, 2), 'Downloaded benchmark'));
-  document.querySelector('#download-risk-profile').addEventListener('click', () => {
+  bindIfPresent('#analytics-toggle', 'change', (event) => updateWorkspaceField('analyticsEnabled', event.target.checked));
+  bindIfPresent('#run-demo', 'click', runDiagnosis);
+  bindIfPresent('#run-http-runner', 'click', runHttpRunner);
+  bindIfPresent('#copy-report', 'click', () => copyText(activeReportMarkdown(), 'Copied report'));
+  bindIfPresent('#download-report', 'click', () => downloadText('harnessamp-report.md', activeReportMarkdown(), 'Downloaded report'));
+  bindIfPresent('#download-report-json', 'click', () => downloadText('harnessamp-report.json', JSON.stringify(activeReportSnapshot(), null, 2), 'Downloaded report JSON'));
+  bindIfPresent('#download-pack', 'click', () => downloadText('harnessamp-mutation-pack.json', JSON.stringify(state.analysis?.exportPack ?? {}, null, 2), 'Downloaded mutation pack'));
+  bindIfPresent('#copy-ci', 'click', () => copyText(githubActionsSnippet, 'Copied CI snippet'));
+  bindIfPresent('#save-report', 'click', () => saveReportSnapshot('Saved report snapshot'));
+  bindIfPresent('#save-server-report', 'click', saveServerReport);
+  bindIfPresent('#load-server-report', 'click', loadServerReport);
+  bindIfPresent('#copy-report-link', 'click', () => copyText(reportUrl(), 'Copied report link'));
+  bindIfPresent('#download-example-bundle', 'click', () => downloadText('quickstart-bundle.json', JSON.stringify(quickstartBundle, null, 2), 'Downloaded bundle'));
+  bindIfPresent('#download-example-runs', 'click', () => downloadText('observed-runs.json', JSON.stringify(observedRuns, null, 2), 'Downloaded runs'));
+  bindIfPresent('#download-example-benchmark', 'click', () => downloadText('support-mvp-benchmark-pack.json', JSON.stringify(supportMvpBenchmarkPack, null, 2), 'Downloaded benchmark'));
+  bindIfPresent('#download-browser-benchmark', 'click', () => downloadText('browser-mvp-benchmark-pack.json', JSON.stringify(browserMvpBenchmarkPack, null, 2), 'Downloaded browser benchmark'));
+  bindIfPresent('#download-risk-profile', 'click', () => {
     const profile = getSelectedRiskProfile();
     downloadText(`${profile.id}.risk-profile.json`, JSON.stringify(profile.profile, null, 2), 'Downloaded risk profile');
   });
-  document.querySelector('#download-ci-yaml').addEventListener('click', () => downloadText('harnessamp-release-gate.yml', githubActionsSnippet, 'Downloaded CI YAML'));
+  bindIfPresent('#download-ci-yaml', 'click', () => downloadText('harnessamp-release-gate.yml', githubActionsSnippet, 'Downloaded CI YAML'));
+  bindIfPresent('#logout-button', 'click', logout);
+  bindIfPresent('#workspace-select', 'change', async (event) => {
+    state.selectedWorkspaceId = event.target.value;
+    persistState();
+    await refreshProjectsForWorkspace();
+    render();
+    runDiagnosis();
+  });
+  bindIfPresent('#project-select', 'change', async (event) => {
+    state.selectedProjectId = event.target.value;
+    persistState();
+    await refreshProjectResources();
+    renderProjectResources();
+    if (state.analysis) updateReportContextOnly();
+  });
+  bindIfPresent('#workspace-draft-name', 'input', (event) => {
+    state.workspaceDraftName = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#project-draft-name', 'input', (event) => {
+    state.projectDraftName = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#create-workspace', 'click', createWorkspaceFromDraft);
+  bindIfPresent('#create-project', 'click', createProjectFromDraft);
+  bindIfPresent('#runner-registration-name', 'input', (event) => {
+    state.runnerRegistrationName = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#runner-registration-endpoint', 'input', (event) => {
+    state.runnerRegistrationEndpoint = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#runner-registration-secret', 'input', (event) => {
+    state.runnerRegistrationSecret = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#register-runner', 'click', registerRunner);
+  bindIfPresent('#runner-select', 'change', (event) => {
+    state.selectedRunnerId = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#dispatch-job', 'click', dispatchProjectJob);
 }
 
 function runDiagnosis() {
@@ -652,7 +790,10 @@ function updateReport(context) {
   const seed = replaySeed(analysis);
   const failure = weakest?.expectedFailure ?? weakest?.label ?? 'wrapper_brittleness';
   const reportId = state.reportId || createReportId(analysis);
+  const snapshot = buildReportSnapshot(analysis, sourceBundle);
   state.reportId = reportId;
+  state.reportPath = reportPathFor(state.selectedProjectId, reportId);
+  state.loadedServerReport = null;
 
   setText('hero-run-label', `diagnosis/${selected.profile.agentDomain}`);
   setText('hero-gate', gate);
@@ -674,9 +815,11 @@ function updateReport(context) {
   setText('report-seed', seed);
   setText('report-gate', gate);
   setText('report-id', reportId);
+  setText('report-path', state.reportPath || '--');
   setText('report-saved', getSavedReports()[reportId] ? 'saved' : 'unsaved');
   setText('report-text', analysis.reportText);
   renderVariantTable(analysis);
+  renderCaseResults(snapshot.caseResults ?? []);
   renderSchemaStatus(sourceBundle, selected.profile, analysis, bundleType);
   renderBenchmarkPanels(sourceBundle, analysis, preset);
   persistState();
@@ -686,7 +829,7 @@ function updateReport(context) {
   `).join('');
 
   document.querySelector('#hero-bars').innerHTML = analysis.familyStats.slice(0, 8).map((family) => {
-    const height = Math.max(18, Math.round(100 - family.passRate));
+    const height = Math.max(18, Math.round(100 - family.holdoutRate));
     return `<i style="--h: ${height}%"></i>`;
   }).join('');
 }
@@ -762,8 +905,8 @@ function renderVariantTable(analysis) {
 
   document.querySelector('#variant-table-body').innerHTML = rows.map(({ outcome, variant }) => `
     <tr>
-      <td>${escapeHtml(variant?.mutationId ?? outcome.variantId)}</td>
-      <td>${escapeHtml(variant?.surface ?? variant?.family ?? 'wrapper')}</td>
+      <td>${escapeHtml(variant?.title ?? outcome.variantId)}</td>
+      <td>${escapeHtml(variant?.familyLabel ?? variant?.familyId ?? 'wrapper')}</td>
       <td class="${outcome.passed ? 'warn' : 'danger'}">${outcome.passed ? 'WARN' : 'FAIL'}</td>
       <td>${Math.round(outcome.score)}</td>
       <td>${Math.round(outcome.latencyMs ?? 0)}ms</td>
@@ -779,7 +922,7 @@ function renderSchemaStatus(bundle, profile, analysis, bundleType = detectBundle
     [inputSchemaLabel, inputSchemaResult],
     ['Observed runs', validateObservedRuns(state.useObservedRuns ? parseObservedRunsForValidation() : [])],
     ['Risk profile', validateRiskProfile(profile)],
-    ['Diagnostic report', validateDiagnosticSnapshot(buildReportSnapshot(analysis))],
+    ['Diagnostic report', validateDiagnosticSnapshot(buildReportSnapshot(analysis, bundle))],
   ];
 
   document.querySelector('#schema-status-list').innerHTML = checks.map(([label, result]) => `
@@ -797,7 +940,7 @@ function renderBenchmarkPanels(sourceBundle, analysis) {
   if (!contractPanel || !caseList) return;
 
   if (!isBenchmarkPackShape(sourceBundle)) {
-    setText('benchmark-summary-meta', 'Select the Support MVP benchmark preset to inspect intent, contract, and release gates.');
+    setText('benchmark-summary-meta', 'Select the support or browser benchmark preset to inspect intent, contract, and release gates.');
     setText('benchmark-cases-meta', 'Cases appear when the active bundle is a benchmark pack.');
     contractPanel.innerHTML = `
       <article class="benchmark-empty">
@@ -916,12 +1059,12 @@ function parseObservedRunsForValidation() {
 }
 
 function weakestFamily(analysis) {
-  const family = [...analysis.familyStats].sort((a, b) => a.passRate - b.passRate)[0];
+  const family = [...analysis.familyStats].sort((a, b) => a.holdoutRate - b.holdoutRate || b.gap - a.gap)[0];
   if (!family) return null;
-  const variant = analysis.pack.variants.find((item) => item.family === family.family);
+  const variant = analysis.pack.variants.find((item) => item.familyId === family.id);
   return {
-    label: formatPackName(family.family ?? variant?.family ?? 'wrapper surface'),
-    expectedFailure: variant?.expectedFailure,
+    label: family.label ?? formatPackName(variant?.familyId ?? 'wrapper surface'),
+    expectedFailure: family.bottleneck,
   };
 }
 
@@ -942,50 +1085,25 @@ function replaySeed(analysis) {
   return seed ? String(seed) : `ha-${analysis.pack.variants.length}-${state.intensity}`;
 }
 
-function buildReportSnapshot(analysis = state.analysis) {
+function buildReportSnapshot(analysis = state.analysis, sourceBundle = activeSourceBundle()) {
   if (!analysis) return {};
   const preset = getSelectedBundlePreset();
   const profile = getSelectedRiskProfile(preset);
-  return {
-    version: 'web-demo-1',
-    id: state.reportId || createReportId(analysis),
-    generatedAt: new Date().toISOString(),
+  return createReportSnapshot({
+    analysis,
+    reportId: state.reportId || createReportId(analysis),
     workspace: workspacePayload(),
-    suite: {
-      project: analysis.bundle.project,
-      profile: profile.id,
-      preset: state.bundlePresetId,
-      thresholds: state.thresholds,
-    },
-    baselineRuns: analysis.outcomes.filter((outcome) => outcome.tier === 'visible'),
-    mutationRuns: analysis.outcomes,
-    deltas: analysis.familyStats.map((family) => ({
-      deltaType: ['pass_rate'],
-      mutationId: family.family,
-      explanation: `${formatPackName(family.family)} pass rate is ${Math.round(family.passRate)}%.`,
-      severity: family.passRate < 60 ? 'high' : family.passRate < 80 ? 'medium' : 'low',
-    })),
-    findings: analysis.recommendations.map((item, index) => ({
-      id: `finding-${index + 1}`,
-      mutationId: item.family ?? 'wrapper',
-      failureTypes: [{ id: item.title ?? 'wrapper_brittleness' }],
-      highestSeverity: index === 0 ? 'high' : 'medium',
-      recommendation: item.detail ?? item.title ?? 'Review wrapper controls.',
-    })),
-    summary: {
-      originalPassRate: analysis.summary.visiblePassRate,
-      mutatedPassRate: analysis.summary.holdoutPassRate,
-      robustnessDrop: analysis.summary.gap,
-      verdict: gateFor(analysis.summary).toLowerCase() === 'block' ? 'block' : gateFor(analysis.summary).toLowerCase(),
-      overallScore: analysis.summary.overallScore,
-    },
-    markdown: analysis.reportText,
-  };
+    projectId: state.selectedProjectId || null,
+    profileId: profile.id,
+    presetId: state.bundlePresetId,
+    thresholds: state.thresholds,
+    sourceBundle,
+  });
 }
 
 function saveReportSnapshot(message = 'Saved') {
   if (!state.analysis) return;
-  const snapshot = buildReportSnapshot();
+  const snapshot = activeReportSnapshot();
   const reports = getSavedReports();
   reports[snapshot.id] = snapshot;
   localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(reports));
@@ -995,20 +1113,32 @@ function saveReportSnapshot(message = 'Saved') {
 
 async function saveServerReport() {
   if (!state.analysis) return;
-  const snapshot = buildReportSnapshot();
+  if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId) {
+    saveReportSnapshot('Saved locally');
+    showFeedback('Sign in and choose a project to save to the server');
+    return;
+  }
+  const snapshot = activeReportSnapshot();
   try {
     const response = await fetch('/api/reports', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(snapshot),
+      body: JSON.stringify({
+        projectId: state.selectedProjectId,
+        snapshot,
+      }),
     });
     if (!response.ok) throw new Error(`Save failed with HTTP ${response.status}`);
     const payload = await response.json();
     state.reportId = payload.id ?? snapshot.id;
+    state.reportPath = reportPathFor(state.selectedProjectId, state.reportId);
     setText('report-id', state.reportId);
+    setText('report-path', state.reportPath);
     setText('report-saved', payload.storage ?? 'server');
     showFeedback('Saved server report');
     persistState();
+    await refreshProjectResources();
+    renderProjectResources();
   } catch (error) {
     showFeedback(error.message);
     saveReportSnapshot('Saved locally');
@@ -1024,15 +1154,13 @@ async function loadServerReport() {
     const response = await fetch(`/api/reports/${encodeURIComponent(state.reportId)}`);
     if (!response.ok) throw new Error(`Load failed with HTTP ${response.status}`);
     const payload = await response.json();
-    setText('report-text', payload.markdown ?? JSON.stringify(payload, null, 2));
-    setText('report-saved', 'server');
-    showFeedback('Loaded server report');
+    applyLoadedSnapshot(payload, {
+      path: reportPathFor(state.selectedProjectId, payload.id ?? state.reportId),
+    });
   } catch (error) {
     const local = getSavedReports()[state.reportId];
     if (local) {
-      setText('report-text', local.markdown ?? JSON.stringify(local, null, 2));
-      setText('report-saved', 'local');
-      showFeedback('Loaded local report');
+      applyLoadedSnapshot(local, { localOnly: true });
       return;
     }
     showFeedback(error.message);
@@ -1054,11 +1182,15 @@ function updateWorkspaceField(key, value) {
 }
 
 function workspacePayload() {
+  const selectedWorkspace = currentWorkspace();
+  const selectedProject = currentProject();
   return {
-    accountEmail: state.accountEmail,
-    workspaceName: state.workspaceName,
-    projectName: state.projectName,
-    projectRole: state.projectRole,
+    accountEmail: state.session?.user?.email ?? state.accountEmail,
+    workspaceName: selectedWorkspace?.name ?? state.workspaceName,
+    workspaceId: selectedWorkspace?.id ?? state.selectedWorkspaceId ?? null,
+    projectName: selectedProject?.name ?? state.projectName,
+    projectId: selectedProject?.id ?? state.selectedProjectId ?? null,
+    projectRole: selectedProject?.role ?? state.projectRole,
   };
 }
 
@@ -1096,6 +1228,493 @@ function createReportId(analysis) {
     hash = (hash * 31 + source.charCodeAt(index)) >>> 0;
   }
   return `ha-${hash.toString(16)}`;
+}
+
+function activeSourceBundle() {
+  if (state.useCustomInput) {
+    return safeJsonParse(state.customBundleText).value ?? {};
+  }
+  const preset = getSelectedBundlePreset();
+  const profile = getSelectedRiskProfile(preset);
+  return resolvePresetBundle(preset, profile);
+}
+
+function activeReportSnapshot() {
+  return state.loadedServerReport ?? buildReportSnapshot(state.analysis, activeSourceBundle());
+}
+
+function activeReportMarkdown() {
+  return activeReportSnapshot()?.markdown ?? state.analysis?.reportText ?? '';
+}
+
+function reportPathFor(projectId, reportId) {
+  if (!reportId) return '';
+  return projectId
+    ? `/projects/${encodeURIComponent(projectId)}/reports/${encodeURIComponent(reportId)}`
+    : `/report/${encodeURIComponent(reportId)}`;
+}
+
+function reportUrl() {
+  const path = state.reportPath || reportPathFor(state.selectedProjectId, state.reportId);
+  return path ? new URL(path, window.location.origin).toString() : window.location.href;
+}
+
+function applyLoadedSnapshot(snapshot, options = {}) {
+  if (!snapshot) return;
+  state.loadedServerReport = snapshot;
+  state.reportId = snapshot.id ?? state.reportId;
+  state.reportPath = options.path ?? reportPathFor(state.selectedProjectId, state.reportId);
+  setText('report-baseline', `${Math.round(snapshot.summary?.originalPassRate ?? 0)}% pass`);
+  setText('report-mutated', `${Math.round(snapshot.summary?.mutatedPassRate ?? 0)}% pass`);
+  setText('report-drop', `${Math.round(snapshot.summary?.robustnessDrop ?? 0)}%`);
+  setText('report-surface', snapshot.deltas?.[0]?.mutationId ?? 'stable');
+  setText('report-failure', snapshot.findings?.[0]?.failureTypes?.[0]?.id ?? 'wrapper_brittleness');
+  setText('report-control', snapshot.findings?.[0]?.recommendation ?? 'Review controls');
+  setText('report-seed', snapshot.mutationRuns?.[0]?.variantId ?? '--');
+  setText('report-gate', String(snapshot.summary?.verdict ?? 'warn').toUpperCase());
+  setText('report-id', state.reportId ?? '--');
+  setText('report-path', state.reportPath || '--');
+  setText('report-saved', options.localOnly ? 'local' : 'server');
+  setText('report-text', snapshot.markdown ?? JSON.stringify(snapshot, null, 2));
+  renderCaseResults(snapshot.caseResults ?? []);
+  renderSnapshotVariantTable(snapshot);
+  showFeedback(options.localOnly ? 'Loaded local report' : 'Loaded server report');
+  persistState();
+}
+
+function renderSnapshotVariantTable(snapshot) {
+  const runs = Array.isArray(snapshot.mutationRuns) ? snapshot.mutationRuns : [];
+  document.querySelector('#variant-table-body').innerHTML = runs
+    .filter((outcome) => !outcome.passed || (outcome.score ?? 100) < 80)
+    .slice(0, 10)
+    .map((outcome) => `
+      <tr>
+        <td>${escapeHtml(outcome.variantId ?? 'variant')}</td>
+        <td>${escapeHtml(outcome.familyId ?? outcome.tier ?? 'wrapper')}</td>
+        <td class="${outcome.passed ? 'warn' : 'danger'}">${outcome.passed ? 'WARN' : 'FAIL'}</td>
+        <td>${Math.round(outcome.score ?? 0)}</td>
+        <td>${Math.round(outcome.latencyMs ?? 0)}ms</td>
+        <td>${escapeHtml(outcome.source ?? 'observed')}</td>
+      </tr>
+    `).join('');
+}
+
+function renderCaseResults(caseResults) {
+  const container = document.querySelector('#case-results');
+  if (!container) return;
+  if (!Array.isArray(caseResults) || caseResults.length === 0) {
+    container.innerHTML = `
+      <article class="case-card case-card--empty">
+        <h4>No case-level data</h4>
+        <p>Case-level results appear for benchmark presets and saved benchmark reports.</p>
+      </article>
+    `;
+    return;
+  }
+
+  container.innerHTML = caseResults.map((item) => `
+    <article class="case-card">
+      <div class="case-card__header">
+        <span>${escapeHtml(item.id)}</span>
+        <strong class="case-status case-status--${escapeHtml(item.status)}">${escapeHtml(item.status)}</strong>
+      </div>
+      <h4>${escapeHtml(item.title)}</h4>
+      <p>${escapeHtml(item.input ?? '')}</p>
+      <div class="case-card__meta">
+        <span>pass ${item.passRate == null ? '--' : `${item.passRate}%`}</span>
+        <span>runs ${escapeHtml(item.observationCount ?? 0)}</span>
+      </div>
+      ${renderTagRow('Evidence', item.evidenceUsed)}
+      ${renderTagRow('Forbidden', item.forbiddenActions)}
+      ${renderTagRow('Scorers', item.scorerFields)}
+      <div class="case-breakdown">
+        ${(item.mutationBreakdown ?? []).map((mutation) => `
+          <div>
+            <strong>${escapeHtml(mutation.mutationId)}</strong>
+            <span>${escapeHtml(mutation.passed)} pass / ${escapeHtml(mutation.failed)} fail</span>
+          </div>
+        `).join('')}
+      </div>
+    </article>
+  `).join('');
+}
+
+function renderProjectResources() {
+  const projectList = document.querySelector('#project-report-list');
+  if (projectList) projectList.innerHTML = renderProjectReportList();
+
+  const runnerSelect = document.querySelector('#runner-select');
+  if (runnerSelect) runnerSelect.innerHTML = renderRunnerOptions();
+
+  const projectRole = document.querySelector('#project-role-display');
+  if (projectRole) projectRole.value = activeProjectRole();
+}
+
+function renderWorkspaceOptions() {
+  const workspaces = state.session?.workspaces ?? [];
+  return workspaces.map((workspace) => `
+    <option value="${workspace.id}" ${workspace.id === state.selectedWorkspaceId ? 'selected' : ''}>${escapeHtml(workspace.name)}</option>
+  `).join('');
+}
+
+function renderProjectOptions() {
+  return state.workspaceProjects.map((project) => `
+    <option value="${project.id}" ${project.id === state.selectedProjectId ? 'selected' : ''}>${escapeHtml(project.name)}</option>
+  `).join('');
+}
+
+function renderRunnerOptions() {
+  if (!state.projectRunners.length) {
+    return '<option value="">No registered runners</option>';
+  }
+  return state.projectRunners.map((runner) => `
+    <option value="${runner.id}" ${runner.id === state.selectedRunnerId ? 'selected' : ''}>${escapeHtml(runner.name)} · ${escapeHtml(runner.status)}</option>
+  `).join('');
+}
+
+function renderProjectReportList() {
+  if (!state.projectReports.length) {
+    return '<p class="session-muted">No saved project reports yet.</p>';
+  }
+
+  return state.projectReports.map((report) => `
+    <a class="project-report-item" href="${escapeHtml(reportPathFor(state.selectedProjectId, report.id))}">
+      <strong>${escapeHtml(report.id)}</strong>
+      <span>${escapeHtml(String(report.gate).toUpperCase())}</span>
+      <small>${escapeHtml(report.createdAt)}</small>
+    </a>
+  `).join('');
+}
+
+function activeProjectRole() {
+  return currentProject()?.role ?? state.projectRole ?? 'viewer';
+}
+
+function currentWorkspace() {
+  return (state.session?.workspaces ?? []).find((workspace) => workspace.id === state.selectedWorkspaceId) ?? null;
+}
+
+function currentProject() {
+  return state.workspaceProjects.find((project) => project.id === state.selectedProjectId) ?? null;
+}
+
+async function refreshSession() {
+  state.sessionStatus = 'loading';
+  try {
+    const response = await fetch('/api/session', { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    state.session = payload;
+    state.sessionStatus = 'authenticated';
+    state.selectedWorkspaceId = payload.currentWorkspaceId || payload.workspaces?.[0]?.id || state.selectedWorkspaceId;
+    state.accountEmail = payload.user.email ?? state.accountEmail;
+    await refreshProjectsForWorkspace(payload.defaultProjectId);
+  } catch {
+    state.session = null;
+    state.sessionStatus = 'anonymous';
+    state.workspaceProjects = [];
+    state.projectReports = [];
+    state.projectRunners = [];
+    state.selectedWorkspaceId = '';
+    state.selectedProjectId = '';
+    state.selectedRunnerId = '';
+  }
+  persistState();
+}
+
+async function refreshProjectsForWorkspace(preferredProjectId = null) {
+  if (state.sessionStatus !== 'authenticated' || !state.selectedWorkspaceId) return;
+  try {
+    const payload = await fetchJson(`/api/workspaces/${encodeURIComponent(state.selectedWorkspaceId)}/projects`);
+    state.workspaceProjects = payload.projects ?? [];
+    const selected = state.workspaceProjects.find((project) => project.id === state.selectedProjectId)
+      ? state.selectedProjectId
+      : preferredProjectId && state.workspaceProjects.some((project) => project.id === preferredProjectId)
+        ? preferredProjectId
+        : state.workspaceProjects[0]?.id ?? '';
+    state.selectedProjectId = selected;
+    await refreshProjectResources();
+  } catch {
+    state.workspaceProjects = [];
+    state.projectReports = [];
+    state.projectRunners = [];
+  }
+}
+
+async function refreshProjectResources() {
+  if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId) return;
+  try {
+    const [reportsPayload, runnersPayload] = await Promise.all([
+      fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/reports`),
+      fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/runners`),
+    ]);
+    state.projectReports = reportsPayload.reports ?? [];
+    state.projectRunners = runnersPayload.runners ?? [];
+    if (!state.projectRunners.some((runner) => runner.id === state.selectedRunnerId)) {
+      state.selectedRunnerId = state.projectRunners[0]?.id ?? '';
+    }
+  } catch {
+    state.projectReports = [];
+    state.projectRunners = [];
+  }
+  persistState();
+}
+
+async function createWorkspaceFromDraft() {
+  if (!state.workspaceDraftName.trim()) {
+    showFeedback('Workspace name is required');
+    return;
+  }
+  try {
+    await fetchJson('/api/workspaces', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: state.workspaceDraftName }),
+    });
+    await refreshSession();
+    render();
+    runDiagnosis();
+    showFeedback('Workspace created');
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function createProjectFromDraft() {
+  if (!state.selectedWorkspaceId || !state.projectDraftName.trim()) {
+    showFeedback('Project name is required');
+    return;
+  }
+  try {
+    await fetchJson(`/api/workspaces/${encodeURIComponent(state.selectedWorkspaceId)}/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: state.projectDraftName }),
+    });
+    await refreshProjectsForWorkspace();
+    render();
+    runDiagnosis();
+    showFeedback('Project created');
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function registerRunner() {
+  if (!state.selectedProjectId || !state.runnerRegistrationName.trim() || !state.runnerRegistrationEndpoint.trim()) {
+    showFeedback('Runner name and endpoint are required');
+    return;
+  }
+  try {
+    await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/runners`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: state.runnerRegistrationName,
+        endpointUrl: state.runnerRegistrationEndpoint,
+        sharedSecret: state.runnerRegistrationSecret,
+      }),
+    });
+    await refreshProjectResources();
+    renderProjectResources();
+    showFeedback('Runner registered');
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function dispatchProjectJob() {
+  if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId || !state.selectedRunnerId) {
+    showFeedback('Select a project and runner first');
+    return;
+  }
+  if (!state.analysis) runDiagnosis();
+  try {
+    const payload = await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runnerId: state.selectedRunnerId,
+        pack: state.analysis?.exportPack ?? {},
+        thresholds: state.thresholds,
+        profileId: getSelectedRiskProfile().id,
+        presetId: state.bundlePresetId,
+      }),
+    });
+    state.activeJobId = payload.jobId;
+    state.activeJobStatus = `Job ${payload.jobId} queued`;
+    setText('job-state', state.activeJobStatus);
+    persistState();
+    await pollJob(payload.jobId);
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function pollJob(jobId) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
+    state.activeJobId = job.id;
+    state.activeJobStatus = `Job ${job.id} ${job.status}`;
+    setText('job-state', state.activeJobStatus);
+    if (job.status === 'completed') {
+      state.reportId = job.reportId;
+      state.reportPath = reportPathFor(state.selectedProjectId, job.reportId);
+      await refreshProjectResources();
+      renderProjectResources();
+      await loadServerReport();
+      showFeedback('Runner job completed');
+      persistState();
+      return;
+    }
+    if (job.status === 'failed' || job.status === 'canceled') {
+      showFeedback(job.error ?? `Runner job ${job.status}`);
+      persistState();
+      return;
+    }
+    await wait(1500);
+  }
+  showFeedback('Runner job still in progress');
+}
+
+async function hydrateRouteState() {
+  const route = getRoute();
+  scrollToRouteTarget();
+  if ((route.kind !== 'report' && route.kind !== 'project-report') || state.sessionStatus !== 'authenticated') {
+    return;
+  }
+
+  if (route.projectId && route.projectId !== state.selectedProjectId) {
+    state.selectedProjectId = route.projectId;
+    await refreshProjectResources();
+  }
+
+  state.reportId = route.reportId;
+  await loadServerReport();
+}
+
+async function logout() {
+  try {
+    await fetch('/api/logout', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch {
+    // Best-effort only.
+  }
+  state.session = null;
+  state.sessionStatus = 'anonymous';
+  state.workspaceProjects = [];
+  state.projectReports = [];
+  state.projectRunners = [];
+  state.selectedWorkspaceId = '';
+  state.selectedProjectId = '';
+  state.selectedRunnerId = '';
+  persistState();
+  render();
+  runDiagnosis();
+}
+
+function authStartHref() {
+  const next = `${window.location.pathname}${window.location.hash}`;
+  return `/api/auth/github/start?next=${encodeURIComponent(next)}`;
+}
+
+function getRoute(pathname = window.location.pathname) {
+  const projectReportMatch = pathname.match(/^\/projects\/([^/]+)\/reports\/([^/]+)$/);
+  if (projectReportMatch) {
+    return {
+      kind: 'project-report',
+      projectId: decodeURIComponent(projectReportMatch[1]),
+      reportId: decodeURIComponent(projectReportMatch[2]),
+    };
+  }
+
+  const reportMatch = pathname.match(/^\/report\/([^/]+)$/);
+  if (reportMatch) {
+    return {
+      kind: 'report',
+      reportId: decodeURIComponent(reportMatch[1]),
+    };
+  }
+
+  const docsMatch = pathname.match(/^\/docs\/([^/]+)$/);
+  if (docsMatch) {
+    return {
+      kind: 'docs',
+      slug: decodeURIComponent(docsMatch[1]),
+    };
+  }
+
+  if (pathname === '/app') {
+    return { kind: 'app' };
+  }
+
+  return { kind: 'home' };
+}
+
+function scrollToRouteTarget() {
+  const route = getRoute();
+  const docsPage = docPages.find((page) => page.slug === route.slug);
+  const targetSelector = window.location.hash
+    || (route.kind === 'docs' && docsPage ? `#${docsPage.id}` : '')
+    || (route.kind === 'app' ? '#demo' : '')
+    || (route.kind === 'report' || route.kind === 'project-report' ? '#report' : '')
+    || '#top';
+  const target = document.querySelector(targetSelector);
+  if (!target) return;
+
+  const scroll = () => {
+    const top = target.getBoundingClientRect().top + window.scrollY - 92;
+    window.scrollTo({ top, left: 0 });
+  };
+
+  window.requestAnimationFrame(scroll);
+  window.setTimeout(scroll, 120);
+}
+
+function updateReportContextOnly() {
+  if (!state.analysis) return;
+  const preset = getSelectedBundlePreset();
+  const profile = getSelectedRiskProfile(preset);
+  const sourceBundle = activeSourceBundle();
+  updateReport({
+    preset,
+    profile,
+    sourceBundle,
+    bundleType: detectBundleType(sourceBundle, preset),
+    coverage: resolveBundleCoverage(sourceBundle, profile, preset).visibleFamilies,
+  });
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error ?? `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+function renderTagRow(label, items = []) {
+  if (!Array.isArray(items) || items.length === 0) return '';
+  return `
+    <div class="case-tag-row">
+      <strong>${escapeHtml(label)}</strong>
+      <div>${items.slice(0, 4).map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>
+    </div>
+  `;
+}
+
+function bindIfPresent(selector, eventName, listener) {
+  const element = document.querySelector(selector);
+  if (element) element.addEventListener(eventName, listener);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 async function copyText(text, message = 'Copied') {
@@ -1182,6 +1801,11 @@ function loadState() {
         ...defaultState.thresholds,
         ...(saved.thresholds ?? {}),
       },
+      workspaceProjects: [],
+      projectReports: [],
+      projectRunners: [],
+      loadedServerReport: null,
+      sessionStatus: 'loading',
       analysis: null,
       inputError: '',
       feedback: '',
@@ -1192,7 +1816,19 @@ function loadState() {
 }
 
 function persistState() {
-  const { analysis, inputError, feedback, ...persistable } = state;
+  const {
+    analysis,
+    inputError,
+    feedback,
+    session,
+    sessionStatus,
+    workspaceProjects,
+    projectReports,
+    projectRunners,
+    loadedServerReport,
+    activeJobStatus,
+    ...persistable
+  } = state;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
 }
 
