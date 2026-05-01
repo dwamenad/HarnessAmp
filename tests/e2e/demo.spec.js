@@ -11,6 +11,14 @@ test('runs the default diagnosis and shows schema validation', async ({ page }) 
   await expect(page.locator('#schema-status-list')).toContainText('Harness bundle');
 });
 
+test('switches to the support benchmark preset and shows benchmark details', async ({ page }) => {
+  await page.locator('#bundle-preset-select').selectOption('support-mvp-benchmark');
+  await expect(page.locator('#profile-select')).toBeDisabled();
+  await expect(page.locator('#schema-status-list')).toContainText('Benchmark pack');
+  await expect(page.locator('#benchmark-summary-meta')).toContainText('Support MVP Robustness Benchmark');
+  await expect(page.locator('#benchmark-case-list')).toContainText('Duplicate charge with complete evidence');
+});
+
 test('changes thresholds and persists them', async ({ page }) => {
   await page.locator('#min-overall-score').fill('90');
   await page.reload();

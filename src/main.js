@@ -5,9 +5,11 @@ import supportProfile from '../examples/risk-profiles/support-agent.json';
 import browserProfile from '../examples/risk-profiles/browser-agent.json';
 import quickstartBundle from '../examples/cli/quickstart-bundle.json';
 import observedRuns from '../examples/cli/observed-runs.json';
+import supportMvpBenchmarkPack from '../examples/benchmarks/support-mvp/benchmark-pack.json';
 import harnessBundleSchema from '../docs/schemas/harness_bundle.schema.json';
 import riskProfileSchema from '../docs/schemas/risk_profile.schema.json';
 import diagnosticReportSchema from '../docs/schemas/diagnostic_report.schema.json';
+import benchmarkPackSchema from '../docs/schemas/benchmark_pack.schema.json';
 
 const riskProfiles = {
   'support-agent': {
@@ -40,6 +42,21 @@ const riskProfiles = {
       description: 'Demo profile for an internal agent with database, file, and execution surfaces.',
     },
     coverage: MUTATION_PACKS,
+  },
+};
+
+const bundlePresets = {
+  'profile-demo': {
+    label: 'Profile demo harness',
+    type: 'harness',
+    description: 'Uses the selected risk profile and its built-in demo harness bundle.',
+  },
+  'support-mvp-benchmark': {
+    label: 'Support MVP benchmark pack',
+    type: 'benchmark',
+    description: 'Loads the checked-in intent, contract, benchmark cases, and wrapper for the support release gate.',
+    lockedProfileId: 'support-agent',
+    bundle: supportMvpBenchmarkPack,
   },
 };
 
@@ -129,12 +146,14 @@ const ajv = new Ajv2020({ allErrors: true, strict: false });
 const validateHarnessBundleSchema = ajv.compile(harnessBundleSchema);
 const validateRiskProfileSchema = ajv.compile(riskProfileSchema);
 const validateDiagnosticReportSchema = ajv.compile(diagnosticReportSchema);
+const validateBenchmarkPackSchema = ajv.compile(benchmarkPackSchema);
 const validateObservedRunsSchema = ajv.compile({
   type: 'array',
   items: harnessBundleSchema.properties.observations.items,
 });
 
 const defaultState = {
+  bundlePresetId: 'profile-demo',
   profileId: 'support-agent',
   intensity: 2,
   useObservedRuns: true,
@@ -162,11 +181,17 @@ const defaultState = {
 const state = loadState();
 const app = document.querySelector('#app');
 
+if (!state.useCustomInput) syncCustomEditorsToPreset();
+
 installErrorMonitoring();
 render();
 runDiagnosis();
 
 function render() {
+  const preset = getSelectedBundlePreset();
+  const profile = getSelectedRiskProfile(preset);
+  const profileLocked = Boolean(preset.lockedProfileId);
+
   app.innerHTML = `
     <div class="site-shell">
       <header class="topbar">
@@ -230,11 +255,16 @@ function render() {
           </div>
           <div class="demo-console">
             <div class="demo-controls">
-              <label><span>Risk profile</span><select id="profile-select">${Object.entries(riskProfiles).map(([id, item]) => `<option value="${id}" ${id === state.profileId ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
+              <label><span>Bundle preset</span><select id="bundle-preset-select">${Object.entries(bundlePresets).map(([id, item]) => `<option value="${id}" ${id === state.bundlePresetId ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
+              <label><span>Risk profile</span><select id="profile-select" ${profileLocked ? 'disabled' : ''}>${Object.entries(riskProfiles).map(([id, item]) => `<option value="${id}" ${id === profile.id ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
               <label><span>Mutation intensity</span><select id="intensity-select">${[1, 2, 3, 4].map((value) => `<option value="${value}" ${value === state.intensity ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
               <label class="check-control"><input id="observed-toggle" type="checkbox" ${state.useObservedRuns ? 'checked' : ''} /><span>Use observed runs</span></label>
               <label class="check-control"><input id="custom-toggle" type="checkbox" ${state.useCustomInput ? 'checked' : ''} /><span>Use pasted JSON</span></label>
               <button class="button button--primary" id="run-demo" type="button">Run diagnosis</button>
+            </div>
+            <div class="preset-note">
+              <strong>${escapeHtml(preset.label)}</strong>
+              <span>${escapeHtml(preset.description)}${profileLocked ? ` Locked to ${profile.label.toLowerCase()}.` : ''}</span>
             </div>
             <div class="threshold-controls">
               <label><span>Min overall score</span><input id="min-overall-score" type="number" min="0" max="100" value="${state.thresholds.minOverallScore}" /></label>
@@ -273,6 +303,20 @@ function render() {
               <h3>Schema validation</h3>
               <div id="schema-status-list" class="schema-status-list"></div>
             </div>
+            <div class="benchmark-panel">
+              <div class="benchmark-panel__header">
+                <h3>Benchmark contract</h3>
+                <p id="benchmark-summary-meta">Select a benchmark preset to inspect intent, contract, and gates.</p>
+              </div>
+              <div id="benchmark-contract-panel" class="benchmark-contract-panel"></div>
+            </div>
+            <div class="benchmark-panel benchmark-panel--cases">
+              <div class="benchmark-panel__header">
+                <h3>Benchmark cases</h3>
+                <p id="benchmark-cases-meta">Cases appear when the active bundle is a benchmark pack.</p>
+              </div>
+              <div id="benchmark-case-list" class="benchmark-case-list"></div>
+            </div>
           </div>
         </section>
 
@@ -282,7 +326,7 @@ function render() {
         </section>
 
         <section id="report" class="section report-section reveal">
-          <div class="report-copy"><p class="eyebrow">Sample report page</p><h2>From pass rate to engineering control.</h2><p>This report is generated from the selected sample bundle, selected risk profile, mutation intensity, and observed run fixture.</p></div>
+          <div class="report-copy"><p class="eyebrow">Sample report page</p><h2>From pass rate to engineering control.</h2><p>This report is generated from the selected preset, selected risk profile, mutation intensity, and observed run fixture.</p></div>
           <div class="report">
             <div><span>Baseline</span><strong id="report-baseline">--</strong></div>
             <div><span>Mutated</span><strong id="report-mutated">--</strong></div>
@@ -368,16 +412,18 @@ dist/assets/*</pre>
         </section>
 
         <section class="section artifacts reveal">
-          <div class="section__intro"><p class="eyebrow">Real proof artifacts</p><h2>Embedded from repo examples.</h2><p>The demo uses examples/cli/quickstart-bundle.json, examples/cli/observed-runs.json, and the checked-in risk profile files.</p></div>
+          <div class="section__intro"><p class="eyebrow">Real proof artifacts</p><h2>Embedded from repo examples.</h2><p>The demo uses examples/cli/quickstart-bundle.json, examples/cli/observed-runs.json, examples/benchmarks/support-mvp/benchmark-pack.json, and the checked-in risk profile files.</p></div>
           <div class="artifact-actions">
             <button class="button button--secondary" id="download-example-bundle" type="button">Download quickstart bundle</button>
             <button class="button button--secondary" id="download-example-runs" type="button">Download observed runs</button>
+            <button class="button button--secondary" id="download-example-benchmark" type="button">Download benchmark pack</button>
             <button class="button button--secondary" id="download-risk-profile" type="button">Download risk profile</button>
             <button class="button button--secondary" id="download-ci-yaml" type="button">Download CI YAML</button>
           </div>
           <div class="artifact-grid">
             <pre>${escapeHtml(JSON.stringify(quickstartBundle, null, 2).slice(0, 900))}</pre>
             <pre>${escapeHtml(JSON.stringify(observedRuns, null, 2))}</pre>
+            <pre>${escapeHtml(JSON.stringify(supportMvpBenchmarkPack, null, 2).slice(0, 1500))}</pre>
           </div>
         </section>
 
@@ -398,7 +444,7 @@ dist/assets/*</pre>
 function renderDocsSections() {
   const docs = [
     ['docs-install', 'Install', 'Clone the repo, install dependencies, and run the first diagnosis from the CLI.', 'npm install\nnpm run diagnose -- examples/cli/quickstart-bundle.json'],
-    ['docs-schemas', 'Schemas', 'Validate harness bundles, risk profiles, mutation registries, and diagnostic reports with the checked-in JSON schemas.', 'docs/schemas/harness_bundle.schema.json\ndocs/schemas/risk_profile.schema.json\ndocs/schemas/diagnostic_report.schema.json'],
+    ['docs-schemas', 'Schemas', 'Validate harness bundles, benchmark packs, risk profiles, mutation registries, and diagnostic reports with the checked-in JSON schemas.', 'docs/schemas/harness_bundle.schema.json\ndocs/schemas/benchmark_pack.schema.json\ndocs/schemas/risk_profile.schema.json\ndocs/schemas/diagnostic_report.schema.json'],
     ['docs-runner-contract', 'Runner contract', 'Implement a small adapter that accepts variants and returns observed outcomes without changing your agent framework.', 'POST /runner\n{ pack, profile, thresholds }\n-> { observations: [...] }'],
     ['docs-ci-gates', 'CI gates', 'Block releases when overall score, holdout pass rate, or robustness gap crosses your thresholds.', 'npm run release:gate -- bundle.json observed-runs.json --write-md artifacts/gate.md'],
     ['docs-mutation-packs', 'Mutation packs', 'Browse deterministic packs for prompt integrity, tool payloads, permissions, network sinks, context, sandbox boundaries, and multimodal inputs.', MUTATION_PACKS.join('\n')],
@@ -413,8 +459,18 @@ function renderDocsSections() {
 }
 
 function bindEvents() {
+  document.querySelector('#bundle-preset-select').addEventListener('change', (event) => {
+    state.bundlePresetId = event.target.value;
+    const preset = getSelectedBundlePreset();
+    if (preset.lockedProfileId) state.profileId = preset.lockedProfileId;
+    if (!state.useCustomInput) syncCustomEditorsToPreset();
+    persistState();
+    render();
+    runDiagnosis();
+  });
   document.querySelector('#profile-select').addEventListener('change', (event) => {
     state.profileId = event.target.value;
+    if (!state.useCustomInput) syncCustomEditorsToPreset();
     persistState();
     runDiagnosis();
   });
@@ -429,6 +485,7 @@ function bindEvents() {
     runDiagnosis();
   });
   document.querySelector('#custom-toggle').addEventListener('change', (event) => {
+    if (event.target.checked) syncCustomEditorsToPreset();
     state.useCustomInput = event.target.checked;
     persistState();
     runDiagnosis();
@@ -467,14 +524,20 @@ function bindEvents() {
   document.querySelector('#load-server-report').addEventListener('click', loadServerReport);
   document.querySelector('#download-example-bundle').addEventListener('click', () => downloadText('quickstart-bundle.json', JSON.stringify(quickstartBundle, null, 2), 'Downloaded bundle'));
   document.querySelector('#download-example-runs').addEventListener('click', () => downloadText('observed-runs.json', JSON.stringify(observedRuns, null, 2), 'Downloaded runs'));
-  document.querySelector('#download-risk-profile').addEventListener('click', () => downloadText(`${state.profileId}.risk-profile.json`, JSON.stringify(riskProfiles[state.profileId].profile, null, 2), 'Downloaded risk profile'));
+  document.querySelector('#download-example-benchmark').addEventListener('click', () => downloadText('support-mvp-benchmark-pack.json', JSON.stringify(supportMvpBenchmarkPack, null, 2), 'Downloaded benchmark'));
+  document.querySelector('#download-risk-profile').addEventListener('click', () => {
+    const profile = getSelectedRiskProfile();
+    downloadText(`${profile.id}.risk-profile.json`, JSON.stringify(profile.profile, null, 2), 'Downloaded risk profile');
+  });
   document.querySelector('#download-ci-yaml').addEventListener('click', () => downloadText('harnessamp-release-gate.yml', githubActionsSnippet, 'Downloaded CI YAML'));
 }
 
 function runDiagnosis() {
-  trackEvent('diagnosis_started', { profile: state.profileId, customInput: state.useCustomInput });
-  const selected = riskProfiles[state.profileId];
-  const customBundle = state.useCustomInput ? parseJsonInput(state.customBundleText, 'Harness bundle') : null;
+  const preset = getSelectedBundlePreset();
+  const selected = getSelectedRiskProfile(preset);
+  const bundleLabel = preset.type === 'benchmark' ? 'Benchmark pack' : 'Harness bundle';
+  trackEvent('diagnosis_started', { profile: selected.id, preset: state.bundlePresetId, customInput: state.useCustomInput });
+  const customBundle = state.useCustomInput ? parseJsonInput(state.customBundleText, bundleLabel) : null;
   const customRuns = state.useCustomInput && state.useObservedRuns ? parseJsonInput(state.customRunsText, 'Observed runs') : null;
 
   if (customBundle?.error || customRuns?.error) {
@@ -488,23 +551,97 @@ function runDiagnosis() {
   setText('input-error', '');
   persistState();
 
+  const baseBundle = state.useCustomInput ? customBundle.value : resolvePresetBundle(preset, selected);
+  const bundleType = detectBundleType(baseBundle, preset);
+  const bundleCoverage = resolveBundleCoverage(baseBundle, selected, preset);
   const bundle = {
-    ...(state.useCustomInput ? customBundle.value : selected.bundle),
+    ...baseBundle,
     mutationPolicy: {
-      ...((state.useCustomInput ? customBundle.value : selected.bundle).mutationPolicy ?? {}),
+      ...(baseBundle.mutationPolicy ?? {}),
       intensity: state.intensity,
-      visibleFamilies: selected.coverage,
-      holdoutFamilies: selected.coverage,
+      visibleFamilies: bundleCoverage.visibleFamilies,
+      holdoutFamilies: bundleCoverage.holdoutFamilies,
     },
   };
 
-  const runs = state.useObservedRuns ? (state.useCustomInput ? customRuns.value : observedRuns) : [];
+  const runs = state.useObservedRuns ? (state.useCustomInput ? customRuns.value : resolvePresetRuns(preset, baseBundle)) : [];
   state.analysis = analyzeBundle(bundle, runs, { intensity: state.intensity });
-  updateReport(selected);
-  trackEvent('diagnosis_completed', { profile: state.profileId, gate: gateFor(state.analysis.summary) });
+  updateReport({ preset, profile: selected, sourceBundle: baseBundle, bundleType, coverage: bundleCoverage.visibleFamilies });
+  trackEvent('diagnosis_completed', { profile: selected.id, preset: state.bundlePresetId, gate: gateFor(state.analysis.summary) });
 }
 
-function updateReport(selected) {
+function getSelectedBundlePreset() {
+  return bundlePresets[state.bundlePresetId] ?? bundlePresets['profile-demo'];
+}
+
+function getSelectedRiskProfile(preset = getSelectedBundlePreset()) {
+  const profileId = preset.lockedProfileId ?? state.profileId;
+  const selected = riskProfiles[profileId] ?? riskProfiles['support-agent'];
+  return {
+    ...selected,
+    id: profileId,
+  };
+}
+
+function resolvePresetBundle(preset, profile) {
+  if (preset.bundle) return cloneJson(preset.bundle);
+  return cloneJson(profile.bundle);
+}
+
+function resolvePresetRuns(preset, bundle) {
+  if (Array.isArray(bundle?.observations) && bundle.observations.length) {
+    return cloneJson(bundle.observations);
+  }
+  if (preset.type === 'benchmark' && Array.isArray(preset.bundle?.observations)) {
+    return cloneJson(preset.bundle.observations);
+  }
+  return cloneJson(observedRuns);
+}
+
+function resolveBundleCoverage(bundle, profile, preset) {
+  const visibleFamilies = normalizeCoverage(bundle?.mutationPolicy?.visibleFamilies) ?? profile.coverage;
+  const holdoutFamilies = normalizeCoverage(bundle?.mutationPolicy?.holdoutFamilies) ?? visibleFamilies;
+  return {
+    visibleFamilies,
+    holdoutFamilies,
+    presetType: preset.type,
+  };
+}
+
+function normalizeCoverage(value) {
+  return Array.isArray(value) && value.length ? value.filter((item) => typeof item === 'string') : null;
+}
+
+function detectBundleType(bundle, preset = getSelectedBundlePreset()) {
+  if (preset.type === 'benchmark') return 'benchmark';
+  return isBenchmarkPackShape(bundle) ? 'benchmark' : 'harness';
+}
+
+function isBenchmarkPackShape(bundle) {
+  return isObject(bundle)
+    && (
+      bundle.format === 'harnessamp.benchmark.v1'
+      || (isObject(bundle.intent) && isObject(bundle.contract) && isObject(bundle.benchmark) && isObject(bundle.wrapper))
+    );
+}
+
+function syncCustomEditorsToPreset() {
+  const preset = getSelectedBundlePreset();
+  const profile = getSelectedRiskProfile(preset);
+  const nextBundleText = JSON.stringify(resolvePresetBundle(preset, profile), null, 2);
+  const nextRunsText = JSON.stringify(resolvePresetRuns(preset, preset.bundle ?? profile.bundle), null, 2);
+  state.customBundleText = nextBundleText;
+  state.customRunsText = nextRunsText;
+}
+
+function updateReport(context) {
+  const {
+    preset,
+    profile: selected,
+    sourceBundle,
+    bundleType,
+    coverage,
+  } = context;
   const analysis = state.analysis;
   const visible = Math.round(analysis.summary.visiblePassRate);
   const holdout = Math.round(analysis.summary.holdoutPassRate);
@@ -524,7 +661,7 @@ function updateReport(selected) {
   setText('hero-drop', `${drop}%`);
   setText('hero-surface', weakest?.label ?? 'No weak surface detected');
   setText('hero-control', recommendation);
-  setText('demo-profile', selected.label);
+  setText('demo-profile', bundleType === 'benchmark' ? `${selected.label} / benchmark` : selected.label);
   setText('demo-variants', String(analysis.pack.variants.length));
   setText('demo-seed', seed);
   setText('demo-gate', gate);
@@ -540,11 +677,12 @@ function updateReport(selected) {
   setText('report-saved', getSavedReports()[reportId] ? 'saved' : 'unsaved');
   setText('report-text', analysis.reportText);
   renderVariantTable(analysis);
-  renderSchemaStatus(analysis.bundle, selected.profile, analysis);
+  renderSchemaStatus(sourceBundle, selected.profile, analysis, bundleType);
+  renderBenchmarkPanels(sourceBundle, analysis, preset);
   persistState();
 
   document.querySelector('#coverage-list').innerHTML = MUTATION_PACKS.map((pack) => `
-    <span class="${selected.coverage.includes(pack) ? 'is-active' : ''}">${formatPackName(pack)}</span>
+    <span class="${coverage.includes(pack) ? 'is-active' : ''}">${formatPackName(pack)}</span>
   `).join('');
 
   document.querySelector('#hero-bars').innerHTML = analysis.familyStats.slice(0, 8).map((family) => {
@@ -566,11 +704,13 @@ async function runHttpRunner() {
   persistState();
 
   try {
+    const profile = getSelectedRiskProfile();
     const response = await fetch(state.runnerEndpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        profile: state.profileId,
+        profile: profile.id,
+        preset: state.bundlePresetId,
         thresholds: state.thresholds,
         pack: state.analysis.exportPack,
       }),
@@ -632,9 +772,11 @@ function renderVariantTable(analysis) {
   `).join('');
 }
 
-function renderSchemaStatus(bundle, profile, analysis) {
+function renderSchemaStatus(bundle, profile, analysis, bundleType = detectBundleType(bundle)) {
+  const inputSchemaLabel = bundleType === 'benchmark' ? 'Benchmark pack' : 'Harness bundle';
+  const inputSchemaResult = bundleType === 'benchmark' ? validateBenchmarkPack(bundle) : validateHarnessBundle(bundle);
   const checks = [
-    ['Harness bundle', validateHarnessBundle(bundle)],
+    [inputSchemaLabel, inputSchemaResult],
     ['Observed runs', validateObservedRuns(state.useObservedRuns ? parseObservedRunsForValidation() : [])],
     ['Risk profile', validateRiskProfile(profile)],
     ['Diagnostic report', validateDiagnosticSnapshot(buildReportSnapshot(analysis))],
@@ -648,8 +790,99 @@ function renderSchemaStatus(bundle, profile, analysis) {
   `).join('');
 }
 
+function renderBenchmarkPanels(sourceBundle, analysis) {
+  const contractPanel = document.querySelector('#benchmark-contract-panel');
+  const caseList = document.querySelector('#benchmark-case-list');
+
+  if (!contractPanel || !caseList) return;
+
+  if (!isBenchmarkPackShape(sourceBundle)) {
+    setText('benchmark-summary-meta', 'Select the Support MVP benchmark preset to inspect intent, contract, and release gates.');
+    setText('benchmark-cases-meta', 'Cases appear when the active bundle is a benchmark pack.');
+    contractPanel.innerHTML = `
+      <article class="benchmark-empty">
+        <h4>Profile demo mode</h4>
+        <p>The current preset uses a generic harness bundle. Switch the bundle preset to the support benchmark to review cases, contract rules, and benchmark gates in the app.</p>
+      </article>
+    `;
+    caseList.innerHTML = '';
+    return;
+  }
+
+  const intent = analysis.bundle.intent ?? {};
+  const contract = analysis.bundle.contract ?? {};
+  const benchmark = analysis.bundle.benchmark ?? {};
+  const harness = analysis.bundle.harness ?? {};
+  const globalRules = contract.global ?? {};
+  const finalResponders = Array.isArray(globalRules.finalResponders) ? globalRules.finalResponders : [];
+  const summary = benchmark.summary ?? {};
+  const caseCount = Array.isArray(benchmark.cases) ? benchmark.cases.length : 0;
+  const toolCount = Array.isArray(harness.tools) ? harness.tools.length : 0;
+
+  setText('benchmark-summary-meta', `${analysis.bundle.project} · ${caseCount} cases · ${toolCount} tools`);
+  setText('benchmark-cases-meta', `${finalResponders.length || contract.agents?.length || 1} responder path · replayable seeds`);
+
+  contractPanel.innerHTML = `
+    <article>
+      <span>Mission</span>
+      <h4>${escapeHtml(analysis.bundle.project)}</h4>
+      <p>${escapeHtml(intent.mission ?? 'No mission documented.')}</p>
+      ${renderInlineList(intent.successSignals, 'Success signals')}
+    </article>
+    <article>
+      <span>Must preserve</span>
+      <h4>Contract rules</h4>
+      ${renderBulletList(globalRules.must, 'No global must rules documented.')}
+    </article>
+    <article>
+      <span>Never allow</span>
+      <h4>Forbidden behavior</h4>
+      ${renderBulletList(globalRules.mustNot, 'No global forbidden actions documented.')}
+    </article>
+    <article>
+      <span>Gate summary</span>
+      <h4>Release thresholds</h4>
+      <ul>
+        ${renderGateRow('Baseline pass', summary.baselinePassGate)}
+        ${renderGateRow('Visible mutated pass', summary.visibleMutatedPassGate)}
+        ${renderGateRow('Hidden holdout pass', summary.hiddenHoldoutPassGate)}
+        ${renderGateRow('Max robustness gap', summary.maxRobustnessGap)}
+      </ul>
+    </article>
+    <article>
+      <span>Final responders</span>
+      <h4>Agent boundary</h4>
+      ${renderInlineList(finalResponders.length ? finalResponders : contract.agents?.map((item) => item.id), 'No responders documented.')}
+    </article>
+    <article>
+      <span>Approved tools</span>
+      <h4>Tool surface</h4>
+      ${renderInlineList(harness.tools?.map((item) => item.name), 'No tools documented.')}
+    </article>
+  `;
+
+  caseList.innerHTML = (benchmark.cases ?? []).map((item) => `
+    <article>
+      <span>${escapeHtml(item.id)}</span>
+      <h4>${escapeHtml(item.title)}</h4>
+      <p>${escapeHtml(item.input ?? '')}</p>
+      ${renderCaseSection('Milestones', item.expectedMilestones)}
+      ${renderCaseSection('Assertions', item.assertions)}
+      ${renderCaseSection('Forbidden', item.forbiddenActions)}
+      <div class="benchmark-case-meta">
+        <strong>seed ${escapeHtml(item.seed ?? '--')}</strong>
+        <span>${escapeHtml((item.allowedAgents ?? []).join(', ') || 'unscoped')}</span>
+      </div>
+    </article>
+  `).join('');
+}
+
 function validateHarnessBundle(bundle) {
   return validationResult(validateHarnessBundleSchema(bundle), validateHarnessBundleSchema.errors);
+}
+
+function validateBenchmarkPack(bundle) {
+  return validationResult(validateBenchmarkPackSchema(bundle), validateBenchmarkPackSchema.errors);
 }
 
 function validateObservedRuns(runs) {
@@ -672,7 +905,12 @@ function validationResult(ok, errors = []) {
 }
 
 function parseObservedRunsForValidation() {
-  if (!state.useCustomInput) return observedRuns;
+  if (!state.useCustomInput) {
+    const preset = getSelectedBundlePreset();
+    const profile = getSelectedRiskProfile(preset);
+    const sourceBundle = resolvePresetBundle(preset, profile);
+    return resolvePresetRuns(preset, sourceBundle);
+  }
   const parsed = safeJsonParse(state.customRunsText);
   return parsed.ok ? parsed.value : null;
 }
@@ -706,6 +944,8 @@ function replaySeed(analysis) {
 
 function buildReportSnapshot(analysis = state.analysis) {
   if (!analysis) return {};
+  const preset = getSelectedBundlePreset();
+  const profile = getSelectedRiskProfile(preset);
   return {
     version: 'web-demo-1',
     id: state.reportId || createReportId(analysis),
@@ -713,7 +953,8 @@ function buildReportSnapshot(analysis = state.analysis) {
     workspace: workspacePayload(),
     suite: {
       project: analysis.bundle.project,
-      profile: state.profileId,
+      profile: profile.id,
+      preset: state.bundlePresetId,
       thresholds: state.thresholds,
     },
     baselineRuns: analysis.outcomes.filter((outcome) => outcome.tier === 'visible'),
@@ -848,7 +1089,8 @@ function readEvents() {
 }
 
 function createReportId(analysis) {
-  const source = `${analysis.bundle.project}-${state.profileId}-${state.intensity}-${Date.now()}`;
+  const profile = getSelectedRiskProfile();
+  const source = `${analysis.bundle.project}-${profile.id}-${state.bundlePresetId}-${state.intensity}-${Date.now()}`;
   let hash = 0;
   for (let index = 0; index < source.length; index += 1) {
     hash = (hash * 31 + source.charCodeAt(index)) >>> 0;
@@ -904,7 +1146,20 @@ async function readJsonFile(event, target) {
 function updateThreshold(key, rawValue) {
   state.thresholds[key] = clampNumber(Number(rawValue), 0, 100);
   persistState();
-  if (state.analysis) updateReport(riskProfiles[state.profileId]);
+  if (state.analysis) {
+    const preset = getSelectedBundlePreset();
+    const profile = getSelectedRiskProfile(preset);
+    const sourceBundle = state.useCustomInput
+      ? safeJsonParse(state.customBundleText).value ?? {}
+      : resolvePresetBundle(preset, profile);
+    updateReport({
+      preset,
+      profile,
+      sourceBundle,
+      bundleType: detectBundleType(sourceBundle, preset),
+      coverage: resolveBundleCoverage(sourceBundle, profile, preset).visibleFamilies,
+    });
+  }
 }
 
 function showFeedback(message) {
@@ -946,12 +1201,41 @@ function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function cloneJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
 function formatPackName(value) {
   return String(value).replace(/_pack$/, '').replaceAll('_', ' ');
 }
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function renderInlineList(items, emptyMessage) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return `<p>${escapeHtml(emptyMessage)}</p>`;
+  }
+  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+}
+
+function renderBulletList(items, emptyMessage) {
+  return renderInlineList(items, emptyMessage);
+}
+
+function renderCaseSection(label, items) {
+  if (!Array.isArray(items) || items.length === 0) return '';
+  return `
+    <div class="benchmark-case-section">
+      <strong>${escapeHtml(label)}</strong>
+      <ul>${items.slice(0, 3).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+    </div>
+  `;
+}
+
+function renderGateRow(label, value) {
+  return `<li>${escapeHtml(label)} <strong>${escapeHtml(value ?? '--')}</strong></li>`;
 }
 
 function setText(id, value) {

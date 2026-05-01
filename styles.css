@@ -527,6 +527,37 @@ section[id] {
   min-width: 180px;
 }
 
+.preset-note {
+  display: grid;
+  gap: 6px;
+  padding: 16px 20px 18px;
+  border-bottom: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.preset-note strong,
+.benchmark-panel__header h3,
+.benchmark-contract-panel span,
+.benchmark-case-list span,
+.benchmark-case-section strong,
+.benchmark-case-meta strong {
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.preset-note span,
+.benchmark-panel__header p,
+.benchmark-contract-panel p,
+.benchmark-case-list p,
+.benchmark-case-meta span {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
 .demo-controls label span,
 .threshold-controls label span,
 .coverage-panel h3,
@@ -710,6 +741,26 @@ section[id] {
   padding: 0 20px 24px;
 }
 
+.benchmark-panel {
+  padding: 0 20px 24px;
+}
+
+.benchmark-panel__header {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 0 0 16px;
+}
+
+.benchmark-panel__header h3 {
+  margin: 0;
+}
+
+.benchmark-panel__header p {
+  margin: 0;
+  font-size: 13px;
+}
+
 .workspace-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -795,6 +846,81 @@ section[id] {
   border-color: rgba(183, 247, 230, 0.45);
   background: rgba(183, 247, 230, 0.08);
   color: var(--accent-2);
+}
+
+.benchmark-contract-panel,
+.benchmark-case-list {
+  display: grid;
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.benchmark-contract-panel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.benchmark-contract-panel article,
+.benchmark-case-list article {
+  background: #080908;
+  padding: 18px;
+}
+
+.benchmark-contract-panel h4,
+.benchmark-case-list h4 {
+  margin: 12px 0 10px;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.benchmark-contract-panel ul,
+.benchmark-case-list ul {
+  margin: 14px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.benchmark-contract-panel li,
+.benchmark-case-list li {
+  margin: 0 0 10px;
+  line-height: 1.6;
+}
+
+.benchmark-contract-panel li strong {
+  float: right;
+  color: var(--accent-2);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.benchmark-empty {
+  min-height: 0;
+}
+
+.benchmark-case-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.benchmark-case-section {
+  margin-top: 14px;
+}
+
+.benchmark-case-section strong {
+  display: block;
+}
+
+.benchmark-case-section ul {
+  margin-top: 10px;
+}
+
+.benchmark-case-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
 }
 
 .report-section {
@@ -896,6 +1022,10 @@ section[id] {
 }
 
 .pack-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.artifact-grid {
   grid-template-columns: repeat(3, 1fr);
 }
 
@@ -1131,6 +1261,8 @@ section[id] {
   .artifact-grid,
   .docs-grid,
   .contract-grid,
+  .benchmark-contract-panel,
+  .benchmark-case-list,
   .demo-result,
   .input-workbench,
   .threshold-controls,
