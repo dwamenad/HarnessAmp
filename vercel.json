@@ -3,6 +3,50 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/auth/github/start",
+      "destination": "/api/auth?action=github-start"
+    },
+    {
+      "source": "/api/auth/github/callback",
+      "destination": "/api/auth?action=github-callback"
+    },
+    {
+      "source": "/api/session",
+      "destination": "/api/auth?action=session"
+    },
+    {
+      "source": "/api/logout",
+      "destination": "/api/auth?action=logout"
+    },
+    {
+      "source": "/api/reports/:id",
+      "destination": "/api/reports"
+    },
+    {
+      "source": "/api/workspaces/:workspaceId/projects",
+      "destination": "/api/workspaces?resource=projects"
+    },
+    {
+      "source": "/api/projects/:projectId/reports",
+      "destination": "/api/projects?resource=reports"
+    },
+    {
+      "source": "/api/projects/:projectId/runners",
+      "destination": "/api/projects?resource=runners"
+    },
+    {
+      "source": "/api/projects/:projectId/jobs",
+      "destination": "/api/projects?resource=jobs"
+    },
+    {
+      "source": "/api/jobs/:id/cancel",
+      "destination": "/api/jobs?action=cancel"
+    },
+    {
+      "source": "/api/jobs/:id",
+      "destination": "/api/jobs"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
