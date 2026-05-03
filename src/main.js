@@ -250,7 +250,7 @@ function render() {
     <div class="site-shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="HarnessAmp home">
-          <span class="brand__mark">HA</span>
+          <span class="brand__mark brand__mark--image"><img src="/logo.png" alt="" /></span>
           <span><strong>HarnessAmp</strong><small>Robustness infrastructure</small></span>
         </a>
         <nav class="topbar__nav" aria-label="Primary navigation">
