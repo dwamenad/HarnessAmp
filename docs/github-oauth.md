@@ -53,11 +53,22 @@ GITHUB_CLIENT_SECRET=<from GitHub>
 APP_BASE_URL=http://127.0.0.1:4173
 ```
 
-Then run:
+Then run the local API runtime on port `3000`:
+
+```bash
+set -a
+source .env.local
+set +a
+npx vercel dev --listen 3000
+```
+
+In a second terminal, run the Vite app on port `4173`:
 
 ```bash
 npm run dev
 ```
+
+The Vite server proxies `/api` requests to the Vercel dev server.
 
 Open:
 
