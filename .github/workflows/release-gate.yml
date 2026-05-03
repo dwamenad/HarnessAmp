@@ -32,10 +32,16 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Run release gate
-        run: |
-          mkdir -p output/release-gate
-          npm run release:gate -- examples/demo-bundle.json examples/cli/observed-runs.json --min-holdout-pass 15 --max-gap 60 --min-overall-score 55 --write-json output/release-gate/result.json --write-md output/release-gate/result.md
+      - name: Run HarnessAmp reusable action
+        uses: ./
+        with:
+          bundle: examples/demo-bundle.json
+          observations: examples/cli/observed-runs.json
+          max-mutations: 3
+          min-overall-score: 55
+          min-holdout-pass: 15
+          max-robustness-gap: 60
+          output-dir: output/release-gate
 
       - name: Upload release gate artifacts
         if: always()
