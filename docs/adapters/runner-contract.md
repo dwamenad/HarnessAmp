@@ -53,4 +53,14 @@ If an adapter cannot provide a field, it should return an explicit empty value r
 
 `MockRunner` is the default local runner. It exists so the mutation engine, delta layer, classifier, report generator, CLI, and UI can run end-to-end without external credentials.
 
-The other runner classes are placeholders and intentionally throw until implemented.
+`CustomHTTPRunner` posts baseline and mutated payloads to a configured endpoint and normalizes compact responses into the `AgentRunResult` shape.
+
+Use it with:
+
+```bash
+node scripts/harnessamp.mjs diagnose examples/demo-bundle.json \
+  --runner-kind custom_http \
+  --runner-endpoint https://runner.example.com/harnessamp
+```
+
+The remaining runner classes are placeholders and intentionally throw until implemented.

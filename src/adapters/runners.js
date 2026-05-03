@@ -61,7 +61,59 @@ export class AgentFrameworkRunner extends AgentRunner {}
 export class GraphWorkflowRunner extends AgentRunner {}
 export class CrewWorkflowRunner extends AgentRunner {}
 export class MultiAgentRunner extends AgentRunner {}
-export class CustomHTTPRunner extends AgentRunner {}
+export class CustomHTTPRunner extends AgentRunner {
+  constructor(options = {}) {
+    super();
+    this.endpoint = options.endpoint ?? process.env.HARNESSAMP_RUNNER_ENDPOINT ?? '';
+    this.token = options.token ?? process.env.HARNESSAMP_RUNNER_TOKEN ?? '';
+    this.runnerVersion = options.runnerVersion ?? 'custom-http-runner/1.0.0';
+    this.timeoutMs = Number(options.timeoutMs ?? process.env.HARNESSAMP_RUNNER_TIMEOUT_MS ?? 30000);
+  }
+
+  async run({ bundle, mutation = null, task = null, environment = 'local' }) {
+    if (!this.endpoint) {
+      throw new Error('CustomHTTPRunner requires endpoint or HARNESSAMP_RUNNER_ENDPOINT.');
+    }
+
+    const startedAt = Date.now();
+    const scenario = task ?? bundle.harness?.scenarios?.[0] ?? {};
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await fetch(this.endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+          ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+        },
+        body: JSON.stringify({
+          bundle,
+          mutation,
+          task: scenario,
+          environment,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Custom HTTP runner returned ${response.status}`);
+      }
+
+      const payload = await response.json();
+      return normalizeHttpRunnerResult(payload, {
+        bundle,
+        mutation,
+        scenario,
+        environment,
+        runnerVersion: this.runnerVersion,
+        latencyMs: Date.now() - startedAt,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
 export class MCPRunner extends AgentRunner {}
 
 export function createRunner(kind = 'mock', options = {}) {
@@ -142,6 +194,40 @@ function severityScore(severity) {
 
 function buildRunId(project, taskId, mutationId) {
   return `${slugify(project)}__${slugify(taskId || 'task')}__${slugify(mutationId)}`;
+}
+
+function normalizeHttpRunnerResult(payload, context) {
+  const result = payload?.result ?? payload;
+  const passed = Boolean(result.metadata?.passed ?? result.passed);
+  return {
+    runId: result.runId ?? buildRunId(context.bundle.project, context.scenario.id, context.mutation?.mutationId ?? 'baseline'),
+    harnessId: result.harnessId ?? slugify(context.bundle.project),
+    harnessVersion: result.harnessVersion ?? context.bundle.version ?? 1,
+    agentVersion: result.agentVersion ?? context.bundle.wrapper?.agentVersion ?? context.bundle.harness?.agentVersion ?? 'external',
+    modelVersion: result.modelVersion ?? context.bundle.wrapper?.model ?? context.bundle.harness?.model ?? 'external',
+    mutationPackVersion: result.mutationPackVersion ?? context.mutation?.version ?? null,
+    mutationId: result.mutationId ?? context.mutation?.mutationId ?? null,
+    mutationSeed: result.mutationSeed ?? context.mutation?.deterministicSeed ?? null,
+    runnerVersion: result.runnerVersion ?? context.runnerVersion,
+    evaluatorVersion: result.evaluatorVersion ?? 'external-runner/1.0.0',
+    timestamp: result.timestamp ?? new Date().toISOString(),
+    environment: result.environment ?? context.environment,
+    toolMode: result.toolMode ?? 'live',
+    taskId: result.taskId ?? context.scenario.id ?? 'task-001',
+    inputPrompt: result.inputPrompt ?? context.scenario.objective ?? '',
+    outputText: result.outputText ?? result.notes ?? '',
+    toolCalls: Array.isArray(result.toolCalls) ? result.toolCalls : [],
+    toolOutputs: Array.isArray(result.toolOutputs) ? result.toolOutputs : [],
+    errors: Array.isArray(result.errors) ? result.errors : [],
+    latencyMs: Number(result.latencyMs ?? context.latencyMs),
+    tokenUsage: result.tokenUsage ?? { input: null, output: null },
+    metadata: {
+      ...result.metadata,
+      passed,
+      score: result.score ?? result.metadata?.score ?? null,
+      externalRunner: true,
+    },
+  };
 }
 
 function slugify(value) {
