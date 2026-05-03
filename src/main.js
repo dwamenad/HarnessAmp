@@ -885,10 +885,18 @@ async function runHttpRunner() {
     persistState();
     runDiagnosis();
   } catch (error) {
-    state.runnerStatus = error.message;
+    state.runnerStatus = friendlyRunnerError(error);
     setText('runner-status', state.runnerStatus);
     persistState();
   }
+}
+
+function friendlyRunnerError(error) {
+  const message = String(error?.message ?? error ?? '');
+  if (message === 'Failed to fetch') {
+    return 'Failed to fetch: runner is unreachable or missing CORS for POST /harnessamp';
+  }
+  return message;
 }
 
 function normalizeRunnerObservations(payload, analysis) {
@@ -1295,7 +1303,7 @@ function applyLoadedSnapshot(snapshot, options = {}) {
   setText('report-baseline', `${Math.round(snapshot.summary?.originalPassRate ?? 0)}% pass`);
   setText('report-mutated', `${Math.round(snapshot.summary?.mutatedPassRate ?? 0)}% pass`);
   setText('report-drop', `${Math.round(snapshot.summary?.robustnessDrop ?? 0)}%`);
-  setText('report-gap-band', snapshot.summary?.robustnessBand?.label ?? '--');
+  setText('report-gap-band', snapshot.summary?.robustnessBand?.label ?? fallbackRobustnessBand(snapshot.summary?.robustnessDrop));
   setText('report-surface', snapshot.deltas?.[0]?.mutationId ?? 'stable');
   setText('report-failure', snapshot.findings?.[0]?.failureTypes?.[0]?.id ?? 'wrapper_brittleness');
   setText('report-control', snapshot.findings?.[0]?.recommendation ?? 'Review controls');
@@ -1309,6 +1317,14 @@ function applyLoadedSnapshot(snapshot, options = {}) {
   renderSnapshotVariantTable(snapshot);
   showFeedback(options.localOnly ? 'Loaded local report' : 'Loaded server report');
   persistState();
+}
+
+function fallbackRobustnessBand(gap) {
+  const value = Number(gap);
+  if (!Number.isFinite(value)) return '--';
+  if (value >= 30) return 'Release Risk (high)';
+  if (value >= 15) return 'Regression Risk (medium)';
+  return 'Stable (low)';
 }
 
 function renderSnapshotVariantTable(snapshot) {
@@ -1694,6 +1710,7 @@ function scrollToRouteTarget() {
   if (!target) return;
 
   const scroll = () => {
+    target.classList.add('is-visible');
     const top = target.getBoundingClientRect().top + window.scrollY - 92;
     window.scrollTo({ top, left: 0 });
   };
@@ -1835,6 +1852,7 @@ function loadState() {
       projectRunners: [],
       loadedServerReport: null,
       sessionStatus: 'loading',
+      runnerStatus: '',
       analysis: null,
       inputError: '',
       feedback: '',
@@ -1856,6 +1874,7 @@ function persistState() {
     projectRunners,
     loadedServerReport,
     activeJobStatus,
+    runnerStatus,
     ...persistable
   } = state;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
