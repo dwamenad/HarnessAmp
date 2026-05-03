@@ -4,6 +4,11 @@ import { createServer } from 'node:http';
 const port = Number(process.env.PORT_RUNNER ?? 8787);
 
 const server = createServer(async (request, response) => {
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204, corsHeaders());
+    return response.end();
+  }
+
   if (request.method === 'GET' && request.url === '/health') {
     return sendJson(response, 200, {
       ok: true,
@@ -77,10 +82,18 @@ function readBody(request) {
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
+    ...corsHeaders(),
     'content-type': 'application/json',
-    'access-control-allow-origin': '*',
   });
   response.end(JSON.stringify(payload, null, 2));
+}
+
+function corsHeaders() {
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'content-type,authorization',
+  };
 }
 
 function mutationSeverity(severity) {
