@@ -137,6 +137,7 @@ The PR-facing metric is `Robustness Gap`, defined as original pass rate minus mu
 - [Installation](docs/installation.md)
 - [Usage](docs/usage.md)
 - [CLI](docs/cli.md)
+- [GitHub OAuth](docs/github-oauth.md)
 - [Replit demo](docs/replit.md)
 - [Failure patterns](docs/failure-patterns.md)
 - [MCP manifest prototype](docs/mcp.md)

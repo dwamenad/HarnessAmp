@@ -7,6 +7,23 @@ npm run dev
 
 The dev server opens the local Vite app. Use the bundled demo bundle or paste your own JSON into the editor.
 
+For GitHub login:
+
+```bash
+cp .env.example .env.local
+```
+
+Then set:
+
+```text
+SESSION_SECRET
+GITHUB_CLIENT_ID
+GITHUB_CLIENT_SECRET
+APP_BASE_URL=http://127.0.0.1:4173
+```
+
+See [GitHub OAuth setup](github-oauth.md).
+
 For a production build:
 
 ```bash
