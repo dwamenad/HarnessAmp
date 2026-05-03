@@ -24,6 +24,13 @@ APP_BASE_URL=http://127.0.0.1:4173
 
 See [GitHub OAuth setup](github-oauth.md).
 
+For OAuth locally, run the API and app in separate terminals:
+
+```bash
+set -a; source .env.local; set +a; npx vercel dev --listen 3000
+npm run dev
+```
+
 For a production build:
 
 ```bash
