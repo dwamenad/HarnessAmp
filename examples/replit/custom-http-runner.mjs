@@ -26,6 +26,17 @@ const server = createServer(async (request, response) => {
 
   try {
     const payload = JSON.parse(await readBody(request));
+    const variants = payload.pack?.analysis?.variants
+      ?? payload.analysis?.variants
+      ?? payload.pack?.variants
+      ?? payload.variants;
+
+    if (Array.isArray(variants) && variants.length) {
+      return sendJson(response, 200, {
+        observations: variants.map(scoreVariant),
+      });
+    }
+
     const mutation = payload.mutation ?? null;
     const task = payload.task ?? {};
     const severity = mutationSeverity(mutation?.severity);
@@ -66,7 +77,8 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`HarnessAmp Replit custom HTTP runner listening on ${port}`);
+  const address = server.address();
+  console.log(`HarnessAmp Replit custom HTTP runner listening on ${address.port}`);
 });
 
 function readBody(request) {
@@ -103,4 +115,28 @@ function mutationSeverity(severity) {
     high: 3,
     critical: 4,
   }[severity] ?? 0;
+}
+
+function scoreVariant(variant) {
+  const familyPenalty = {
+    prompt: 28,
+    tools: 38,
+    schema: 34,
+    envelope: 18,
+    timing: 10,
+    scenarios: 24,
+  }[variant.familyId] ?? 18;
+  const holdoutPenalty = variant.tier === 'holdout' ? 26 : 0;
+  const score = Math.max(8, Math.round(94 - familyPenalty - holdoutPenalty));
+  const passed = score >= 70;
+
+  return {
+    variantId: variant.id,
+    passed,
+    score,
+    latencyMs: Math.round(variant.estimatedLatencyMs ?? 500),
+    notes: passed
+      ? `Replit runner preserved ${variant.familyLabel} ${variant.tier} variant.`
+      : `Replit runner exposed ${variant.familyLabel} fragility on ${variant.tier} variant.`,
+  };
 }

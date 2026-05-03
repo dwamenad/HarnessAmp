@@ -386,6 +386,7 @@ function render() {
             <div><span>Baseline</span><strong id="report-baseline">--</strong></div>
             <div><span>Mutated</span><strong id="report-mutated">--</strong></div>
             <div><span>Robustness drop</span><strong class="danger" id="report-drop">--</strong></div>
+            <div><span>Gap band</span><strong id="report-gap-band">--</strong></div>
             <div><span>Weakest surface</span><strong id="report-surface">--</strong></div>
             <div><span>Failure class</span><strong id="report-failure">--</strong></div>
             <div><span>Recommended control</span><strong id="report-control">--</strong></div>
@@ -859,6 +860,7 @@ async function runHttpRunner() {
         preset: state.bundlePresetId,
         thresholds: state.thresholds,
         pack: state.analysis.exportPack,
+        variants: state.analysis.exportPack?.analysis?.variants ?? [],
       }),
     });
 
@@ -878,7 +880,7 @@ async function runHttpRunner() {
     document.querySelector('#runs-json').value = state.customRunsText;
     document.querySelector('#custom-toggle').checked = true;
     document.querySelector('#observed-toggle').checked = true;
-    state.runnerStatus = `Loaded ${observations.length} runner observations`;
+    state.runnerStatus = `Loaded ${observations.length} runner observations · Robustness Gap updated`;
     setText('runner-status', state.runnerStatus);
     persistState();
     runDiagnosis();
@@ -1293,6 +1295,7 @@ function applyLoadedSnapshot(snapshot, options = {}) {
   setText('report-baseline', `${Math.round(snapshot.summary?.originalPassRate ?? 0)}% pass`);
   setText('report-mutated', `${Math.round(snapshot.summary?.mutatedPassRate ?? 0)}% pass`);
   setText('report-drop', `${Math.round(snapshot.summary?.robustnessDrop ?? 0)}%`);
+  setText('report-gap-band', snapshot.summary?.robustnessBand?.label ?? '--');
   setText('report-surface', snapshot.deltas?.[0]?.mutationId ?? 'stable');
   setText('report-failure', snapshot.findings?.[0]?.failureTypes?.[0]?.id ?? 'wrapper_brittleness');
   setText('report-control', snapshot.findings?.[0]?.recommendation ?? 'Review controls');

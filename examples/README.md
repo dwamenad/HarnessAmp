@@ -6,6 +6,7 @@ This folder mirrors a larger project layout with grouped starter packs.
 - `cli/` - terminal-first samples and observed runs
 - `failures/` - collected failure-corpus examples
 - `mutations/` - small mutation-suite examples
+- `mcp/` - MCP-style tool manifest examples
 - `packs/` - compiled benchmark-pack examples
 - `risk-profiles/` - sample inputs for mutation-pack selection
 - `replit/` - Replit-ready custom HTTP runner demo
