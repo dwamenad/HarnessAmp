@@ -86,10 +86,10 @@ const mutationPackDetails = [
 ];
 
 const integrations = [
-  ['GitHub Actions', 'Run `harnessamp diagnose` in CI and fail the job when the release gate returns block.'],
+  ['GitHub Actions', 'Use the reusable action to emit Markdown, JSON, and failure-corpus artifacts while blocking risky PRs.'],
   ['Local JSON', 'Commit harness bundles, observed runs, and diagnostic reports as plain JSON artifacts.'],
   ['CLI', 'Use the terminal as the primary workflow and open the web report only when reviewing results.'],
-  ['HTTP runners', 'Wrap agents behind an endpoint that accepts variant payloads and returns observed outcomes.'],
+  ['HTTP runners', 'Point HarnessAmp at an endpoint that runs your real agent and returns normalized run results.'],
   ['MCP tool servers', 'Exercise tool-call boundaries and server responses without changing the agent framework.'],
   ['Custom runners', 'Implement the runner contract for graph agents, crew-style agents, or internal harnesses.'],
 ];
@@ -106,8 +106,7 @@ const githubActionsSnippet = `name: HarnessAmp release gate
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   robustness:
@@ -117,8 +116,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm ci
-      - run: npm run release:gate -- examples/cli/quickstart-bundle.json examples/cli/observed-runs.json --write-md artifacts/harnessamp-gate.md --write-json artifacts/harnessamp-gate.json`;
+      - uses: ./
+        with:
+          bundle: examples/demo-bundle.json
+          max-mutations: 24
+          max-robustness-gap: 20
+          output-dir: harnessamp-artifacts`;
 
 const runnerContract = [
   ['Input', 'Accept one baseline or mutated variant with scenario id, mutation id, seed, wrapper payload, and metadata.'],
@@ -131,8 +134,8 @@ const runnerContract = [
 const proofStats = [
   ['7', 'mutation packs'],
   ['20+', 'deterministic mutations'],
-  ['seeded', 'replayable runs'],
-  ['pass/warn/block', 'CI status'],
+  ['3 artifacts', 'report + json + corpus'],
+  ['red X', 'PR-blocking gate'],
   ['2 benchmark lanes', 'support + browser'],
 ];
 
@@ -159,7 +162,7 @@ const modules = [
   ['Behavioral Delta Layer', 'Measure how output quality, pass rate, latency, tool calls, and error classes shift when conditions change.'],
   ['Failure Classifier', 'Turn brittle behavior into named failure modes that engineers can route, reproduce, and fix.'],
   ['Robustness Reports', 'Readable diagnostic output with weakest surface, recommended controls, and replay metadata.'],
-  ['CI/CD Gates', 'Use robustness thresholds to pass, warn, or block merges and deploys.'],
+  ['CI/CD Gates', 'Convert the Robustness Gap into pass, warn, or block status for pull requests and releases.'],
 ];
 
 const STORAGE_KEY = 'harnessamp.webDemoState';
@@ -266,8 +269,8 @@ function render() {
         <section class="hero reveal">
           <div class="hero__copy">
             <p class="eyebrow">Agent reliability diagnosis</p>
-            <h1>Find out what makes your agent fail.</h1>
-            <p class="hero__lede">HarnessAmp wraps your agent harness, applies deterministic mutations to prompts, tools, permissions, context, network sinks, and sandbox boundaries, then reports exactly where reliability breaks.</p>
+            <h1>Turn agent fragility into a failing PR check.</h1>
+            <p class="hero__lede">HarnessAmp wraps your agent harness, mutates prompts, tools, permissions, context, network sinks, and sandbox boundaries, then reports the Robustness Gap and the exact condition that broke reliability.</p>
             <div class="hero__actions">
               <a class="button button--primary" href="#demo">Run a robustness diagnosis</a>
               <a class="button button--secondary" href="#report">View sample report</a>
@@ -281,7 +284,7 @@ function render() {
               <div><span>Drop</span><b class="danger" id="hero-drop">--</b></div>
             </div>
             <div class="trace"><span>weakest_surface</span><strong id="hero-surface">waiting for run</strong></div>
-            <div class="trace"><span>recommended_control</span><strong id="hero-control">select a profile and run diagnosis</strong></div>
+            <div class="trace"><span>recommended_control</span><strong id="hero-control">run a diagnosis to generate CI-ready evidence</strong></div>
             <div class="mutation-map" id="hero-bars">${Array.from({ length: 8 }, (_, index) => `<i style="--h: ${36 + index * 6}%"></i>`).join('')}</div>
           </div>
         </section>
@@ -297,7 +300,7 @@ function render() {
           <div class="section__intro">
             <p class="eyebrow">Interactive demo</p>
             <h2>Load a sample harness. Choose risk. Run mutations.</h2>
-            <p>The browser demo calls the same analysis engine used by the CLI examples, then renders the resulting pack, report, and gate status.</p>
+            <p>The browser demo calls the same analysis engine used by the CLI, reusable GitHub Action, and release gate. The output is a report, JSON payload, and corpus-ready failure record.</p>
             <div class="try-path">
               <span>01 Select profile</span>
               <span>02 Review schema</span>
@@ -484,10 +487,10 @@ function render() {
         </section>
 
         <section id="integrations" class="section reveal">
-          <div class="section__intro"><p class="eyebrow">Integrations detail</p><h2>Bring your runner. Keep your stack.</h2></div>
+          <div class="section__intro"><p class="eyebrow">Integrations detail</p><h2>Bring your runner. Keep your stack.</h2><p>The default mock runner proves the workflow. The custom HTTP runner lets real agents receive baseline and mutated payloads through the same contract.</p></div>
           <div class="integration-grid">${integrations.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
           <div class="ci-snippet">
-            <div class="section__intro"><p class="eyebrow">Concrete CI path</p><h2>Release gate command and GitHub Actions.</h2></div>
+            <div class="section__intro"><p class="eyebrow">Concrete CI path</p><h2>Reusable action, PR summary, and artifacts.</h2><p>Each run writes a Markdown report, JSON report, and failure corpus artifact. A block verdict exits non-zero.</p></div>
             <pre>${escapeHtml(githubActionsSnippet)}</pre>
           </div>
         </section>
