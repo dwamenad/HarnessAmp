@@ -49,7 +49,7 @@ inputs:
 
 outputs:
   verdict:
-    description: HarnessAmp release verdict: pass, warn, or block.
+    description: 'HarnessAmp release verdict: pass, warn, or block.'
     value: ${{ steps.robustness-gate.outputs.verdict }}
   robustness-gap:
     description: Original pass rate minus mutated pass rate.
