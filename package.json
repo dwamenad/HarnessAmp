@@ -17,6 +17,8 @@
     "collect:failures": "node scripts/collect-failures.mjs",
     "release:gate": "node scripts/release-gate.mjs",
     "diagnose": "node scripts/harnessamp.mjs diagnose",
+    "replit:start": "node scripts/replit-start.mjs",
+    "replit:runner": "node examples/replit/custom-http-runner.mjs",
     "docker:build": "docker build -t harnessamp:local .",
     "docker:run": "docker run --rm -p 8088:80 harnessamp:local",
     "docker:stop": "docker stop harnessamp-local"
