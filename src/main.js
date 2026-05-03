@@ -867,9 +867,9 @@ async function runHttpRunner() {
     }
 
     const payload = await response.json();
-    const observations = Array.isArray(payload) ? payload : payload.observations;
+    const observations = normalizeRunnerObservations(payload, state.analysis);
     if (!Array.isArray(observations)) {
-      throw new Error('Runner response must be an observation array or { observations }.');
+      throw new Error('Runner response must be an observation array, { observations }, or an AgentRunResult.');
     }
 
     state.customRunsText = JSON.stringify(observations, null, 2);
@@ -887,6 +887,29 @@ async function runHttpRunner() {
     setText('runner-status', state.runnerStatus);
     persistState();
   }
+}
+
+function normalizeRunnerObservations(payload, analysis) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.observations)) return payload.observations;
+  const result = payload?.result ?? payload;
+  if (!result || typeof result !== 'object') return null;
+  const variantId = result.variantId
+    ?? result.mutationId
+    ?? result.metadata?.mutationId
+    ?? analysis?.pack?.variants?.[0]?.id
+    ?? 'prompt-visible';
+  const passed = Boolean(result.passed ?? result.metadata?.passed);
+  const score = Number(result.score ?? result.metadata?.score ?? (passed ? 90 : 25));
+  return [
+    {
+      variantId,
+      passed,
+      score,
+      latencyMs: Number(result.latencyMs ?? 0),
+      notes: result.outputText ?? result.notes ?? 'External runner returned AgentRunResult.',
+    },
+  ];
 }
 
 function parseJsonInput(text, label) {
