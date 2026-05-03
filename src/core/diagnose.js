@@ -10,7 +10,7 @@ export async function diagnoseHarness(bundleInput, options = {}) {
     packs: options.packs,
     maxMutations: options.maxMutations ?? 24,
   });
-  const runner = options.runner ?? createRunner(options.runnerKind ?? 'mock');
+  const runner = options.runner ?? createRunner(options.runnerKind ?? 'mock', options.runnerOptions ?? {});
   const baselineRuns = [];
   const mutationRuns = [];
 

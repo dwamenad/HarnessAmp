@@ -28,6 +28,8 @@ if (command === 'validate') {
   const diagnosis = await diagnoseHarness(bundle, {
     maxMutations: options.maxMutations ?? 5,
     riskProfile: options.riskProfile,
+    runnerKind: options.runnerKind,
+    runnerOptions: options.runnerOptions,
   });
   console.log(JSON.stringify({
     baselineRuns: diagnosis.baselineRuns,
@@ -37,6 +39,8 @@ if (command === 'validate') {
   const diagnosis = await diagnoseHarness(bundle, {
     maxMutations: options.maxMutations,
     riskProfile: options.riskProfile,
+    runnerKind: options.runnerKind,
+    runnerOptions: options.runnerOptions,
   });
   console.log(diagnosis.reportText);
 } else if (command === 'registry') {
@@ -45,6 +49,8 @@ if (command === 'validate') {
   const diagnosis = await diagnoseHarness(bundle, {
     maxMutations: options.maxMutations,
     riskProfile: options.riskProfile,
+    runnerKind: options.runnerKind,
+    runnerOptions: options.runnerOptions,
   });
   if (options.json) {
     console.log(JSON.stringify(diagnosis, null, 2));
@@ -67,6 +73,8 @@ function parseArgs(args) {
     maxMutations: null,
     json: false,
     riskProfile: null,
+    runnerKind: 'mock',
+    runnerOptions: {},
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -78,6 +86,21 @@ function parseArgs(args) {
     }
     if (arg === '--risk-profile') {
       parsed.riskProfile = JSON.parse(args[index + 1] ?? '{}');
+      index += 1;
+      continue;
+    }
+    if (arg === '--runner-kind') {
+      parsed.runnerKind = args[index + 1] ?? parsed.runnerKind;
+      index += 1;
+      continue;
+    }
+    if (arg === '--runner-endpoint') {
+      parsed.runnerOptions.endpoint = args[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--runner-token') {
+      parsed.runnerOptions.token = args[index + 1] ?? '';
       index += 1;
       continue;
     }

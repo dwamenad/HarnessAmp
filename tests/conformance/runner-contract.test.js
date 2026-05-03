@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { createDemoBundle } from '../../src/core/engine.js';
 import {
   AgentRunner,
@@ -68,7 +69,6 @@ test('future adapter classes are explicit AgentRunner placeholders', async () =>
     GraphWorkflowRunner,
     CrewWorkflowRunner,
     MultiAgentRunner,
-    CustomHTTPRunner,
     MCPRunner,
   ];
 
@@ -76,6 +76,47 @@ test('future adapter classes are explicit AgentRunner placeholders', async () =>
     const runner = new Runner();
     assert.ok(runner instanceof AgentRunner);
     await assert.rejects(() => runner.run({}), /must be implemented/);
+  }
+});
+
+test('custom HTTP runner normalizes external runner responses', async () => {
+  const server = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    const payload = JSON.parse(body);
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({
+      passed: true,
+      score: 91,
+      outputText: `external ok for ${payload.task.id}`,
+      latencyMs: 42,
+      toolCalls: [{ name: 'lookup_customer', arguments: {} }],
+    }));
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+
+  try {
+    const address = server.address();
+    const bundle = createDemoBundle();
+    const runner = createRunner('custom_http', {
+      endpoint: `http://127.0.0.1:${address.port}`,
+    });
+    const result = await runner.run({
+      bundle,
+      task: bundle.harness.scenarios[0],
+      environment: 'conformance',
+    });
+
+    assert.ok(runner instanceof CustomHTTPRunner);
+    REQUIRED_RUN_RESULT_FIELDS.forEach((field) => {
+      assert.ok(field in result, `missing ${field}`);
+    });
+    assert.equal(result.metadata.passed, true);
+    assert.equal(result.metadata.score, 91);
+    assert.equal(result.toolMode, 'live');
+    assert.equal(result.outputText, `external ok for ${bundle.harness.scenarios[0].id}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 

@@ -49,6 +49,8 @@ Useful commands:
 | Analyze bundle | `npm run analyze -- examples/demo-bundle.json` |
 | Diagnose mutations | `npm run diagnose -- examples/demo-bundle.json` |
 | Release gate | `npm run release:gate` |
+| GitHub Action gate | `node scripts/github-action.mjs --bundle examples/demo-bundle.json` |
+| Custom HTTP runner | `node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --runner-kind custom_http --runner-endpoint https://runner.example.com/harnessamp` |
 | Compile traces | `npm run compile:traces` |
 | Run tests | `npm test` |
 | Run E2E tests | `npm run test:e2e` |
@@ -98,6 +100,14 @@ KV_REST_API_TOKEN
 ```
 
 Release gates fail on configured thresholds for overall score, holdout pass rate, and robustness gap.
+
+The reusable GitHub Action at `action.yml` turns HarnessAmp into a PR-blocking robustness gate. It emits:
+
+- `harnessamp-report.md`
+- `harnessamp-report.json`
+- `harnessamp-failure-corpus.json`
+
+The PR-facing metric is `Robustness Gap`, defined as original pass rate minus mutated pass rate.
 
 ## Docs
 

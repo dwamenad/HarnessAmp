@@ -15,6 +15,24 @@ export function collectFailureCorpus(analysis, options = {}) {
   };
 }
 
+export function collectDiagnosticFailureCorpus(diagnosis) {
+  const entries = collectDiagnosticFailureEntries(diagnosis);
+
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    project: diagnosis.summary?.project ?? diagnosis.bundle?.project ?? 'HarnessAmp diagnosis',
+    source: {
+      packProject: diagnosis.bundle?.project ?? 'unknown',
+      packVersion: diagnosis.bundle?.version ?? 1,
+      analysisMode: 'diagnosis',
+      mutationPackVersion: diagnosis.suite?.registryVersion ?? 'unknown',
+    },
+    summary: summarizeFailureCorpus(entries),
+    entries,
+  };
+}
+
 export function mergeFailureCorpora(...corpora) {
   const entriesById = new Map();
 
@@ -110,6 +128,44 @@ function collectFailureEntries(analysis, options) {
         },
       },
     ];
+  });
+}
+
+function collectDiagnosticFailureEntries(diagnosis) {
+  const bundle = diagnosis.bundle ?? {};
+  return (diagnosis.findings ?? []).map((finding) => {
+    const mutation = finding.mutation ?? {};
+    const failureType = finding.failureTypes?.[0] ?? {};
+    return {
+      id: buildEntryId(bundle.project ?? 'diagnosis', finding.mutationId, failureType.id ?? 'diagnostic_failure'),
+      capturedAt: diagnosis.generatedAt ?? new Date().toISOString(),
+      project: bundle.project ?? diagnosis.summary?.project ?? 'HarnessAmp diagnosis',
+      packRef: {
+        project: bundle.project ?? 'unknown',
+        version: bundle.version ?? 1,
+      },
+      variantId: finding.mutationId,
+      familyId: mutation.mutationFamily ?? 'unknown',
+      familyLabel: mutation.mutationFamily ?? 'unknown',
+      surface: mutation.surface ?? 'unknown',
+      tier: 'mutated',
+      title: mutation.operation ?? finding.mutationId,
+      failureType: failureType.id ?? mutation.expectedFailure ?? 'diagnostic_failure',
+      observedBehavior: finding.delta?.after?.outputText ?? 'Mutated run failed without output text.',
+      expectedBehavior: mutation.robustBehavior ?? 'Preserve the contract under mutation.',
+      fixCandidates: [finding.recommendation].filter(Boolean),
+      generalized: null,
+      evidence: {
+        mutationId: finding.mutationId,
+        mutationFamily: mutation.mutationFamily,
+        mutationPack: mutation.mutationPack,
+        trustBoundary: mutation.trustBoundary,
+        severity: finding.highestSeverity ?? mutation.severity,
+        deltaType: finding.delta?.deltaType ?? [],
+        diagnosticSignal: mutation.diagnosticSignal,
+        recommendedControl: mutation.recommendedControl,
+      },
+    };
   });
 }
 

@@ -2,6 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/core/engine.js';
+import { diagnoseHarness } from '../src/core/diagnose.js';
+import { evaluateDiagnosisGate, formatCiGateSummary } from '../src/core/ci-gate.js';
 
 const args = process.argv.slice(2);
 const positional = [];
@@ -11,6 +13,9 @@ const options = {
   minOverallScore: 65,
   writeJson: null,
   writeMd: null,
+  diagnose: false,
+  maxMutations: 24,
+  failOnWarn: false,
 };
 
 for (let index = 0; index < args.length; index += 1) {
@@ -40,6 +45,20 @@ for (let index = 0; index < args.length; index += 1) {
     index += 1;
     continue;
   }
+  if (arg === '--diagnose') {
+    options.diagnose = true;
+    continue;
+  }
+  if (arg === '--max-mutations') {
+    options.maxMutations = Number(args[index + 1] ?? options.maxMutations);
+    index += 1;
+    continue;
+  }
+  if (arg === '--fail-on-warn') {
+    options.failOnWarn = String(args[index + 1] ?? 'false').toLowerCase() === 'true';
+    index += 1;
+    continue;
+  }
   if (!arg.startsWith('--')) {
     positional.push(arg);
   }
@@ -62,6 +81,50 @@ if (observationsPath) {
     throw parsed.error;
   }
   observationsInput = parsed.value;
+}
+
+if (options.diagnose) {
+  const diagnosis = await diagnoseHarness(bundleInput, {
+    maxMutations: options.maxMutations,
+  });
+  const gate = evaluateDiagnosisGate(diagnosis, {
+    minOverallScore: options.minOverallScore,
+    minHoldoutPass: options.minHoldoutPass,
+    maxRobustnessGap: options.maxGap,
+    failOnWarn: options.failOnWarn,
+  });
+  const markdown = formatCiGateSummary(diagnosis, gate, {
+    reportPath: options.writeMd,
+    jsonPath: options.writeJson,
+  });
+  const payload = {
+    verdict: gate.verdict,
+    thresholds: gate.thresholds,
+    metrics: gate.metrics,
+    checks: gate.checks,
+    summary: diagnosis.summary,
+  };
+
+  if (options.writeJson) {
+    await ensureParent(options.writeJson);
+    await writeFile(resolve(options.writeJson), JSON.stringify(payload, null, 2));
+  }
+
+  if (options.writeMd) {
+    await ensureParent(options.writeMd);
+    await writeFile(resolve(options.writeMd), markdown);
+  }
+
+  console.log(markdown);
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    await writeFile(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`, { flag: 'a' });
+  }
+
+  if (gate.shouldFail) {
+    process.exitCode = gate.verdict === 'block' ? 2 : 1;
+  }
+  process.exit();
 }
 
 const analysis = analyzeBundle(bundleInput, observationsInput);

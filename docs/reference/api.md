@@ -46,6 +46,15 @@ Important outputs:
 - `summary` - entry counts, hidden failure counts, and unique surfaces
 - `entries` - concrete regression records with expected vs observed behavior
 
+## `collectDiagnosticFailureCorpus(diagnosis)`
+
+Builds a failure corpus from mutation-diagnosis findings.
+
+Important outputs:
+
+- `summary` - entry counts and unique surfaces/failure types
+- `entries` - mutation-linked failure records with trust boundaries and recommended controls
+
 ## `mergeFailureCorpora(...corpora)`
 
 Merges multiple failure corpora while deduplicating entries by id.
@@ -71,3 +80,14 @@ Important outputs:
 - `findings` - classified failures with recommendations
 - `summary` - pass/warn/block verdict and robustness drop
 - `reportText` - markdown robustness report
+
+## `evaluateDiagnosisGate(diagnosis, thresholds)`
+
+Converts a diagnosis into CI gate checks.
+
+Important outputs:
+
+- `verdict` - `pass`, `warn`, or `block`
+- `shouldFail` - whether the process should exit non-zero
+- `metrics.robustnessGap` - original pass rate minus mutated pass rate
+- `checks` - threshold-by-threshold pass/fail results
