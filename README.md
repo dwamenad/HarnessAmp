@@ -8,9 +8,9 @@
 HarnessAmp stress-tests AI agents before production. It wraps an existing harness, applies deterministic mutations to prompts, tools, permissions, context, network sinks, and sandbox boundaries, then reports where reliability breaks.
 
 <p align="center">
-  <img src="docs/screenshots/harnessamp-demo-current.png" alt="HarnessAmp interactive demo" width="900">
+  <img src="docs/screenshots/readme-hero-gate.png" alt="HarnessAmp robustness gate hero showing baseline, mutated pass rate, robustness gap, and recommended control" width="900">
   <br/>
-  <em>Interactive demo with risk profiles, schema validation, runner configuration, and release-gate thresholds.</em>
+  <em>HarnessAmp turns wrapper fragility into a visible Robustness Gap and PR-ready release signal.</em>
 </p>
 
 ## What it does
@@ -71,9 +71,9 @@ The web app now behaves like a product console, not a landing page. It includes:
 - copy/download actions for reports, packs, CI YAML, and examples
 
 <p align="center">
-  <img src="docs/screenshots/harnessamp-report-current.png" alt="HarnessAmp report view" width="900">
+  <img src="docs/screenshots/readme-console-gate.png" alt="HarnessAmp product console with bundle presets, risk profiles, mutation intensity, schema validation, and benchmark contract panels" width="900">
   <br/>
-  <em>Report view with robustness drop, failure class, recommended control, report ID, and saved snapshot status.</em>
+  <em>Product console with risk profiles, benchmark packs, HTTP runner setup, schema validation, and release-gate thresholds.</em>
 </p>
 
 ## Mutation packs
@@ -108,6 +108,12 @@ The reusable GitHub Action at `action.yml` turns HarnessAmp into a PR-blocking r
 - `harnessamp-failure-corpus.json`
 
 The PR-facing metric is `Robustness Gap`, defined as original pass rate minus mutated pass rate.
+
+<p align="center">
+  <img src="docs/screenshots/readme-ci-action.png" alt="HarnessAmp integrations view showing reusable GitHub Action configuration and artifact outputs" width="900">
+  <br/>
+  <em>Reusable GitHub Action flow that emits Markdown, JSON, and failure-corpus artifacts.</em>
+</p>
 
 ## Docs
 
