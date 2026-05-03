@@ -51,6 +51,7 @@ Useful commands:
 | Release gate | `npm run release:gate` |
 | GitHub Action gate | `node scripts/github-action.mjs --bundle examples/demo-bundle.json` |
 | Custom HTTP runner | `node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --runner-kind custom_http --runner-endpoint https://runner.example.com/harnessamp` |
+| Replit demo | `npm run replit:start` |
 | Compile traces | `npm run compile:traces` |
 | Run tests | `npm test` |
 | Run E2E tests | `npm run test:e2e` |
@@ -75,6 +76,22 @@ The web app now behaves like a product console, not a landing page. It includes:
   <br/>
   <em>Product console with risk profiles, benchmark packs, HTTP runner setup, schema validation, and release-gate thresholds.</em>
 </p>
+
+## Replit demo
+
+HarnessAmp includes a Replit-ready demo that starts the web console and a custom HTTP runner endpoint.
+
+```bash
+npm run replit:start
+```
+
+Then point the HTTP runner field at:
+
+```text
+https://<your-repl-url>/harnessamp
+```
+
+See [docs/replit.md](docs/replit.md) and [examples/replit](examples/replit).
 
 ## Mutation packs
 
@@ -120,6 +137,10 @@ The PR-facing metric is `Robustness Gap`, defined as original pass rate minus mu
 - [Installation](docs/installation.md)
 - [Usage](docs/usage.md)
 - [CLI](docs/cli.md)
+- [GitHub OAuth](docs/github-oauth.md)
+- [Replit demo](docs/replit.md)
+- [Failure patterns](docs/failure-patterns.md)
+- [MCP manifest prototype](docs/mcp.md)
 - [Mutation engine](docs/mutation-engine.md)
 - [Runner contract](docs/adapters/runner-contract.md)
 - [Testing](docs/testing.md)

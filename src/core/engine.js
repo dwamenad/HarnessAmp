@@ -820,6 +820,7 @@ function summarizeOverall(bundle, features, familyStats, outcomes) {
       : 65;
   const hotspot = familyStats[0] ?? null;
   const label = overallScore >= 85 ? 'stable' : overallScore >= 70 ? 'watch' : overallScore >= 55 ? 'brittle' : 'fragile';
+  const robustnessBand = classifyRobustnessGap(gap);
 
   return {
     project: bundle.project,
@@ -827,6 +828,7 @@ function summarizeOverall(bundle, features, familyStats, outcomes) {
     visiblePassRate: Math.round(visibleMean),
     holdoutPassRate: Math.round(holdoutMean),
     gap,
+    robustnessBand,
     confidence,
     label,
     modeLabel: outcomes.every((item) => item.source === 'observed')
@@ -850,6 +852,40 @@ function summarizeOverall(bundle, features, familyStats, outcomes) {
         ? `The harness is most brittle around ${hotspot.label}. The holdout gap is ${hotspot.gap} points.`
         : `The harness is manageable, but ${hotspot.label} is still the weakest surface.`
       : 'No variants were generated.',
+  };
+}
+
+export function classifyRobustnessGap(gap) {
+  const value = Number(gap) || 0;
+  if (value <= 10) {
+    return {
+      id: 'stable',
+      label: 'Stable',
+      severity: 'low',
+      description: 'Small gap. Keep monitoring and expand coverage.',
+    };
+  }
+  if (value <= 25) {
+    return {
+      id: 'brittle',
+      label: 'Brittle',
+      severity: 'medium',
+      description: 'Meaningful wrapper sensitivity. Harden before raising autonomy.',
+    };
+  }
+  if (value <= 50) {
+    return {
+      id: 'release_risk',
+      label: 'Release Risk',
+      severity: 'high',
+      description: 'Large robustness drop. Treat as a release risk.',
+    };
+  }
+  return {
+    id: 'blocker',
+    label: 'Blocker',
+    severity: 'critical',
+    description: 'Severe wrapper fragility. Block release until fixed.',
   };
 }
 
@@ -941,6 +977,7 @@ function buildExportPack(bundle, features, pack, familyStats, outcomes, summary,
         visiblePassRate: summary.visiblePassRate,
         holdoutPassRate: summary.holdoutPassRate,
         gap: summary.gap,
+        robustnessBand: summary.robustnessBand,
         label: summary.label,
         mode: summary.modeLabel,
         hotspot: summary.hotspot,
@@ -985,6 +1022,7 @@ export function formatMarkdownReport(bundle, features, familyStats, summary, rec
   lines.push(`- Visible pass rate: ${summary.visiblePassRate}%`);
   lines.push(`- Holdout pass rate: ${summary.holdoutPassRate}%`);
   lines.push(`- Gap: ${summary.gap} points`);
+  lines.push(`- Robustness Gap band: ${summary.robustnessBand.label} (${summary.robustnessBand.severity})`);
   lines.push(`- Variants: ${summary.variantCount}`);
   lines.push('');
   lines.push('## Key finding');

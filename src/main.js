@@ -386,6 +386,7 @@ function render() {
             <div><span>Baseline</span><strong id="report-baseline">--</strong></div>
             <div><span>Mutated</span><strong id="report-mutated">--</strong></div>
             <div><span>Robustness drop</span><strong class="danger" id="report-drop">--</strong></div>
+            <div><span>Gap band</span><strong id="report-gap-band">--</strong></div>
             <div><span>Weakest surface</span><strong id="report-surface">--</strong></div>
             <div><span>Failure class</span><strong id="report-failure">--</strong></div>
             <div><span>Recommended control</span><strong id="report-control">--</strong></div>
@@ -859,6 +860,7 @@ async function runHttpRunner() {
         preset: state.bundlePresetId,
         thresholds: state.thresholds,
         pack: state.analysis.exportPack,
+        variants: state.analysis.exportPack?.analysis?.variants ?? [],
       }),
     });
 
@@ -867,9 +869,9 @@ async function runHttpRunner() {
     }
 
     const payload = await response.json();
-    const observations = Array.isArray(payload) ? payload : payload.observations;
+    const observations = normalizeRunnerObservations(payload, state.analysis);
     if (!Array.isArray(observations)) {
-      throw new Error('Runner response must be an observation array or { observations }.');
+      throw new Error('Runner response must be an observation array, { observations }, or an AgentRunResult.');
     }
 
     state.customRunsText = JSON.stringify(observations, null, 2);
@@ -878,7 +880,7 @@ async function runHttpRunner() {
     document.querySelector('#runs-json').value = state.customRunsText;
     document.querySelector('#custom-toggle').checked = true;
     document.querySelector('#observed-toggle').checked = true;
-    state.runnerStatus = `Loaded ${observations.length} runner observations`;
+    state.runnerStatus = `Loaded ${observations.length} runner observations · Robustness Gap updated`;
     setText('runner-status', state.runnerStatus);
     persistState();
     runDiagnosis();
@@ -887,6 +889,29 @@ async function runHttpRunner() {
     setText('runner-status', state.runnerStatus);
     persistState();
   }
+}
+
+function normalizeRunnerObservations(payload, analysis) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.observations)) return payload.observations;
+  const result = payload?.result ?? payload;
+  if (!result || typeof result !== 'object') return null;
+  const variantId = result.variantId
+    ?? result.mutationId
+    ?? result.metadata?.mutationId
+    ?? analysis?.pack?.variants?.[0]?.id
+    ?? 'prompt-visible';
+  const passed = Boolean(result.passed ?? result.metadata?.passed);
+  const score = Number(result.score ?? result.metadata?.score ?? (passed ? 90 : 25));
+  return [
+    {
+      variantId,
+      passed,
+      score,
+      latencyMs: Number(result.latencyMs ?? 0),
+      notes: result.outputText ?? result.notes ?? 'External runner returned AgentRunResult.',
+    },
+  ];
 }
 
 function parseJsonInput(text, label) {
@@ -1270,6 +1295,7 @@ function applyLoadedSnapshot(snapshot, options = {}) {
   setText('report-baseline', `${Math.round(snapshot.summary?.originalPassRate ?? 0)}% pass`);
   setText('report-mutated', `${Math.round(snapshot.summary?.mutatedPassRate ?? 0)}% pass`);
   setText('report-drop', `${Math.round(snapshot.summary?.robustnessDrop ?? 0)}%`);
+  setText('report-gap-band', snapshot.summary?.robustnessBand?.label ?? '--');
   setText('report-surface', snapshot.deltas?.[0]?.mutationId ?? 'stable');
   setText('report-failure', snapshot.findings?.[0]?.failureTypes?.[0]?.id ?? 'wrapper_brittleness');
   setText('report-control', snapshot.findings?.[0]?.recommendation ?? 'Review controls');

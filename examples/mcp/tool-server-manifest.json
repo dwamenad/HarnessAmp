@@ -1,0 +1,32 @@
+{
+  "name": "Demo MCP Support Tools",
+  "tools": [
+    {
+      "name": "lookup_customer",
+      "description": "Find a customer by email or account id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customer_id": { "type": "string" },
+          "email": { "type": "string" }
+        },
+        "required": ["customer_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_refund",
+      "description": "Create a refund after approval metadata is present.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": { "type": "string" },
+          "amount": { "type": "number" },
+          "approval_id": { "type": "string" }
+        },
+        "required": ["order_id", "amount", "approval_id"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

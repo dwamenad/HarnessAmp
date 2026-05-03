@@ -1,0 +1,13 @@
+modules = ["nodejs-20"]
+run = "npm run replit:start"
+
+[nix]
+channel = "stable-24_05"
+
+[[ports]]
+localPort = 4173
+externalPort = 80
+
+[[ports]]
+localPort = 8787
+externalPort = 8787

@@ -50,6 +50,7 @@ export function buildReportSnapshot({
       originalPassRate: analysis.summary.visiblePassRate,
       mutatedPassRate: analysis.summary.holdoutPassRate,
       robustnessDrop: analysis.summary.gap,
+      robustnessBand: analysis.summary.robustnessBand,
       verdict: normalizeVerdict(analysis.summary),
       overallScore: analysis.summary.overallScore,
       confidence: analysis.summary.confidence,
