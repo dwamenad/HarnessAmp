@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeBundle, createDemoBundle } from '../src/core/engine.js';
-import { collectFailureCorpus, mergeFailureCorpora } from '../src/reports/failure-corpus.js';
+import { diagnoseHarness } from '../src/core/diagnose.js';
+import { collectDiagnosticFailureCorpus, collectFailureCorpus, mergeFailureCorpora } from '../src/reports/failure-corpus.js';
 
 test('failure corpus collects failed variants from an analysis run', () => {
   const analysis = analyzeBundle(createDemoBundle(), [
@@ -24,4 +25,13 @@ test('failure corpora can be merged without duplicating entry ids', () => {
   const merged = mergeFailureCorpora(corpus, corpus);
 
   assert.equal(merged.summary.entryCount, corpus.summary.entryCount);
+});
+
+test('diagnostic failure corpus preserves mutation trust-boundary evidence', async () => {
+  const diagnosis = await diagnoseHarness(createDemoBundle(), { maxMutations: 3 });
+  const corpus = collectDiagnosticFailureCorpus(diagnosis);
+
+  assert.ok(corpus.summary.entryCount >= 1);
+  assert.equal(corpus.source.analysisMode, 'diagnosis');
+  assert.ok(corpus.entries.some((entry) => entry.evidence.trustBoundary));
 });
