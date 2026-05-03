@@ -1,0 +1,105 @@
+name: HarnessAmp Robustness Gate
+description: Stress-test an AI agent harness with deterministic mutations and block PRs on robustness regressions.
+author: HarnessAmp
+
+inputs:
+  bundle:
+    description: Path to the benchmark or harness bundle JSON.
+    required: true
+  observations:
+    description: Optional path to observed runs JSON. Reserved for compatibility with analysis-based gates.
+    required: false
+    default: ''
+  max-mutations:
+    description: Maximum deterministic mutations to run.
+    required: false
+    default: '24'
+  min-overall-score:
+    description: Minimum acceptable overall score.
+    required: false
+    default: '65'
+  min-holdout-pass:
+    description: Minimum acceptable mutated pass rate.
+    required: false
+    default: '60'
+  max-robustness-gap:
+    description: Maximum allowed Robustness Gap, defined as original pass rate minus mutated pass rate.
+    required: false
+    default: '20'
+  fail-on-warn:
+    description: Fail the workflow for WARN verdicts as well as BLOCK verdicts.
+    required: false
+    default: 'false'
+  output-dir:
+    description: Directory where HarnessAmp writes Markdown, JSON, and failure-corpus artifacts.
+    required: false
+    default: harnessamp-artifacts
+  runner-kind:
+    description: Runner adapter kind. Defaults to mock; future values can include custom_http or mcp.
+    required: false
+    default: mock
+  runner-endpoint:
+    description: Endpoint for the custom_http runner.
+    required: false
+    default: ''
+  runner-token:
+    description: Optional bearer token for the custom_http runner.
+    required: false
+    default: ''
+
+outputs:
+  verdict:
+    description: HarnessAmp release verdict: pass, warn, or block.
+    value: ${{ steps.robustness-gate.outputs.verdict }}
+  robustness-gap:
+    description: Original pass rate minus mutated pass rate.
+    value: ${{ steps.robustness-gate.outputs.robustness-gap }}
+  original-pass-rate:
+    description: Baseline/original pass rate.
+    value: ${{ steps.robustness-gate.outputs.original-pass-rate }}
+  mutated-pass-rate:
+    description: Mutated pass rate.
+    value: ${{ steps.robustness-gate.outputs.mutated-pass-rate }}
+  report-path:
+    description: Path to the Markdown report artifact.
+    value: ${{ steps.robustness-gate.outputs.report-path }}
+  json-path:
+    description: Path to the JSON report artifact.
+    value: ${{ steps.robustness-gate.outputs.json-path }}
+  failure-corpus-path:
+    description: Path to the generated failure corpus artifact.
+    value: ${{ steps.robustness-gate.outputs.failure-corpus-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install HarnessAmp dependencies
+      shell: bash
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        if [ -d node_modules ]; then
+          echo "HarnessAmp dependencies already installed."
+          exit 0
+        fi
+        if [ -f package-lock.json ]; then
+          npm ci
+        else
+          npm install
+        fi
+
+    - name: Run HarnessAmp robustness gate
+      id: robustness-gate
+      shell: bash
+      run: |
+        node "$GITHUB_ACTION_PATH/scripts/github-action.mjs" \
+          --bundle "${{ inputs.bundle }}" \
+          --observations "${{ inputs.observations }}" \
+          --max-mutations "${{ inputs.max-mutations }}" \
+          --min-overall-score "${{ inputs.min-overall-score }}" \
+          --min-holdout-pass "${{ inputs.min-holdout-pass }}" \
+          --max-robustness-gap "${{ inputs.max-robustness-gap }}" \
+          --fail-on-warn "${{ inputs.fail-on-warn }}" \
+          --output-dir "${{ inputs.output-dir }}" \
+          --runner-kind "${{ inputs.runner-kind }}" \
+          --runner-endpoint "${{ inputs.runner-endpoint }}" \
+          --runner-token "${{ inputs.runner-token }}"
