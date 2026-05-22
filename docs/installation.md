@@ -5,7 +5,9 @@ npm install
 npm run dev
 ```
 
-The dev server opens the local Vite app. Use the bundled demo bundle or paste your own JSON into the editor.
+`npm run dev` starts the local Vite app on `4173` and the local API runtime on `3000`. If `HARNESSAMP_DEV_AUTH` is unset, the API seeds a local dev session automatically.
+
+Use the bundled demo bundle or paste your own JSON into the editor.
 
 For GitHub login:
 
@@ -20,16 +22,18 @@ SESSION_SECRET
 GITHUB_CLIENT_ID
 GITHUB_CLIENT_SECRET
 APP_BASE_URL=http://127.0.0.1:4173
+HARNESSAMP_DEV_AUTH=0
 ```
 
 See [GitHub OAuth setup](github-oauth.md).
 
-For OAuth locally, run the API and app in separate terminals:
+For OAuth locally, run:
 
 ```bash
-set -a; source .env.local; set +a; npx vercel dev --listen 3000
 npm run dev
 ```
+
+If you prefer split terminals, use `npm run dev:api` and `npm run dev:web`.
 
 For a production build:
 

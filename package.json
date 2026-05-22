@@ -7,7 +7,9 @@
     "harnessamp": "./scripts/harnessamp.mjs"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite",
+    "dev:api": "node scripts/dev-api.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test",

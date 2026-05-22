@@ -51,24 +51,23 @@ SESSION_SECRET=<long random string>
 GITHUB_CLIENT_ID=<from GitHub>
 GITHUB_CLIENT_SECRET=<from GitHub>
 APP_BASE_URL=http://127.0.0.1:4173
+HARNESSAMP_DEV_AUTH=0
 ```
 
-Then run the local API runtime on port `3000`:
-
-```bash
-set -a
-source .env.local
-set +a
-npx vercel dev --listen 3000
-```
-
-In a second terminal, run the Vite app on port `4173`:
+Then run:
 
 ```bash
 npm run dev
 ```
 
-The Vite server proxies `/api` requests to the Vercel dev server.
+The Vite server proxies `/api` requests to the local API runtime on port `3000`.
+
+If you want separate terminals instead of the combined launcher, use:
+
+```bash
+npm run dev:api
+npm run dev:web
+```
 
 Open:
 
@@ -93,13 +92,13 @@ Then redeploy.
 
 ## Local Dev Shortcut
 
-For local development without GitHub OAuth, set:
+For local development without GitHub OAuth, either leave `.env.local` out entirely or set:
 
 ```text
 HARNESSAMP_DEV_AUTH=1
 ```
 
-This uses the seeded dev user and skips the GitHub redirect.
+The local API runtime seeds a local dev user and skips the GitHub redirect. When `npm run dev` starts without `HARNESSAMP_DEV_AUTH` set, it defaults to this seeded mode.
 
 Do not set `HARNESSAMP_DEV_AUTH=1` in production.
 

@@ -14,6 +14,7 @@ The first three should stay fixed. The wrapper is the only layer that should dri
 ## Browser UI
 
 - Open the app with `npm run dev`.
+- The command starts both the Vite UI and the local API runtime.
 - Paste or import a harness bundle.
 - Check whether the `intent`, `contract`, and `benchmark` layers are explicit or inferred.
 - Paste observed runs if you have real results.

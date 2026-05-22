@@ -596,7 +596,7 @@ function renderDocsOverview() {
       <div class="section__intro">
         <p class="eyebrow">Built-in docs</p>
         <h2>Repo-backed docs without leaving the product.</h2>
-        <p>The `/docs` route now renders the checked-in Markdown and schema files as a proper reading surface with navigation, anchors, and shareable deep links.</p>
+        <p>The <code class="docs-inline-code">/docs</code> route now renders the checked-in Markdown and schema files as a proper reading surface with navigation, anchors, and shareable deep links.</p>
       </div>
       <div class="docs-grid">
         ${featuredDocPages.map((page) => `
