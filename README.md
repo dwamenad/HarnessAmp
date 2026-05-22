@@ -41,6 +41,18 @@ npm install
 npm run dev
 ```
 
+`npm run dev` starts both the Vite frontend and the local API runtime. By default:
+
+- `/` is the product landing page
+- `/app` is the interactive evaluation surface
+- `/docs` is the built-in documentation experience
+
+If you want a seeded local session instead of anonymous mode, restart dev with:
+
+```bash
+HARNESSAMP_DEV_AUTH=1 npm run dev
+```
+
 Useful commands:
 
 | Task | Command |
@@ -57,25 +69,32 @@ Useful commands:
 | Run E2E tests | `npm run test:e2e` |
 | Build | `npm run build` |
 
-## Browser demo
+## Product surfaces
 
-The web app now behaves like a product console, not a landing page. It includes:
+HarnessAmp now ships as three focused surfaces instead of one long page:
 
-- sample and pasted JSON harnesses
-- JSON file upload
-- Ajv schema validation against repo schemas
+- `/` - a shorter product landing page with workflow, proof, and report preview
+- `/app` - the interactive evaluation surface for running assessments and reviewing reports
+- `/docs` - repo-backed docs rendered from the checked-in Markdown and JSON reference files
+
+The `/app` surface includes:
+
+- sample workflows and scenario packs
+- optional JSON upload and pasted source data behind `Edit source data`
+- Ajv validation against the repo schemas
 - risk profiles for support, browser, and tool-heavy agents
-- HTTP runner endpoint configuration
-- configurable pass/warn/block thresholds
-- local and server-backed report saves
-- workspace/project context for team reports
-- copy/download actions for reports, packs, CI YAML, and examples
+- configurable thresholds for overall score, stressed score, and performance drop
+- connected HTTP runner configuration
+- browser-saved and workspace-saved reports
+- copy/download actions for reports, packs, workflow snippets, and share links
 
 <p align="center">
   <img src="docs/screenshots/readme-console-gate.png" alt="HarnessAmp product console with bundle presets, risk profiles, mutation intensity, schema validation, and benchmark contract panels" width="900">
   <br/>
-  <em>Product console with risk profiles, benchmark packs, HTTP runner setup, schema validation, and release-gate thresholds.</em>
+  <em>Interactive app surface with guided evaluations, connected runners, validation, and release-gate thresholds.</em>
 </p>
+
+Anonymous visitors can use the landing page, docs, and app without errors. Sign in only when you want shared workspace reports, team projects, or saved runner setup.
 
 ## Replit demo
 
@@ -134,6 +153,7 @@ The PR-facing metric is `Robustness Gap`, defined as original pass rate minus mu
 
 ## Docs
 
+- Built-in docs route: `/docs`
 - [Installation](docs/installation.md)
 - [Usage](docs/usage.md)
 - [CLI](docs/cli.md)

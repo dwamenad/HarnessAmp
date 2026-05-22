@@ -69,19 +69,19 @@ const bundlePresets = {
   'profile-demo': {
     label: 'Profile demo harness',
     type: 'harness',
-    description: 'Uses the selected risk profile and its built-in demo harness bundle.',
+    description: 'Starts with the selected risk profile and a sample workflow.',
   },
   'support-mvp-benchmark': {
     label: 'Support MVP benchmark pack',
     type: 'benchmark',
-    description: 'Loads the checked-in intent, contract, benchmark cases, and wrapper for the support release gate.',
+    description: 'Loads the support release scenario pack with built-in rules and test cases.',
     lockedProfileId: 'support-agent',
     bundle: supportMvpBenchmarkPack,
   },
   'browser-mvp-benchmark': {
     label: 'Browser MVP benchmark pack',
     type: 'benchmark',
-    description: 'Loads the browser-agent benchmark with origin, download, and cross-origin failure modes.',
+    description: 'Loads the browser release scenario pack with origin, download, and cross-site failure modes.',
     lockedProfileId: 'browser-agent',
     bundle: browserMvpBenchmarkPack,
   },
@@ -176,6 +176,12 @@ const modules = [
   ['CI/CD Gates', 'Convert the Robustness Gap into pass, warn, or block status for pull requests and releases.'],
 ];
 
+const landingPaths = [
+  ['Open the app', 'Use `/app` for guided evaluations, saved reports, validation checks, and connected runner workflows.'],
+  ['Keep team features deeper', 'Sign-in, shared reports, and runner setup stay in the app so the product page can stay focused.'],
+  ['Keep setup in docs', 'Installation, sign-in setup, deployment steps, and reference material live under `/docs` for easier rollout.'],
+];
+
 const STORAGE_KEY = 'harnessamp.webDemoState';
 const REPORT_STORAGE_KEY = 'harnessamp.savedReports';
 const EVENT_STORAGE_KEY = 'harnessamp.telemetryEvents';
@@ -265,6 +271,7 @@ function render() {
   const route = getRoute();
   const isAuthed = state.sessionStatus === 'authenticated' && state.session?.user;
   const activeReportPath = state.reportPath || (state.reportId ? reportPathFor(state.selectedProjectId, state.reportId) : '');
+  const activeReportUrl = activeReportPath ? new URL(activeReportPath, window.location.origin).toString() : '';
 
   if (route.kind === 'docs') {
     app.innerHTML = `
@@ -283,283 +290,16 @@ function render() {
   app.innerHTML = `
     <div class="site-shell">
       ${renderTopbar(route, isAuthed)}
-
       <main id="top">
-        <section class="hero reveal">
-          <div class="hero__copy">
-            <p class="eyebrow">Agent reliability diagnosis</p>
-            <h1>Turn agent fragility into a failing PR check.</h1>
-            <p class="hero__lede">HarnessAmp wraps your agent harness, mutates prompts, tools, permissions, context, network sinks, and sandbox boundaries, then reports the Robustness Gap and the exact condition that broke reliability.</p>
-            <div class="hero__actions">
-              <a class="button button--primary" href="#demo">Run a robustness diagnosis</a>
-              <a class="button button--secondary" href="#report">View sample report</a>
-            </div>
-          </div>
-          <div class="diagnostic-board" aria-label="Live robustness diagnosis">
-            <div class="board-header"><span id="hero-run-label">diagnosis/pending</span><strong id="hero-gate">RUN</strong></div>
-            <div class="scoreline">
-              <div><span>Baseline</span><b id="hero-baseline">--</b></div>
-              <div><span>Mutated</span><b class="warn" id="hero-mutated">--</b></div>
-              <div><span>Drop</span><b class="danger" id="hero-drop">--</b></div>
-            </div>
-            <div class="trace"><span>weakest_surface</span><strong id="hero-surface">waiting for run</strong></div>
-            <div class="trace"><span>recommended_control</span><strong id="hero-control">run a diagnosis to generate CI-ready evidence</strong></div>
-            <div class="mutation-map" id="hero-bars">${Array.from({ length: 8 }, (_, index) => `<i style="--h: ${36 + index * 6}%"></i>`).join('')}</div>
-          </div>
-        </section>
-
-        <section class="proof-strip reveal" aria-label="Proof artifacts">${proofStats.map(([value, label]) => `<div><strong>${value}</strong><span>${label}</span></div>`).join('')}</section>
-
-        <section id="workflow" class="section section--split reveal">
-          <div><p class="eyebrow">Robustness workflow</p><h2>Wrap -> Mutate -> Run -> Diagnose -> Gate</h2></div>
-          <div class="workflow">${workflow.map(([title, detail], index) => `<article><span>${String(index + 1).padStart(2, '0')}</span><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
-        </section>
-
-        <section id="demo" class="section demo-section reveal">
-          <div class="section__intro">
-            <p class="eyebrow">Interactive demo</p>
-            <h2>Load a sample harness. Choose risk. Run mutations.</h2>
-            <p>The browser demo calls the same analysis engine used by the CLI, reusable GitHub Action, and release gate. The output is a report, JSON payload, and corpus-ready failure record.</p>
-            <div class="try-path">
-              <span>01 Select profile</span>
-              <span>02 Review schema</span>
-              <span>03 Run diagnosis</span>
-              <span>04 Save report</span>
-            </div>
-          </div>
-          <div class="demo-console">
-            <div class="demo-controls">
-              <label><span>Bundle preset</span><select id="bundle-preset-select">${Object.entries(bundlePresets).map(([id, item]) => `<option value="${id}" ${id === state.bundlePresetId ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
-              <label><span>Risk profile</span><select id="profile-select" ${profileLocked ? 'disabled' : ''}>${Object.entries(riskProfiles).map(([id, item]) => `<option value="${id}" ${id === profile.id ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
-              <label><span>Mutation intensity</span><select id="intensity-select">${[1, 2, 3, 4].map((value) => `<option value="${value}" ${value === state.intensity ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
-              <label class="check-control"><input id="observed-toggle" type="checkbox" ${state.useObservedRuns ? 'checked' : ''} /><span>Use observed runs</span></label>
-              <label class="check-control"><input id="custom-toggle" type="checkbox" ${state.useCustomInput ? 'checked' : ''} /><span>Use pasted JSON</span></label>
-              <button class="button button--primary" id="run-demo" type="button">Run diagnosis</button>
-            </div>
-            <div class="preset-note">
-              <strong>${escapeHtml(preset.label)}</strong>
-              <span>${escapeHtml(preset.description)}${profileLocked ? ` Locked to ${profile.label.toLowerCase()}.` : ''}</span>
-            </div>
-            <div class="threshold-controls">
-              <label><span>Min overall score</span><input id="min-overall-score" type="number" min="0" max="100" value="${state.thresholds.minOverallScore}" /></label>
-              <label><span>Min holdout pass</span><input id="min-holdout-pass" type="number" min="0" max="100" value="${state.thresholds.minHoldoutPass}" /></label>
-              <label><span>Max robustness gap</span><input id="max-gap" type="number" min="0" max="100" value="${state.thresholds.maxGap}" /></label>
-            </div>
-            <div class="runner-controls">
-              <label><span>HTTP runner endpoint</span><input id="runner-endpoint" type="url" placeholder="https://runner.example.com/harnessamp" value="${escapeHtml(state.runnerEndpoint)}" /></label>
-              <button class="button button--secondary" id="run-http-runner" type="button">Run HTTP runner</button>
-              <span id="runner-status">${escapeHtml(state.runnerStatus)}</span>
-            </div>
-            <div class="input-workbench" id="input-workbench">
-              <label>
-                <span>Harness bundle JSON</span>
-                <input id="bundle-file" type="file" accept="application/json,.json" />
-                <textarea id="bundle-json" spellcheck="false">${escapeHtml(state.customBundleText)}</textarea>
-              </label>
-              <label>
-                <span>Observed runs JSON</span>
-                <input id="runs-file" type="file" accept="application/json,.json" />
-                <textarea id="runs-json" spellcheck="false">${escapeHtml(state.customRunsText)}</textarea>
-              </label>
-              <p id="input-error" class="input-error">${escapeHtml(state.inputError)}</p>
-            </div>
-            <div class="demo-result">
-              <div><span>Profile</span><strong id="demo-profile">--</strong></div>
-              <div><span>Mutation variants</span><strong id="demo-variants">--</strong></div>
-              <div><span>Replay seed</span><strong id="demo-seed">--</strong></div>
-              <div><span>Gate</span><strong class="danger" id="demo-gate">--</strong></div>
-            </div>
-            <div class="coverage-panel">
-              <h3>Visible mutation coverage</h3>
-              <div id="coverage-list" class="coverage-list"></div>
-            </div>
-            <div class="schema-panel">
-              <h3>Schema validation</h3>
-              <div id="schema-status-list" class="schema-status-list"></div>
-            </div>
-            <div class="benchmark-panel">
-              <div class="benchmark-panel__header">
-                <h3>Benchmark contract</h3>
-                <p id="benchmark-summary-meta">Select a benchmark preset to inspect intent, contract, and gates.</p>
-              </div>
-              <div id="benchmark-contract-panel" class="benchmark-contract-panel"></div>
-            </div>
-            <div class="benchmark-panel benchmark-panel--cases">
-              <div class="benchmark-panel__header">
-                <h3>Benchmark cases</h3>
-                <p id="benchmark-cases-meta">Cases appear when the active bundle is a benchmark pack.</p>
-              </div>
-              <div id="benchmark-case-list" class="benchmark-case-list"></div>
-            </div>
-          </div>
-        </section>
-
-        <section id="product" class="section reveal">
-          <div class="section__intro"><p class="eyebrow">Core product</p><h2>Reliability modules for agents that already run.</h2><p>HarnessAmp does not ask teams to adopt a new agent framework. It tests the wrapper conditions around the system they already have.</p></div>
-          <div class="module-grid">${modules.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
-        </section>
-
-        <section id="report" class="section report-section reveal">
-          <div class="report-copy"><p class="eyebrow">Sample report page</p><h2>From pass rate to engineering control.</h2><p>This report is generated from the selected preset, selected risk profile, mutation intensity, and observed run fixture.</p></div>
-          <div class="report">
-            <div><span>Baseline</span><strong id="report-baseline">--</strong></div>
-            <div><span>Mutated</span><strong id="report-mutated">--</strong></div>
-            <div><span>Robustness drop</span><strong class="danger" id="report-drop">--</strong></div>
-            <div><span>Gap band</span><strong id="report-gap-band">--</strong></div>
-            <div><span>Weakest surface</span><strong id="report-surface">--</strong></div>
-            <div><span>Failure class</span><strong id="report-failure">--</strong></div>
-            <div><span>Recommended control</span><strong id="report-control">--</strong></div>
-            <div><span>Replay seed</span><strong id="report-seed">--</strong></div>
-            <div><span>CI gate</span><strong class="danger" id="report-gate">--</strong></div>
-            <div><span>Report id</span><strong id="report-id">--</strong></div>
-            <div><span>Shareable route</span><strong id="report-path">${activeReportPath ? escapeHtml(activeReportPath) : '--'}</strong></div>
-            <div><span>Saved snapshot</span><strong id="report-saved">local</strong></div>
-          </div>
-          <div class="export-actions">
-            <button class="button button--secondary" id="copy-report" type="button">Copy Markdown report</button>
-            <button class="button button--secondary" id="download-report" type="button">Download report</button>
-            <button class="button button--secondary" id="download-report-json" type="button">Download report JSON</button>
-            <button class="button button--secondary" id="download-pack" type="button">Download mutation pack</button>
-            <button class="button button--secondary" id="copy-ci" type="button">Copy CI gate snippet</button>
-            <button class="button button--secondary" id="save-report" type="button">Save report snapshot</button>
-            <button class="button button--secondary" id="save-server-report" type="button">Save server report</button>
-            <button class="button button--secondary" id="load-server-report" type="button">Load server report</button>
-            <button class="button button--secondary" id="copy-report-link" type="button">Copy report link</button>
-            <span class="action-feedback" id="action-feedback">${escapeHtml(state.feedback)}</span>
-          </div>
-          <div class="variant-panel">
-            <h3>Failed and warning variants</h3>
-            <div class="variant-table-wrap">
-              <table class="variant-table">
-                <thead><tr><th>Mutation</th><th>Surface</th><th>Status</th><th>Score</th><th>Latency</th><th>Source</th></tr></thead>
-                <tbody id="variant-table-body"></tbody>
-              </table>
-            </div>
-          </div>
-          <div class="case-panel">
-            <h3>Case-level reporting</h3>
-            <div id="case-results" class="case-results"></div>
-          </div>
-          <pre class="report-text" id="report-text"></pre>
-        </section>
-
-        <section id="workspace" class="section workspace-section reveal">
-          <div class="section__intro"><p class="eyebrow">Auth and workspaces</p><h2>Project context for team reports and runner jobs.</h2><p>Anonymous visitors can use the demo. Saving team reports, registering runners, and dispatching jobs requires GitHub auth and a selected project.</p></div>
-          <div class="workspace-grid">
-            <div class="workspace-panel workspace-panel--auth">
-              <h3>Session</h3>
-              ${isAuthed ? `
-                <div class="session-card">
-                  <strong>${escapeHtml(state.session.user.name)}</strong>
-                  <span>${escapeHtml(state.session.user.login)}</span>
-                  <small>${escapeHtml(state.session.user.email ?? 'no public email')}</small>
-                </div>
-                <label><span>Workspace</span><select id="workspace-select">${renderWorkspaceOptions()}</select></label>
-                <label><span>Project</span><select id="project-select">${renderProjectOptions()}</select></label>
-                <label><span>Project role</span><input id="project-role-display" type="text" value="${escapeHtml(activeProjectRole())}" disabled /></label>
-                <div class="inline-actions">
-                  <label><span>New workspace</span><input id="workspace-draft-name" type="text" value="${escapeHtml(state.workspaceDraftName)}" /></label>
-                  <button class="button button--secondary" id="create-workspace" type="button">Create workspace</button>
-                </div>
-                <div class="inline-actions">
-                  <label><span>New project</span><input id="project-draft-name" type="text" value="${escapeHtml(state.projectDraftName)}" /></label>
-                  <button class="button button--secondary" id="create-project" type="button">Create project</button>
-                </div>
-              ` : `
-                <div class="session-empty">
-                  <p>GitHub auth enables saved reports, project membership, runner registration, and cross-device report routes.</p>
-                  <a class="button button--primary" href="${escapeHtml(authStartHref())}">Sign in with GitHub</a>
-                </div>
-              `}
-              <label class="check-control"><input id="analytics-toggle" type="checkbox" ${state.analyticsEnabled ? 'checked' : ''} /><span>Allow client analytics events</span></label>
-            </div>
-            <div class="workspace-panel">
-              <h3>Runner control plane</h3>
-              ${isAuthed ? `
-                <label><span>Runner name</span><input id="runner-registration-name" type="text" value="${escapeHtml(state.runnerRegistrationName)}" /></label>
-                <label><span>Runner endpoint</span><input id="runner-registration-endpoint" type="url" value="${escapeHtml(state.runnerRegistrationEndpoint)}" placeholder="https://runner.example.com/harnessamp" /></label>
-                <label><span>Runner secret</span><input id="runner-registration-secret" type="password" value="${escapeHtml(state.runnerRegistrationSecret)}" placeholder="Optional bearer token" /></label>
-                <div class="inline-actions">
-                  <button class="button button--secondary" id="register-runner" type="button">Register runner</button>
-                  <button class="button button--secondary" id="dispatch-job" type="button">Dispatch job</button>
-                </div>
-                <label><span>Registered runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>
-                <p class="runner-state" id="job-state">${escapeHtml(state.activeJobStatus || 'No runner job dispatched')}</p>
-              ` : `
-                <p class="session-muted">Sign in to register project-scoped runners and dispatch async jobs.</p>
-              `}
-            </div>
-            <div class="workspace-panel">
-              <h3>Project reports</h3>
-              ${isAuthed ? `
-                <p class="session-muted">Saved reports live under the selected project and open at pathname routes.</p>
-                <div id="project-report-list" class="project-report-list">${renderProjectReportList()}</div>
-              ` : `
-                <p class="session-muted">Anonymous mode keeps reports in the browser only.</p>
-              `}
-            </div>
-          </div>
-        </section>
-
-        <section id="packs" class="section reveal">
-          <div class="section__intro"><p class="eyebrow">Mutation pack browser</p><h2>7 packs covering 20+ deterministic mutations.</h2><p>Each pack targets a wrapper condition that can change after the agent looked stable in a narrow baseline test.</p></div>
-          <div class="pack-grid">${mutationPackDetails.map(([name, detail, example]) => `<article><span>${name}</span><h3>${formatPackName(name)}</h3><p>${detail}</p><small>${example}</small></article>`).join('')}</div>
-        </section>
-
-        <section id="integrations" class="section reveal">
-          <div class="section__intro"><p class="eyebrow">Integrations detail</p><h2>Bring your runner. Keep your stack.</h2><p>The default mock runner proves the workflow. The custom HTTP runner lets real agents receive baseline and mutated payloads through the same contract.</p></div>
-          <div class="integration-grid">${integrations.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
-          <div class="ci-snippet">
-            <div class="section__intro"><p class="eyebrow">Concrete CI path</p><h2>Reusable action, PR summary, and artifacts.</h2><p>Each run writes a Markdown report, JSON report, and failure corpus artifact. A block verdict exits non-zero.</p></div>
-            <pre>${escapeHtml(githubActionsSnippet)}</pre>
-          </div>
-        </section>
-
-        <section id="runner-contract" class="section reveal">
-          <div class="section__intro"><p class="eyebrow">Runner contract</p><h2>The adapter shape custom teams implement.</h2><p>HarnessAmp stays framework-agnostic by asking every runner to expose the same small execution contract.</p></div>
-          <div class="contract-grid">${runnerContract.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
-        </section>
-
-        <section id="quickstart" class="section quickstart reveal">
-          <div><p class="eyebrow">Docs path</p><h2>Quickstart from clone to release gate.</h2></div>
-          <div class="quickstart-list">${quickstart.map(([title, detail], index) => `<article><span>${index + 1}</span><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
-        </section>
-
-        ${renderDocsOverview()}
-
-        <section id="deploy" class="section deploy-section reveal">
-          <div class="section__intro"><p class="eyebrow">Deployment</p><h2>Static hosting ready.</h2><p>The app builds as a static Vite site. Deploy the generated dist directory to Vercel, Netlify, GitHub Pages, or any static host.</p></div>
-          <pre>npm run build
-npx serve dist
-
-# production output
-dist/index.html
-dist/assets/*</pre>
-        </section>
-
-        <section class="section artifacts reveal">
-          <div class="section__intro"><p class="eyebrow">Real proof artifacts</p><h2>Embedded from repo examples.</h2><p>The demo uses examples/cli/quickstart-bundle.json, examples/cli/observed-runs.json, examples/benchmarks/support-mvp/benchmark-pack.json, examples/benchmarks/browser-mvp/benchmark-pack.json, and the checked-in risk profile files.</p></div>
-          <div class="artifact-actions">
-            <button class="button button--secondary" id="download-example-bundle" type="button">Download quickstart bundle</button>
-            <button class="button button--secondary" id="download-example-runs" type="button">Download observed runs</button>
-            <button class="button button--secondary" id="download-example-benchmark" type="button">Download benchmark pack</button>
-            <button class="button button--secondary" id="download-browser-benchmark" type="button">Download browser benchmark</button>
-            <button class="button button--secondary" id="download-risk-profile" type="button">Download risk profile</button>
-            <button class="button button--secondary" id="download-ci-yaml" type="button">Download CI YAML</button>
-          </div>
-          <div class="artifact-grid">
-            <pre>${escapeHtml(JSON.stringify(quickstartBundle, null, 2).slice(0, 900))}</pre>
-            <pre>${escapeHtml(JSON.stringify(observedRuns, null, 2))}</pre>
-            <pre>${escapeHtml(JSON.stringify(supportMvpBenchmarkPack, null, 2).slice(0, 1500))}</pre>
-            <pre>${escapeHtml(JSON.stringify(browserMvpBenchmarkPack, null, 2).slice(0, 1500))}</pre>
-          </div>
-        </section>
-
-        <section class="closing reveal">
-          <p>If your agent breaks when the wrapper changes, it was not production-ready.</p>
-          <h2>Prove your agents still work when conditions change.</h2>
-          <a class="button button--primary" href="#demo">Run a robustness diagnosis</a>
-        </section>
+        ${route.kind === 'home'
+          ? renderHomeSurface(activeReportUrl)
+          : renderAppSurface({
+            preset,
+            profile,
+            profileLocked,
+            activeReportUrl,
+            isAuthed,
+          })}
       </main>
     </div>
   `;
@@ -569,23 +309,359 @@ dist/assets/*</pre>
   scrollToRouteTarget();
 }
 
+function renderHomeSurface(activeReportUrl) {
+  return `
+    ${renderHomeHero()}
+    ${renderProofStrip()}
+    ${renderWorkflowSection()}
+    ${renderProductSection()}
+    ${renderHomeReportPreview(activeReportUrl)}
+    ${renderLandingPathsSection()}
+    ${renderDocsLandingSpotlight()}
+    ${renderClosingSection({ href: '/app#demo', label: 'Run a robustness diagnosis' })}
+  `;
+}
+
+function renderAppSurface({
+  preset,
+  profile,
+  profileLocked,
+  activeReportUrl,
+  isAuthed,
+}) {
+  return `
+    ${renderDemoSection({ preset, profile, profileLocked })}
+    ${renderReportSection(activeReportUrl)}
+    ${renderWorkspaceSection(isAuthed)}
+    ${renderDocsOverview()}
+    ${renderClosingSection({ href: '/docs', label: 'Open docs' })}
+  `;
+}
+
+function renderHomeHero() {
+  return `
+    <section class="hero reveal">
+      <div class="hero__copy">
+        <p class="eyebrow">Agent reliability diagnosis</p>
+        <h1>Turn agent fragility into a failing PR check.</h1>
+        <p class="hero__lede">HarnessAmp stress-tests agent workflows under changing conditions, then highlights the failures, regressions, and controls teams should address before release.</p>
+        <div class="hero__actions">
+          <a class="button button--primary" href="/app#demo">Launch the app</a>
+          <a class="button button--secondary" href="#report">View sample report</a>
+        </div>
+      </div>
+      ${renderDiagnosticBoard()}
+    </section>
+  `;
+}
+
+function renderProofStrip() {
+  return `<section class="proof-strip reveal" aria-label="Proof artifacts">${proofStats.map(([value, label]) => `<div><strong>${value}</strong><span>${label}</span></div>`).join('')}</section>`;
+}
+
+function renderWorkflowSection() {
+  return `
+    <section id="workflow" class="section section--split reveal">
+      <div><p class="eyebrow">Robustness workflow</p><h2>Wrap -> Mutate -> Run -> Diagnose -> Gate</h2></div>
+      <div class="workflow">${workflow.map(([title, detail], index) => `<article><span>${String(index + 1).padStart(2, '0')}</span><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
+    </section>
+  `;
+}
+
+function renderProductSection() {
+  return `
+    <section id="product" class="section reveal">
+      <div class="section__intro"><p class="eyebrow">Core product</p><h2>Reliability modules for agents that already run.</h2><p>HarnessAmp does not ask teams to adopt a new agent framework. It tests how the system behaves when real operating conditions shift.</p></div>
+      <div class="module-grid">${modules.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
+    </section>
+  `;
+}
+
+function renderHomeReportPreview(activeReportUrl) {
+  return `
+    <section id="report" class="section section--split reveal">
+      <div class="section__intro">
+        <p class="eyebrow">Diagnosis output</p>
+        <h2>See the Robustness Gap before it reaches production.</h2>
+        <p>The homepage keeps the report preview concise: baseline versus stressed performance, overall risk band, highest-risk surface, recommended next step, and a link you can share with the team.</p>
+        <div class="hero__actions">
+          <a class="button button--primary" href="/app#report">Open full report</a>
+          <a class="button button--secondary" href="/docs/usage">Read usage docs</a>
+        </div>
+      </div>
+      <div class="report">
+        <div><span>Baseline</span><strong id="report-baseline">--</strong></div>
+        <div><span>Stressed</span><strong id="report-mutated">--</strong></div>
+        <div><span>Performance drop</span><strong class="danger" id="report-drop">--</strong></div>
+        <div><span>Risk band</span><strong id="report-gap-band">--</strong></div>
+        <div><span>Highest-risk surface</span><strong id="report-surface">--</strong></div>
+        <div><span>Recommended next step</span><strong id="report-control">--</strong></div>
+        <div><span>Release status</span><strong class="danger" id="report-gate">--</strong></div>
+        <div><span>Share link</span><strong id="report-path">${activeReportUrl ? escapeHtml(activeReportUrl) : '--'}</strong></div>
+      </div>
+    </section>
+  `;
+}
+
+function renderLandingPathsSection() {
+  return `
+    <section id="demo" class="section reveal">
+      <div class="section__intro">
+        <p class="eyebrow">How teams use it</p>
+        <h2>Start with the product story here, then go deeper in the app.</h2>
+        <p>The homepage explains the workflow. The interactive evaluation tools, team features, and setup guides are split between <code class="docs-inline-code">/app</code> and <code class="docs-inline-code">/docs</code> so the experience stays focused.</p>
+      </div>
+      <div class="module-grid">${landingPaths.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
+      <div class="hero__actions">
+        <a class="button button--primary" href="/app#demo">Open app</a>
+        <a class="button button--secondary" href="/docs/install">Install path</a>
+        <a class="button button--secondary" href="/docs/github-oauth">Sign-in setup</a>
+      </div>
+    </section>
+  `;
+}
+
+function renderDemoSection({ preset, profile, profileLocked }) {
+  return `
+    <section id="demo" class="section demo-section reveal">
+      <div class="section__intro">
+        <p class="eyebrow">Interactive evaluation</p>
+        <h2>Run a sample assessment and review the result.</h2>
+        <p>Use the guided app to test a sample workflow, review the resulting scorecard, and compare baseline performance with stressed conditions.</p>
+        <div class="try-path">
+          <span>01 Choose a starting point</span>
+          <span>02 Review inputs</span>
+          <span>03 Run evaluation</span>
+          <span>04 Save or share</span>
+        </div>
+      </div>
+      <div class="demo-console">
+        <div class="demo-controls">
+          <label><span>Starting point</span><select id="bundle-preset-select">${Object.entries(bundlePresets).map(([id, item]) => `<option value="${id}" ${id === state.bundlePresetId ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
+          <label><span>Risk profile</span><select id="profile-select" ${profileLocked ? 'disabled' : ''}>${Object.entries(riskProfiles).map(([id, item]) => `<option value="${id}" ${id === profile.id ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
+          <label><span>Stress level</span><select id="intensity-select">${[1, 2, 3, 4].map((value) => `<option value="${value}" ${value === state.intensity ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+          <label class="check-control"><input id="observed-toggle" type="checkbox" ${state.useObservedRuns ? 'checked' : ''} /><span>Include sample outcomes</span></label>
+          <label class="check-control"><input id="custom-toggle" type="checkbox" ${state.useCustomInput ? 'checked' : ''} /><span>Edit source data</span></label>
+          <button class="button button--primary" id="run-demo" type="button">Run evaluation</button>
+        </div>
+        <div class="preset-note">
+          <strong>${escapeHtml(preset.label)}</strong>
+          <span>${escapeHtml(preset.description)}${profileLocked ? ` Locked to ${profile.label.toLowerCase()}.` : ''}</span>
+        </div>
+        <div class="threshold-controls">
+          <label><span>Minimum overall score</span><input id="min-overall-score" type="number" min="0" max="100" value="${state.thresholds.minOverallScore}" /></label>
+          <label><span>Minimum stressed score</span><input id="min-holdout-pass" type="number" min="0" max="100" value="${state.thresholds.minHoldoutPass}" /></label>
+          <label><span>Maximum performance drop</span><input id="max-gap" type="number" min="0" max="100" value="${state.thresholds.maxGap}" /></label>
+        </div>
+        <div class="runner-controls">
+          <label><span>Connected runner endpoint</span><input id="runner-endpoint" type="url" placeholder="https://runner.example.com/harnessamp" value="${escapeHtml(state.runnerEndpoint)}" /></label>
+          <button class="button button--secondary" id="run-http-runner" type="button">Test connected runner</button>
+          <span id="runner-status">${escapeHtml(state.runnerStatus)}</span>
+        </div>
+        <div class="input-workbench-shell ${state.useCustomInput ? 'is-active' : ''}">
+          <p class="input-workbench-note">${state.useCustomInput
+    ? 'Paste or upload source workflow data and run results when you want to test a custom scenario.'
+    : 'Turn on Edit source data when you want to paste a workflow JSON or real run results.'}</p>
+          <div class="input-workbench" id="input-workbench" ${state.useCustomInput ? '' : 'hidden'}>
+          <label>
+            <span>Source workflow JSON</span>
+            <input id="bundle-file" type="file" accept="application/json,.json" />
+            <textarea id="bundle-json" spellcheck="false">${escapeHtml(state.customBundleText)}</textarea>
+          </label>
+          <label>
+            <span>Outcome data JSON</span>
+            <input id="runs-file" type="file" accept="application/json,.json" />
+            <textarea id="runs-json" spellcheck="false">${escapeHtml(state.customRunsText)}</textarea>
+          </label>
+          <p id="input-error" class="input-error">${escapeHtml(state.inputError)}</p>
+        </div>
+        </div>
+        <div class="demo-result">
+          <div><span>Profile</span><strong id="demo-profile">--</strong></div>
+          <div><span>Coverage</span><strong id="demo-variants">--</strong></div>
+          <div><span>Run reference</span><strong id="demo-seed">--</strong></div>
+          <div><span>Status</span><strong class="danger" id="demo-gate">--</strong></div>
+        </div>
+        <div class="coverage-panel">
+          <h3>Coverage</h3>
+          <div id="coverage-list" class="coverage-list"></div>
+        </div>
+        <div class="schema-panel">
+          <h3>Data validation</h3>
+          <div id="schema-status-list" class="schema-status-list"></div>
+        </div>
+        <div class="benchmark-panel">
+          <div class="benchmark-panel__header">
+            <h3>Evaluation rules</h3>
+            <p id="benchmark-summary-meta">Choose a scenario pack to inspect its rules, thresholds, and allowed behavior.</p>
+          </div>
+          <div id="benchmark-contract-panel" class="benchmark-contract-panel"></div>
+        </div>
+        <div class="benchmark-panel benchmark-panel--cases">
+          <div class="benchmark-panel__header">
+            <h3>Test scenarios</h3>
+            <p id="benchmark-cases-meta">Scenario details appear when the selected starting point includes them.</p>
+          </div>
+          <div id="benchmark-case-list" class="benchmark-case-list"></div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderReportSection(activeReportUrl) {
+  return `
+    <section id="report" class="section report-section reveal">
+      <div class="report-copy"><p class="eyebrow">Report</p><h2>Turn results into a clear next action.</h2><p>Review baseline versus stressed performance, the highest-risk surface, and the specific follow-up needed before rollout.</p></div>
+      <div class="report">
+        <div><span>Baseline</span><strong id="report-baseline">--</strong></div>
+        <div><span>Stressed</span><strong id="report-mutated">--</strong></div>
+        <div><span>Performance drop</span><strong class="danger" id="report-drop">--</strong></div>
+        <div><span>Risk band</span><strong id="report-gap-band">--</strong></div>
+        <div><span>Highest-risk surface</span><strong id="report-surface">--</strong></div>
+        <div><span>Failure pattern</span><strong id="report-failure">--</strong></div>
+        <div><span>Recommended next step</span><strong id="report-control">--</strong></div>
+        <div><span>Release status</span><strong class="danger" id="report-gate">--</strong></div>
+        <div><span>Share link</span><strong id="report-path">${activeReportUrl ? escapeHtml(activeReportUrl) : '--'}</strong></div>
+      </div>
+      <div class="export-actions">
+        <button class="button button--secondary" id="copy-report" type="button">Copy report</button>
+        <button class="button button--secondary" id="download-report" type="button">Download report</button>
+        <button class="button button--secondary" id="download-report-json" type="button">Download report JSON</button>
+        <button class="button button--secondary" id="download-pack" type="button">Download test package</button>
+        <button class="button button--secondary" id="copy-ci" type="button">Copy workflow snippet</button>
+        <button class="button button--secondary" id="save-report" type="button">Save to this browser</button>
+        <button class="button button--secondary" id="save-server-report" type="button">Save to workspace</button>
+        <button class="button button--secondary" id="load-server-report" type="button">Open saved report</button>
+        <button class="button button--secondary" id="copy-report-link" type="button">Copy share link</button>
+        <span class="action-feedback" id="action-feedback">${escapeHtml(state.feedback)}</span>
+      </div>
+      <div class="variant-panel">
+        <h3>Scenarios to review</h3>
+        <div class="variant-table-wrap">
+          <table class="variant-table">
+            <thead><tr><th>Mutation</th><th>Surface</th><th>Status</th><th>Score</th><th>Latency</th><th>Source</th></tr></thead>
+            <tbody id="variant-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="case-panel">
+        <h3>Scenario breakdown</h3>
+        <div id="case-results" class="case-results"></div>
+      </div>
+      <details class="report-details">
+        <summary>View raw report</summary>
+        <pre class="report-text" id="report-text"></pre>
+      </details>
+    </section>
+  `;
+}
+
+function renderWorkspaceSection(isAuthed) {
+  return `
+    <section id="workspace" class="section workspace-section reveal">
+      <div class="section__intro"><p class="eyebrow">Team access</p><h2>Manage saved reports and connected runners.</h2><p>You can explore the app without signing in. Sign in when you want shared reports, team projects, and connected runner setup.</p></div>
+      <div class="workspace-grid">
+        <div class="workspace-panel workspace-panel--auth">
+          <h3>Account</h3>
+          ${isAuthed ? `
+            <div class="session-card">
+              <strong>${escapeHtml(state.session.user.name)}</strong>
+              <span>${escapeHtml(state.session.user.login)}</span>
+              <small>${escapeHtml(state.session.user.email ?? 'no public email')}</small>
+            </div>
+            <label><span>Team</span><select id="workspace-select">${renderWorkspaceOptions()}</select></label>
+            <label><span>Project</span><select id="project-select">${renderProjectOptions()}</select></label>
+            <label><span>Access level</span><input id="project-role-display" type="text" value="${escapeHtml(activeProjectRole())}" disabled /></label>
+            <div class="inline-actions">
+              <label><span>New team</span><input id="workspace-draft-name" type="text" value="${escapeHtml(state.workspaceDraftName)}" /></label>
+              <button class="button button--secondary" id="create-workspace" type="button">Create team</button>
+            </div>
+            <div class="inline-actions">
+              <label><span>New project</span><input id="project-draft-name" type="text" value="${escapeHtml(state.projectDraftName)}" /></label>
+              <button class="button button--secondary" id="create-project" type="button">Create project</button>
+            </div>
+          ` : `
+            <div class="session-empty">
+              <p>Sign in to sync reports, manage team projects, and reuse connected runners across devices.</p>
+              <a class="button button--primary" href="${escapeHtml(authStartHref())}">Sign in with GitHub</a>
+            </div>
+          `}
+          <label class="check-control"><input id="analytics-toggle" type="checkbox" ${state.analyticsEnabled ? 'checked' : ''} /><span>Allow product analytics</span></label>
+        </div>
+        <div class="workspace-panel">
+          <h3>Connected runners</h3>
+          ${isAuthed ? `
+            <label><span>Runner name</span><input id="runner-registration-name" type="text" value="${escapeHtml(state.runnerRegistrationName)}" /></label>
+            <label><span>Runner endpoint</span><input id="runner-registration-endpoint" type="url" value="${escapeHtml(state.runnerRegistrationEndpoint)}" placeholder="https://runner.example.com/harnessamp" /></label>
+            <label><span>Access token</span><input id="runner-registration-secret" type="password" value="${escapeHtml(state.runnerRegistrationSecret)}" placeholder="Optional bearer token" /></label>
+            <div class="inline-actions">
+              <button class="button button--secondary" id="register-runner" type="button">Register runner</button>
+              <button class="button button--secondary" id="dispatch-job" type="button">Start run</button>
+            </div>
+            <label><span>Active runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>
+            <p class="runner-state" id="job-state">${escapeHtml(state.activeJobStatus || 'No run started')}</p>
+          ` : `
+            <p class="session-muted">Sign in to add runners and start saved runs.</p>
+          `}
+        </div>
+        <div class="workspace-panel">
+          <h3>Saved reports</h3>
+          ${isAuthed ? `
+            <p class="session-muted">Saved reports stay attached to the selected project and can be reopened from any signed-in device.</p>
+            <div id="project-report-list" class="project-report-list">${renderProjectReportList()}</div>
+          ` : `
+            <p class="session-muted">Without signing in, saved reports stay in this browser only.</p>
+          `}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderDiagnosticBoard() {
+  return `
+    <div class="diagnostic-board" aria-label="Live robustness diagnosis">
+      <div class="board-header"><span id="hero-run-label">latest run</span><strong id="hero-gate">RUN</strong></div>
+      <div class="scoreline">
+        <div><span>Baseline</span><b id="hero-baseline">--</b></div>
+        <div><span>Stressed</span><b class="warn" id="hero-mutated">--</b></div>
+        <div><span>Drop</span><b class="danger" id="hero-drop">--</b></div>
+      </div>
+      <div class="trace"><span>highest risk</span><strong id="hero-surface">waiting for run</strong></div>
+      <div class="trace"><span>next step</span><strong id="hero-control">run an evaluation to generate a release-ready summary</strong></div>
+      <div class="mutation-map" id="hero-bars">${Array.from({ length: 8 }, (_, index) => `<i style="--h: ${36 + index * 6}%"></i>`).join('')}</div>
+    </div>
+  `;
+}
+
+function renderClosingSection({ href, label }) {
+  return `
+    <section class="closing reveal">
+      <p>If your agent breaks when conditions change, it was not production-ready.</p>
+      <h2>Prove your agents still work when conditions change.</h2>
+      <a class="button button--primary" href="${escapeHtml(href)}">${escapeHtml(label)}</a>
+    </section>
+  `;
+}
+
 function renderTopbar(route, isAuthed) {
   return `
     <header class="topbar">
       <a class="brand" href="/" aria-label="HarnessAmp home">
         <span class="brand__mark brand__mark--image"><img src="/logo.png" alt="" /></span>
-        <span><strong>HarnessAmp</strong><small>Robustness infrastructure</small></span>
+        <span><strong>HarnessAmp</strong><small>Reliability testing</small></span>
       </a>
       <nav class="topbar__nav" aria-label="Primary navigation">
         <a href="/" ${route.kind === 'home' ? 'aria-current="page"' : ''}>Product</a>
         <a href="/app" ${route.kind === 'app' || route.kind === 'report' || route.kind === 'project-report' ? 'aria-current="page"' : ''}>App</a>
         <a href="/docs" ${route.kind === 'docs' ? 'aria-current="page"' : ''}>Docs</a>
+        <a href="/app#demo">Demo</a>
         <a href="/app#report">Reports</a>
-        <a href="/app#packs">Packs</a>
       </nav>
       ${isAuthed
         ? '<button class="nav-cta nav-cta--button" id="logout-button" type="button">Log out</button>'
-        : `<a class="nav-cta" href="${escapeHtml(authStartHref())}">GitHub login</a>`}
+        : `<a class="nav-cta" href="${escapeHtml(authStartHref())}">Sign in</a>`}
     </header>
   `;
 }
@@ -594,9 +670,9 @@ function renderDocsOverview() {
   return `
     <section id="docs-preview" class="section reveal">
       <div class="section__intro">
-        <p class="eyebrow">Built-in docs</p>
-        <h2>Repo-backed docs without leaving the product.</h2>
-        <p>The <code class="docs-inline-code">/docs</code> route now renders the checked-in Markdown and schema files as a proper reading surface with navigation, anchors, and shareable deep links.</p>
+        <p class="eyebrow">Documentation</p>
+        <h2>Open setup and reference material without leaving the product.</h2>
+        <p>Browse installation steps, sign-in setup, usage guides, and reference pages in a dedicated docs area.</p>
       </div>
       <div class="docs-grid">
         ${featuredDocPages.map((page) => `
@@ -624,9 +700,9 @@ function renderDocsExperience(route) {
     <main id="docs-top" class="docs-shell">
       <aside class="docs-sidebar reveal is-visible">
         <div class="docs-sidebar__header">
-          <p class="eyebrow">Developer docs</p>
+          <p class="eyebrow">Documentation</p>
           <h1>HarnessAmp docs</h1>
-          <p>Reference, guides, concepts, and schemas sourced directly from the repository.</p>
+          <p>Reference guides, setup notes, and technical details for teams evaluating or deploying HarnessAmp.</p>
         </div>
         <a class="docs-home-link ${page.slug === '' ? 'is-active' : ''}" href="/docs">Overview</a>
         ${docsSidebarGroups.map((group) => `
@@ -687,8 +763,8 @@ function renderDocsLandingSpotlight() {
     <section class="docs-landing reveal is-visible">
       <div class="docs-landing__intro">
         <p class="eyebrow">Start here</p>
-        <h3>Fast path through the repo.</h3>
-        <p>Open the overview, install path, usage guide, CI gate docs, benchmark docs, and schema reference from one place.</p>
+        <h3>Open the essentials first.</h3>
+        <p>Jump straight to the overview, install path, usage guide, release workflow, and reference pages from one place.</p>
       </div>
       <div class="docs-grid docs-grid--compact">
         ${featuredDocPages.map((page) => `
@@ -789,7 +865,7 @@ function bindEvents() {
   bindIfPresent('#download-report-json', 'click', () => downloadText('harnessamp-report.json', JSON.stringify(activeReportSnapshot(), null, 2), 'Downloaded report JSON'));
   bindIfPresent('#download-pack', 'click', () => downloadText('harnessamp-mutation-pack.json', JSON.stringify(state.analysis?.exportPack ?? {}, null, 2), 'Downloaded mutation pack'));
   bindIfPresent('#copy-ci', 'click', () => copyText(githubActionsSnippet, 'Copied CI snippet'));
-  bindIfPresent('#save-report', 'click', () => saveReportSnapshot('Saved report snapshot'));
+  bindIfPresent('#save-report', 'click', () => saveReportSnapshot('Saved to this browser'));
   bindIfPresent('#save-server-report', 'click', saveServerReport);
   bindIfPresent('#load-server-report', 'click', loadServerReport);
   bindIfPresent('#copy-report-link', 'click', () => copyText(reportUrl(), 'Copied report link'));
@@ -850,10 +926,10 @@ function bindEvents() {
 function runDiagnosis() {
   const preset = getSelectedBundlePreset();
   const selected = getSelectedRiskProfile(preset);
-  const bundleLabel = preset.type === 'benchmark' ? 'Benchmark pack' : 'Harness bundle';
+  const bundleLabel = preset.type === 'benchmark' ? 'Scenario pack' : 'Source workflow';
   trackEvent('diagnosis_started', { profile: selected.id, preset: state.bundlePresetId, customInput: state.useCustomInput });
   const customBundle = state.useCustomInput ? parseJsonInput(state.customBundleText, bundleLabel) : null;
-  const customRuns = state.useCustomInput && state.useObservedRuns ? parseJsonInput(state.customRunsText, 'Observed runs') : null;
+  const customRuns = state.useCustomInput && state.useObservedRuns ? parseJsonInput(state.customRunsText, 'Outcome data') : null;
 
   if (customBundle?.error || customRuns?.error) {
     state.inputError = customBundle?.error ?? customRuns?.error;
@@ -972,7 +1048,7 @@ function updateReport(context) {
   state.reportPath = reportPathFor(state.selectedProjectId, reportId);
   state.loadedServerReport = null;
 
-  setText('hero-run-label', `diagnosis/${selected.profile.agentDomain}`);
+  setText('hero-run-label', `${selected.label} assessment`);
   setText('hero-gate', gate);
   setText('hero-baseline', `${visible}%`);
   setText('hero-mutated', `${holdout}%`);
@@ -980,20 +1056,21 @@ function updateReport(context) {
   setText('hero-surface', weakest?.label ?? 'No weak surface detected');
   setText('hero-control', recommendation);
   setText('demo-profile', bundleType === 'benchmark' ? `${selected.label} / benchmark` : selected.label);
-  setText('demo-variants', String(analysis.pack.variants.length));
+  setText('demo-variants', `${analysis.pack.variants.length} scenarios`);
   setText('demo-seed', seed);
   setText('demo-gate', gate);
   setText('report-baseline', `${visible}% pass`);
   setText('report-mutated', `${holdout}% pass`);
   setText('report-drop', `${drop}%`);
+  setText('report-gap-band', analysis.summary.robustnessBand?.label ?? fallbackRobustnessBand(analysis.summary.gap));
   setText('report-surface', weakest?.label ?? 'stable');
   setText('report-failure', failure);
   setText('report-control', recommendation);
   setText('report-seed', seed);
   setText('report-gate', gate);
   setText('report-id', reportId);
-  setText('report-path', state.reportPath || '--');
-  setText('report-saved', getSavedReports()[reportId] ? 'saved' : 'unsaved');
+  setText('report-path', reportUrl());
+  setText('report-saved', getSavedReports()[reportId] ? 'browser' : 'unsaved');
   setText('report-text', analysis.reportText);
   renderVariantTable(analysis);
   renderCaseResults(snapshot.caseResults ?? []);
@@ -1019,13 +1096,13 @@ function updateReport(context) {
 
 async function runHttpRunner() {
   if (!state.runnerEndpoint.trim()) {
-    state.runnerStatus = 'Add an endpoint first';
+    state.runnerStatus = 'Add a runner URL to test a connected workflow.';
     setText('runner-status', state.runnerStatus);
     return;
   }
 
   if (!state.analysis) runDiagnosis();
-  state.runnerStatus = 'Posting mutation pack...';
+  state.runnerStatus = 'Sending the assessment to the connected runner...';
   setText('runner-status', state.runnerStatus);
   persistState();
 
@@ -1059,7 +1136,7 @@ async function runHttpRunner() {
     document.querySelector('#runs-json').value = state.customRunsText;
     document.querySelector('#custom-toggle').checked = true;
     document.querySelector('#observed-toggle').checked = true;
-    state.runnerStatus = `Loaded ${observations.length} runner observations · Robustness Gap updated`;
+    state.runnerStatus = `Loaded ${observations.length} run result${observations.length === 1 ? '' : 's'} and refreshed the report.`;
     setText('runner-status', state.runnerStatus);
     persistState();
     runDiagnosis();
@@ -1073,7 +1150,7 @@ async function runHttpRunner() {
 function friendlyRunnerError(error) {
   const message = String(error?.message ?? error ?? '');
   if (message === 'Failed to fetch') {
-    return 'Failed to fetch: runner is unreachable or missing CORS for POST /harnessamp';
+    return 'Runner is unreachable. Check the URL and allow cross-origin POST requests.';
   }
   return message;
 }
@@ -1096,7 +1173,7 @@ function normalizeRunnerObservations(payload, analysis) {
       passed,
       score,
       latencyMs: Number(result.latencyMs ?? 0),
-      notes: result.outputText ?? result.notes ?? 'External runner returned AgentRunResult.',
+      notes: result.outputText ?? result.notes ?? 'Connected runner returned a result.',
     },
   ];
 }
@@ -1134,13 +1211,13 @@ function renderVariantTable(analysis) {
 }
 
 function renderSchemaStatus(bundle, profile, analysis, bundleType = detectBundleType(bundle)) {
-  const inputSchemaLabel = bundleType === 'benchmark' ? 'Benchmark pack' : 'Harness bundle';
+  const inputSchemaLabel = bundleType === 'benchmark' ? 'Scenario pack' : 'Source workflow';
   const inputSchemaResult = bundleType === 'benchmark' ? validateBenchmarkPack(bundle) : validateHarnessBundle(bundle);
   const checks = [
     [inputSchemaLabel, inputSchemaResult],
-    ['Observed runs', validateObservedRuns(state.useObservedRuns ? parseObservedRunsForValidation() : [])],
-    ['Risk profile', validateRiskProfile(profile)],
-    ['Diagnostic report', validateDiagnosticSnapshot(buildReportSnapshot(analysis, bundle))],
+    ['Outcome data', validateObservedRuns(state.useObservedRuns ? parseObservedRunsForValidation() : [])],
+    ['Selected setup', validateRiskProfile(profile)],
+    ['Generated report', validateDiagnosticSnapshot(buildReportSnapshot(analysis, bundle))],
   ];
 
   const schemaList = document.querySelector('#schema-status-list');
@@ -1161,12 +1238,12 @@ function renderBenchmarkPanels(sourceBundle, analysis) {
   if (!contractPanel || !caseList) return;
 
   if (!isBenchmarkPackShape(sourceBundle)) {
-    setText('benchmark-summary-meta', 'Select the support or browser benchmark preset to inspect intent, contract, and release gates.');
-    setText('benchmark-cases-meta', 'Cases appear when the active bundle is a benchmark pack.');
+    setText('benchmark-summary-meta', 'Choose a scenario pack to review its rules, thresholds, and allowed behavior.');
+    setText('benchmark-cases-meta', 'Scenario details appear when the selected pack includes them.');
     contractPanel.innerHTML = `
       <article class="benchmark-empty">
-        <h4>Profile demo mode</h4>
-        <p>The current preset uses a generic harness bundle. Switch the bundle preset to the support benchmark to review cases, contract rules, and benchmark gates in the app.</p>
+        <h4>Example setup</h4>
+        <p>The current starting point uses sample workflow data. Switch to a scenario pack to review cases, checks, and release thresholds.</p>
       </article>
     `;
     caseList.innerHTML = '';
@@ -1184,7 +1261,8 @@ function renderBenchmarkPanels(sourceBundle, analysis) {
   const toolCount = Array.isArray(harness.tools) ? harness.tools.length : 0;
 
   setText('benchmark-summary-meta', `${analysis.bundle.project} · ${caseCount} cases · ${toolCount} tools`);
-  setText('benchmark-cases-meta', `${finalResponders.length || contract.agents?.length || 1} responder path · replayable seeds`);
+  const responsePathCount = finalResponders.length || contract.agents?.length || 1;
+  setText('benchmark-cases-meta', `${responsePathCount} response path${responsePathCount === 1 ? '' : 's'} · replayable scenarios`);
 
   contractPanel.innerHTML = `
     <article>
@@ -1194,9 +1272,9 @@ function renderBenchmarkPanels(sourceBundle, analysis) {
       ${renderInlineList(intent.successSignals, 'Success signals')}
     </article>
     <article>
-      <span>Must preserve</span>
-      <h4>Contract rules</h4>
-      ${renderBulletList(globalRules.must, 'No global must rules documented.')}
+      <span>Expected behavior</span>
+      <h4>Critical checks</h4>
+      ${renderBulletList(globalRules.must, 'No required behaviors documented.')}
     </article>
     <article>
       <span>Never allow</span>
@@ -1204,23 +1282,23 @@ function renderBenchmarkPanels(sourceBundle, analysis) {
       ${renderBulletList(globalRules.mustNot, 'No global forbidden actions documented.')}
     </article>
     <article>
-      <span>Gate summary</span>
-      <h4>Release thresholds</h4>
+      <span>Release decision</span>
+      <h4>Passing thresholds</h4>
       <ul>
-        ${renderGateRow('Baseline pass', summary.baselinePassGate)}
-        ${renderGateRow('Visible mutated pass', summary.visibleMutatedPassGate)}
-        ${renderGateRow('Hidden holdout pass', summary.hiddenHoldoutPassGate)}
-        ${renderGateRow('Max robustness gap', summary.maxRobustnessGap)}
+        ${renderGateRow('Baseline score', summary.baselinePassGate)}
+        ${renderGateRow('Observed stress score', summary.visibleMutatedPassGate)}
+        ${renderGateRow('Holdout stress score', summary.hiddenHoldoutPassGate)}
+        ${renderGateRow('Maximum performance drop', summary.maxRobustnessGap)}
       </ul>
     </article>
     <article>
-      <span>Final responders</span>
-      <h4>Agent boundary</h4>
-      ${renderInlineList(finalResponders.length ? finalResponders : contract.agents?.map((item) => item.id), 'No responders documented.')}
+      <span>Coverage</span>
+      <h4>Included agents</h4>
+      ${renderInlineList(finalResponders.length ? finalResponders : contract.agents?.map((item) => item.id), 'No agent coverage documented.')}
     </article>
     <article>
-      <span>Approved tools</span>
-      <h4>Tool surface</h4>
+      <span>Allowed tools</span>
+      <h4>Tool access</h4>
       ${renderInlineList(harness.tools?.map((item) => item.name), 'No tools documented.')}
     </article>
   `;
@@ -1234,8 +1312,8 @@ function renderBenchmarkPanels(sourceBundle, analysis) {
       ${renderCaseSection('Assertions', item.assertions)}
       ${renderCaseSection('Forbidden', item.forbiddenActions)}
       <div class="benchmark-case-meta">
-        <strong>seed ${escapeHtml(item.seed ?? '--')}</strong>
-        <span>${escapeHtml((item.allowedAgents ?? []).join(', ') || 'unscoped')}</span>
+        <strong>reference ${escapeHtml(item.seed ?? '--')}</strong>
+        <span>${escapeHtml((item.allowedAgents ?? []).join(', ') || 'all agents')}</span>
       </div>
     </article>
   `).join('');
@@ -1328,15 +1406,15 @@ function saveReportSnapshot(message = 'Saved') {
   const reports = getSavedReports();
   reports[snapshot.id] = snapshot;
   localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(reports));
-  setText('report-saved', 'saved');
+  setText('report-saved', 'browser');
   showFeedback(message);
 }
 
 async function saveServerReport() {
   if (!state.analysis) return;
   if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId) {
-    saveReportSnapshot('Saved locally');
-    showFeedback('Sign in and choose a project to save to the server');
+    saveReportSnapshot('Saved to this browser');
+    showFeedback('Sign in and choose a project to save to the workspace.');
     return;
   }
   const snapshot = activeReportSnapshot();
@@ -1354,21 +1432,21 @@ async function saveServerReport() {
     state.reportId = payload.id ?? snapshot.id;
     state.reportPath = reportPathFor(state.selectedProjectId, state.reportId);
     setText('report-id', state.reportId);
-    setText('report-path', state.reportPath);
-    setText('report-saved', payload.storage ?? 'server');
-    showFeedback('Saved server report');
+    setText('report-path', reportUrl());
+    setText('report-saved', payload.storage === 'server' ? 'workspace' : (payload.storage ?? 'workspace'));
+    showFeedback('Saved to the workspace');
     persistState();
     await refreshProjectResources();
     renderProjectResources();
   } catch (error) {
     showFeedback(error.message);
-    saveReportSnapshot('Saved locally');
+    saveReportSnapshot('Saved to this browser');
   }
 }
 
 async function loadServerReport() {
   if (!state.reportId) {
-    showFeedback('No report id');
+    showFeedback('Save or open a report first.');
     return;
   }
   try {
@@ -1489,18 +1567,18 @@ function applyLoadedSnapshot(snapshot, options = {}) {
   setText('report-mutated', `${Math.round(snapshot.summary?.mutatedPassRate ?? 0)}% pass`);
   setText('report-drop', `${Math.round(snapshot.summary?.robustnessDrop ?? 0)}%`);
   setText('report-gap-band', snapshot.summary?.robustnessBand?.label ?? fallbackRobustnessBand(snapshot.summary?.robustnessDrop));
-  setText('report-surface', snapshot.deltas?.[0]?.mutationId ?? 'stable');
-  setText('report-failure', snapshot.findings?.[0]?.failureTypes?.[0]?.id ?? 'wrapper_brittleness');
+  setText('report-surface', snapshot.deltas?.[0]?.mutationId ? humanizeDocSegment(snapshot.deltas[0].mutationId) : 'Stable');
+  setText('report-failure', snapshot.findings?.[0]?.failureTypes?.[0]?.id ? humanizeDocSegment(snapshot.findings[0].failureTypes[0].id) : 'Review needed');
   setText('report-control', snapshot.findings?.[0]?.recommendation ?? 'Review controls');
   setText('report-seed', snapshot.mutationRuns?.[0]?.variantId ?? '--');
   setText('report-gate', String(snapshot.summary?.verdict ?? 'warn').toUpperCase());
   setText('report-id', state.reportId ?? '--');
-  setText('report-path', state.reportPath || '--');
-  setText('report-saved', options.localOnly ? 'local' : 'server');
+  setText('report-path', reportUrl());
+  setText('report-saved', options.localOnly ? 'browser' : 'workspace');
   setText('report-text', snapshot.markdown ?? JSON.stringify(snapshot, null, 2));
   renderCaseResults(snapshot.caseResults ?? []);
   renderSnapshotVariantTable(snapshot);
-  showFeedback(options.localOnly ? 'Loaded local report' : 'Loaded server report');
+  showFeedback(options.localOnly ? 'Opened the browser-saved report' : 'Opened the workspace report');
   persistState();
 }
 
@@ -1634,6 +1712,9 @@ async function refreshSession() {
     const response = await fetch('/api/session', { credentials: 'same-origin' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
+    if (!payload?.user) {
+      throw new Error('anonymous');
+    }
     state.session = payload;
     state.sessionStatus = 'authenticated';
     state.selectedWorkspaceId = payload.currentWorkspaceId || payload.workspaces?.[0]?.id || state.selectedWorkspaceId;
@@ -2317,7 +2398,7 @@ function extractMarkdownDescription(body, title) {
     return line;
   }
 
-  return 'Reference content sourced directly from the checked-in repository docs.';
+  return 'Summary pulled from the repository documentation.';
 }
 
 function extractJsonDocTitle(value, sourcePath) {

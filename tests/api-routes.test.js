@@ -64,6 +64,21 @@ test('dev-auth session endpoint returns a seeded user context', async () => {
   assert.ok(Array.isArray(response.body.workspaces));
 });
 
+test('session endpoint returns anonymous payload without auth', async () => {
+  delete process.env.HARNESSAMP_DEV_AUTH;
+  const request = {
+    method: 'GET',
+    headers: {},
+    query: { action: 'session' },
+  };
+  const response = createMockResponse();
+
+  await authHandler(request, response);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.user, null);
+  assert.deepEqual(response.body.workspaces, []);
+});
+
 test('server report save and load round-trips through the API handlers', async () => {
   process.env.HARNESSAMP_DEV_AUTH = '1';
   const session = await seedDevSession();
