@@ -82,7 +82,12 @@ export default async function handler(request, response) {
     if (request.method === 'GET' && action === 'session') {
       const session = await readSessionContext(request);
       if (!session?.user) {
-        unauthorized(response);
+        response.status(200).json({
+          user: null,
+          workspaces: [],
+          currentWorkspaceId: null,
+          defaultProjectId: null,
+        });
         return;
       }
 

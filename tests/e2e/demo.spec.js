@@ -1,20 +1,20 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/#demo');
+  await page.goto('/app');
 });
 
 test('runs the default diagnosis and shows schema validation', async ({ page }) => {
-  await expect(page.getByText('Load a sample harness. Choose risk. Run mutations.')).toBeVisible();
+  await expect(page.getByText('Run a sample assessment and review the result.')).toBeVisible();
   await expect(page.locator('#demo-gate')).toContainText(/PASS|WARN|BLOCK/);
-  await expect(page.getByText('Schema validation')).toBeVisible();
-  await expect(page.locator('#schema-status-list')).toContainText('Harness bundle');
+  await expect(page.getByText('Data validation')).toBeVisible();
+  await expect(page.locator('#schema-status-list')).toContainText('Source workflow');
 });
 
 test('switches to the support benchmark preset and shows benchmark details', async ({ page }) => {
   await page.locator('#bundle-preset-select').selectOption('support-mvp-benchmark');
   await expect(page.locator('#profile-select')).toBeDisabled();
-  await expect(page.locator('#schema-status-list')).toContainText('Benchmark pack');
+  await expect(page.locator('#schema-status-list')).toContainText('Scenario pack');
   await expect(page.locator('#benchmark-summary-meta')).toContainText('Support MVP Robustness Benchmark');
   await expect(page.locator('#benchmark-case-list')).toContainText('Duplicate charge with complete evidence');
 });
@@ -35,14 +35,14 @@ test('changes thresholds and persists them', async ({ page }) => {
 test('shows invalid JSON errors for pasted bundles', async ({ page }) => {
   await page.locator('#custom-toggle').check();
   await page.locator('#bundle-json').fill('{bad json');
-  await page.getByRole('button', { name: 'Run diagnosis' }).click();
-  await expect(page.locator('#input-error')).toContainText('Harness bundle');
+  await page.getByRole('button', { name: 'Run evaluation' }).click();
+  await expect(page.locator('#input-error')).toContainText('Source workflow');
 });
 
 test('supports report export actions and local snapshot save', async ({ page }) => {
   await page.locator('#report').scrollIntoViewIfNeeded();
-  await page.getByRole('button', { name: 'Save report snapshot' }).click();
-  await expect(page.locator('#action-feedback')).toContainText('Saved report snapshot');
+  await page.getByRole('button', { name: 'Save to this browser' }).click();
+  await expect(page.locator('#action-feedback')).toContainText('Saved to this browser');
 });
 
 test('docs routes resolve to the install section', async ({ page }) => {
@@ -53,11 +53,11 @@ test('docs routes resolve to the install section', async ({ page }) => {
 test('report pathname routes still render the shared report section', async ({ page }) => {
   await page.goto('/report/demo-shared');
   await expect(page.locator('#report')).toBeVisible();
-  await expect(page.locator('#report')).toContainText('From pass rate to engineering control.');
+  await expect(page.locator('#report')).toContainText('Turn results into a clear next action.');
 });
 
 test('renders mobile demo controls without hiding the primary action', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'mobile-only coverage');
-  await expect(page.getByRole('button', { name: 'Run diagnosis' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run evaluation' })).toBeVisible();
   await expect(page.locator('#runner-endpoint')).toBeVisible();
 });

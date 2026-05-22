@@ -29,8 +29,8 @@ test('web report exposes export and persistence actions', () => {
     'download-pack',
     'copy-ci',
     'save-report',
-    'report-id',
-    'report-saved',
+    'save-server-report',
+    'load-server-report',
     'action-feedback',
     'copy-report-link',
     'report-path',
@@ -38,17 +38,22 @@ test('web report exposes export and persistence actions', () => {
   ].forEach((id) => assert.match(source, new RegExp(`id="${id}"`)));
 });
 
-test('web demo includes validation, docs, runner, and deploy sections', () => {
+test('web app splits the product landing page from the operator surface', () => {
   [
     'schema-status-list',
     'benchmark-contract-panel',
     'benchmark-case-list',
-    'Runner contract',
+    'renderHomeSurface',
+    'renderAppSurface',
+    'renderLandingPathsSection',
+    'renderDocsLandingSpotlight',
     'renderDocsExperience',
     'renderDocsOverview',
     'rawMarkdownDocs',
     '/report/',
-    'Static hosting ready',
+    'Launch the app',
+    'Manage saved reports and connected runners.',
+    'report-details',
     'validateHarnessBundle',
     'validateBenchmarkPack',
     'validateRiskProfile',
