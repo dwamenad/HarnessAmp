@@ -35,6 +35,8 @@ test('web report exposes export and persistence actions', () => {
     'copy-report-link',
     'report-path',
     'case-results',
+    'failure-corpus-summary',
+    'report-comparison',
   ].forEach((id) => assert.match(source, new RegExp(`id="${id}"`)));
 });
 
@@ -58,6 +60,8 @@ test('web app splits the product landing page from the operator surface', () => 
     'validateBenchmarkPack',
     'validateRiskProfile',
     'validateDiagnosticSnapshot',
+    'benchmarkReadiness',
+    'Review readiness',
     'runHttpRunner',
     'browser-mvp-benchmark',
   ].forEach((text) => assert.match(source, new RegExp(text)));

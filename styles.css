@@ -1032,6 +1032,36 @@ section[id] {
   letter-spacing: 0.08em;
 }
 
+.benchmark-contract-panel .readiness-list {
+  padding-left: 0;
+}
+
+.readiness-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 8px;
+  list-style: none;
+}
+
+.readiness-list li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-top: 8px;
+  background: var(--dim);
+}
+
+.readiness-list .is-ready::before {
+  background: var(--accent-2);
+}
+
+.readiness-list .is-missing::before {
+  background: var(--danger);
+}
+
 .benchmark-empty {
   min-height: 0;
 }
@@ -1167,6 +1197,95 @@ section[id] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   background: var(--line-soft);
+}
+
+.report-insights {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 18px;
+  background: var(--line-soft);
+}
+
+.report-insights article {
+  min-height: 180px;
+  background: rgba(8, 9, 8, 0.96);
+  padding: 20px;
+}
+
+.report-insights h3 {
+  margin-bottom: 18px;
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.insight-grid,
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.insight-grid div,
+.comparison-grid div {
+  display: grid;
+  gap: 8px;
+  min-height: 78px;
+  align-content: center;
+  background: #070807;
+  padding: 14px;
+}
+
+.insight-grid span,
+.comparison-grid span,
+.comparison-header span {
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.insight-grid strong,
+.comparison-grid strong {
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+.comparison-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.comparison-status,
+.comparison-grid small {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.comparison-status--improved,
+.comparison-grid .improved {
+  color: var(--accent-2);
+}
+
+.comparison-status--regressed,
+.comparison-grid .regressed {
+  color: var(--danger);
+}
+
+.comparison-status--steady,
+.comparison-grid .steady {
+  color: var(--muted);
 }
 
 .case-card {
@@ -1847,7 +1966,8 @@ section[id] {
 
   .export-actions,
   .variant-panel,
-  .case-panel {
+  .case-panel,
+  .report-insights {
     grid-column: auto;
   }
 }
@@ -1892,6 +2012,9 @@ section[id] {
   .schema-status-list,
   .scoreline,
   .report,
+  .report-insights,
+  .insight-grid,
+  .comparison-grid,
   .docs-meta {
     grid-template-columns: 1fr;
   }
