@@ -1,4 +1,5 @@
 import Ajv2020 from 'ajv/dist/2020';
+import { marked } from 'marked';
 import { analyzeBundle, createDemoBundle, safeJsonParse } from './core/engine.js';
 import { buildReportSnapshot as createReportSnapshot } from './shared/report-snapshot.js';
 import { MUTATION_PACKS } from './mutations/registry.js';
@@ -12,12 +13,23 @@ import harnessBundleSchema from '../docs/schemas/harness_bundle.schema.json';
 import riskProfileSchema from '../docs/schemas/risk_profile.schema.json';
 import diagnosticReportSchema from '../docs/schemas/diagnostic_report.schema.json';
 import benchmarkPackSchema from '../docs/schemas/benchmark_pack.schema.json';
-import docsInstall from '../docs/install.md?raw';
-import docsSchemas from '../docs/schemas.md?raw';
-import docsRunnerContract from '../docs/runner-contract.md?raw';
-import docsCiGates from '../docs/ci-gates.md?raw';
-import docsMutationPacks from '../docs/mutation-packs.md?raw';
-import docsBenchmarks from '../docs/benchmarks.md?raw';
+
+const rawMarkdownDocs = import.meta.glob('../docs/**/*.md', {
+  eager: true,
+  import: 'default',
+  query: '?raw',
+});
+
+const rawJsonDocs = import.meta.glob('../docs/**/*.json', {
+  eager: true,
+  import: 'default',
+  query: '?raw',
+});
+
+const rawDocModules = {
+  ...rawMarkdownDocs,
+  ...rawJsonDocs,
+};
 
 const riskProfiles = {
   'support-agent': {
@@ -139,14 +151,13 @@ const proofStats = [
   ['2 benchmark lanes', 'support + browser'],
 ];
 
-const docPages = [
-  { slug: 'install', id: 'docs-install', title: 'Install', body: docsInstall },
-  { slug: 'schemas', id: 'docs-schemas', title: 'Schemas', body: docsSchemas },
-  { slug: 'runner-contract', id: 'docs-runner-contract', title: 'Runner contract', body: docsRunnerContract },
-  { slug: 'ci-gates', id: 'docs-ci-gates', title: 'CI gates', body: docsCiGates },
-  { slug: 'mutation-packs', id: 'docs-mutation-packs', title: 'Mutation packs', body: docsMutationPacks },
-  { slug: 'benchmarks', id: 'docs-benchmarks', title: 'Benchmarks', body: docsBenchmarks },
-];
+const docPages = createDocPages(rawDocModules);
+const docPageMap = new Map(docPages.map((page) => [page.slug, page]));
+const docSourceMap = new Map(docPages.map((page) => [page.sourcePath, page]));
+const docsSidebarGroups = buildDocsSidebarGroups(docPages);
+const docsSequence = docPages.filter((page) => page.slug !== '__missing__');
+const docsHomePage = docPageMap.get('') ?? docPages[0];
+const featuredDocPages = pickFeaturedDocPages(docPages);
 
 const workflow = [
   ['Wrap', 'Load your harness without rewriting the agent runtime.'],
@@ -231,6 +242,15 @@ initializeApp().catch((error) => {
 
 async function initializeApp() {
   if (!state.useCustomInput) syncCustomEditorsToPreset();
+  if (getRoute().kind === 'docs') {
+    state.session = null;
+    state.sessionStatus = 'anonymous';
+    render();
+    await hydrateRouteState();
+    window.addEventListener('hashchange', scrollToRouteTarget);
+    return;
+  }
+
   await refreshSession();
   render();
   runDiagnosis();
@@ -246,24 +266,23 @@ function render() {
   const isAuthed = state.sessionStatus === 'authenticated' && state.session?.user;
   const activeReportPath = state.reportPath || (state.reportId ? reportPathFor(state.selectedProjectId, state.reportId) : '');
 
+  if (route.kind === 'docs') {
+    app.innerHTML = `
+      <div class="site-shell site-shell--docs">
+        ${renderTopbar(route, isAuthed)}
+        ${renderDocsExperience(route)}
+      </div>
+    `;
+
+    bindEvents();
+    observeReveals();
+    scrollToRouteTarget();
+    return;
+  }
+
   app.innerHTML = `
     <div class="site-shell">
-      <header class="topbar">
-        <a class="brand" href="/" aria-label="HarnessAmp home">
-          <span class="brand__mark brand__mark--image"><img src="/logo.png" alt="" /></span>
-          <span><strong>HarnessAmp</strong><small>Robustness infrastructure</small></span>
-        </a>
-        <nav class="topbar__nav" aria-label="Primary navigation">
-          <a href="/" ${route.kind === 'home' ? 'aria-current="page"' : ''}>Product</a>
-          <a href="/app" ${route.kind === 'app' || route.kind === 'report' || route.kind === 'project-report' ? 'aria-current="page"' : ''}>App</a>
-          <a href="/docs/install" ${route.kind === 'docs' ? 'aria-current="page"' : ''}>Docs</a>
-          <a href="/app#report">Reports</a>
-          <a href="/app#packs">Packs</a>
-        </nav>
-        ${isAuthed
-          ? `<button class="nav-cta nav-cta--button" id="logout-button" type="button">Log out</button>`
-          : `<a class="nav-cta" href="${escapeHtml(authStartHref())}">GitHub login</a>`}
-      </header>
+      ${renderTopbar(route, isAuthed)}
 
       <main id="top">
         <section class="hero reveal">
@@ -506,7 +525,7 @@ function render() {
           <div class="quickstart-list">${quickstart.map(([title, detail], index) => `<article><span>${index + 1}</span><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
         </section>
 
-        ${renderDocsSections()}
+        ${renderDocsOverview()}
 
         <section id="deploy" class="section deploy-section reveal">
           <div class="section__intro"><p class="eyebrow">Deployment</p><h2>Static hosting ready.</h2><p>The app builds as a static Vite site. Deploy the generated dist directory to Vercel, Netlify, GitHub Pages, or any static host.</p></div>
@@ -550,13 +569,167 @@ dist/assets/*</pre>
   scrollToRouteTarget();
 }
 
-function renderDocsSections() {
-  return docPages.map((page) => `
-    <section id="${page.id}" class="section docs-section reveal">
-      <div class="section__intro"><p class="eyebrow">Docs / ${page.title}</p><h2>${page.title}</h2><p>Route: /docs/${page.slug}</p></div>
-      <pre>${escapeHtml(page.body.trim())}</pre>
+function renderTopbar(route, isAuthed) {
+  return `
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="HarnessAmp home">
+        <span class="brand__mark brand__mark--image"><img src="/logo.png" alt="" /></span>
+        <span><strong>HarnessAmp</strong><small>Robustness infrastructure</small></span>
+      </a>
+      <nav class="topbar__nav" aria-label="Primary navigation">
+        <a href="/" ${route.kind === 'home' ? 'aria-current="page"' : ''}>Product</a>
+        <a href="/app" ${route.kind === 'app' || route.kind === 'report' || route.kind === 'project-report' ? 'aria-current="page"' : ''}>App</a>
+        <a href="/docs" ${route.kind === 'docs' ? 'aria-current="page"' : ''}>Docs</a>
+        <a href="/app#report">Reports</a>
+        <a href="/app#packs">Packs</a>
+      </nav>
+      ${isAuthed
+        ? '<button class="nav-cta nav-cta--button" id="logout-button" type="button">Log out</button>'
+        : `<a class="nav-cta" href="${escapeHtml(authStartHref())}">GitHub login</a>`}
+    </header>
+  `;
+}
+
+function renderDocsOverview() {
+  return `
+    <section id="docs-preview" class="section reveal">
+      <div class="section__intro">
+        <p class="eyebrow">Built-in docs</p>
+        <h2>Repo-backed docs without leaving the product.</h2>
+        <p>The `/docs` route now renders the checked-in Markdown and schema files as a proper reading surface with navigation, anchors, and shareable deep links.</p>
+      </div>
+      <div class="docs-grid">
+        ${featuredDocPages.map((page) => `
+          <article>
+            <span>${escapeHtml(page.groupLabel)}</span>
+            <h3>${escapeHtml(page.title)}</h3>
+            <p>${escapeHtml(page.description)}</p>
+            <a class="button button--secondary" href="${escapeHtml(page.routePath)}">Open page</a>
+          </article>
+        `).join('')}
+      </div>
     </section>
-  `).join('');
+  `;
+}
+
+function renderDocsExperience(route) {
+  const page = docPageMap.get(route.slug ?? '') ?? docsHomePage;
+  const isMissing = !docPageMap.has(route.slug ?? '');
+  const rendered = renderDocBody(page);
+  const pageIndex = docsSequence.findIndex((item) => item.slug === page.slug);
+  const previous = pageIndex > 0 ? docsSequence[pageIndex - 1] : null;
+  const next = pageIndex >= 0 ? docsSequence[pageIndex + 1] ?? null : null;
+
+  return `
+    <main id="docs-top" class="docs-shell">
+      <aside class="docs-sidebar reveal is-visible">
+        <div class="docs-sidebar__header">
+          <p class="eyebrow">Developer docs</p>
+          <h1>HarnessAmp docs</h1>
+          <p>Reference, guides, concepts, and schemas sourced directly from the repository.</p>
+        </div>
+        <a class="docs-home-link ${page.slug === '' ? 'is-active' : ''}" href="/docs">Overview</a>
+        ${docsSidebarGroups.map((group) => `
+          <section class="docs-sidebar__group">
+            <span>${escapeHtml(group.label)}</span>
+            ${group.pages.map((item) => `
+              <a class="${item.slug === page.slug ? 'is-active' : ''}" href="${escapeHtml(item.routePath)}" ${item.slug === page.slug ? 'aria-current="page"' : ''}>
+                ${escapeHtml(item.sidebarTitle)}
+              </a>
+            `).join('')}
+          </section>
+        `).join('')}
+      </aside>
+
+      <section class="docs-page">
+        <div class="docs-page__hero reveal is-visible">
+          <div class="docs-breadcrumbs">${renderDocBreadcrumbs(page)}</div>
+          <div class="docs-page__title">
+            <p class="eyebrow">${isMissing ? 'Docs / Missing page' : `Docs / ${escapeHtml(page.groupLabel)}`}</p>
+            <h2>${escapeHtml(isMissing ? 'Page not found' : page.title)}</h2>
+            <p>${escapeHtml(isMissing ? 'This docs route does not exist in the current repository snapshot. Use the sidebar to jump back into the published pages.' : page.description)}</p>
+          </div>
+          <div class="docs-meta">
+            <span>${escapeHtml(page.routePath)}</span>
+            <span>${escapeHtml(page.sourcePath)}</span>
+            <span>${escapeHtml(page.format.toUpperCase())}</span>
+          </div>
+        </div>
+
+        ${page.slug === '' ? renderDocsLandingSpotlight() : ''}
+
+        <div class="docs-page__body">
+          <article class="docs-article reveal is-visible">
+            ${isMissing ? `
+              <div class="docs-callout">
+                <strong>Missing page</strong>
+                <p>The requested docs path is not available. Open the docs overview or a page from the sidebar.</p>
+              </div>
+            ` : rendered.html}
+          </article>
+          <aside class="docs-toc reveal is-visible">
+            <span>On this page</span>
+            ${renderDocsToc(rendered.toc)}
+          </aside>
+        </div>
+
+        <nav class="docs-pagination reveal is-visible" aria-label="Docs pagination">
+          ${previous ? `<a class="docs-pagination__link" href="${escapeHtml(previous.routePath)}"><span>Previous</span><strong>${escapeHtml(previous.title)}</strong></a>` : '<div class="docs-pagination__link docs-pagination__link--empty"></div>'}
+          ${next ? `<a class="docs-pagination__link" href="${escapeHtml(next.routePath)}"><span>Next</span><strong>${escapeHtml(next.title)}</strong></a>` : '<div class="docs-pagination__link docs-pagination__link--empty"></div>'}
+        </nav>
+      </section>
+    </main>
+  `;
+}
+
+function renderDocsLandingSpotlight() {
+  return `
+    <section class="docs-landing reveal is-visible">
+      <div class="docs-landing__intro">
+        <p class="eyebrow">Start here</p>
+        <h3>Fast path through the repo.</h3>
+        <p>Open the overview, install path, usage guide, CI gate docs, benchmark docs, and schema reference from one place.</p>
+      </div>
+      <div class="docs-grid docs-grid--compact">
+        ${featuredDocPages.map((page) => `
+          <article>
+            <span>${escapeHtml(page.groupLabel)}</span>
+            <h3>${escapeHtml(page.title)}</h3>
+            <p>${escapeHtml(page.description)}</p>
+            <a class="button button--secondary" href="${escapeHtml(page.routePath)}">Read page</a>
+          </article>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderDocsToc(items) {
+  if (!items.length) {
+    return '<p class="docs-toc__empty">This page has no section headings.</p>';
+  }
+  return `
+    <div class="docs-toc__list">
+      ${items.map((item) => `<a class="docs-toc__item docs-toc__item--depth-${item.depth}" href="#${escapeHtml(item.id)}">${escapeHtml(item.text)}</a>`).join('')}
+    </div>
+  `;
+}
+
+function renderDocBreadcrumbs(page) {
+  const segments = page.slug ? page.slug.split('/') : [];
+  const crumbs = [{ label: 'Docs', href: '/docs' }];
+  segments.forEach((segment, index) => {
+    const slug = segments.slice(0, index + 1).join('/');
+    const doc = docPageMap.get(slug);
+    crumbs.push({
+      label: doc?.title ?? humanizeDocSegment(segment),
+      href: doc?.routePath ?? `/docs/${slug}`,
+    });
+  });
+
+  return crumbs.map((crumb, index) => index === crumbs.length - 1
+    ? `<strong>${escapeHtml(crumb.label)}</strong>`
+    : `<a href="${escapeHtml(crumb.href)}">${escapeHtml(crumb.label)}</a>`).join('<span>/</span>');
 }
 
 function bindEvents() {
@@ -828,14 +1001,20 @@ function updateReport(context) {
   renderBenchmarkPanels(sourceBundle, analysis, preset);
   persistState();
 
-  document.querySelector('#coverage-list').innerHTML = MUTATION_PACKS.map((pack) => `
-    <span class="${coverage.includes(pack) ? 'is-active' : ''}">${formatPackName(pack)}</span>
-  `).join('');
+  const coverageList = document.querySelector('#coverage-list');
+  if (coverageList) {
+    coverageList.innerHTML = MUTATION_PACKS.map((pack) => `
+      <span class="${coverage.includes(pack) ? 'is-active' : ''}">${formatPackName(pack)}</span>
+    `).join('');
+  }
 
-  document.querySelector('#hero-bars').innerHTML = analysis.familyStats.slice(0, 8).map((family) => {
-    const height = Math.max(18, Math.round(100 - family.holdoutRate));
-    return `<i style="--h: ${height}%"></i>`;
-  }).join('');
+  const heroBars = document.querySelector('#hero-bars');
+  if (heroBars) {
+    heroBars.innerHTML = analysis.familyStats.slice(0, 8).map((family) => {
+      const height = Math.max(18, Math.round(100 - family.holdoutRate));
+      return `<i style="--h: ${height}%"></i>`;
+    }).join('');
+  }
 }
 
 async function runHttpRunner() {
@@ -939,7 +1118,10 @@ function renderVariantTable(analysis) {
     .filter(({ outcome }) => !outcome.passed || outcome.score < 80)
     .slice(0, 10);
 
-  document.querySelector('#variant-table-body').innerHTML = rows.map(({ outcome, variant }) => `
+  const body = document.querySelector('#variant-table-body');
+  if (!body) return;
+
+  body.innerHTML = rows.map(({ outcome, variant }) => `
     <tr>
       <td>${escapeHtml(variant?.title ?? outcome.variantId)}</td>
       <td>${escapeHtml(variant?.familyLabel ?? variant?.familyId ?? 'wrapper')}</td>
@@ -961,7 +1143,10 @@ function renderSchemaStatus(bundle, profile, analysis, bundleType = detectBundle
     ['Diagnostic report', validateDiagnosticSnapshot(buildReportSnapshot(analysis, bundle))],
   ];
 
-  document.querySelector('#schema-status-list').innerHTML = checks.map(([label, result]) => `
+  const schemaList = document.querySelector('#schema-status-list');
+  if (!schemaList) return;
+
+  schemaList.innerHTML = checks.map(([label, result]) => `
     <div class="${result.ok ? 'is-valid' : 'is-invalid'}">
       <strong>${label}</strong>
       <span>${result.ok ? 'valid' : escapeHtml(result.errors[0])}</span>
@@ -1657,7 +1842,7 @@ async function logout() {
   state.selectedRunnerId = '';
   persistState();
   render();
-  runDiagnosis();
+  if (getRoute().kind !== 'docs') runDiagnosis();
 }
 
 function authStartHref() {
@@ -1666,6 +1851,7 @@ function authStartHref() {
 }
 
 function getRoute(pathname = window.location.pathname) {
+  const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/u, '') : pathname;
   const projectReportMatch = pathname.match(/^\/projects\/([^/]+)\/reports\/([^/]+)$/);
   if (projectReportMatch) {
     return {
@@ -1683,7 +1869,14 @@ function getRoute(pathname = window.location.pathname) {
     };
   }
 
-  const docsMatch = pathname.match(/^\/docs\/([^/]+)$/);
+  if (normalizedPath === '/docs') {
+    return {
+      kind: 'docs',
+      slug: '',
+    };
+  }
+
+  const docsMatch = normalizedPath.match(/^\/docs\/(.+)$/u);
   if (docsMatch) {
     return {
       kind: 'docs',
@@ -1691,7 +1884,7 @@ function getRoute(pathname = window.location.pathname) {
     };
   }
 
-  if (pathname === '/app') {
+  if (normalizedPath === '/app') {
     return { kind: 'app' };
   }
 
@@ -1700,9 +1893,8 @@ function getRoute(pathname = window.location.pathname) {
 
 function scrollToRouteTarget() {
   const route = getRoute();
-  const docsPage = docPages.find((page) => page.slug === route.slug);
   const targetSelector = window.location.hash
-    || (route.kind === 'docs' && docsPage ? `#${docsPage.id}` : '')
+    || (route.kind === 'docs' ? '#docs-top' : '')
     || (route.kind === 'app' ? '#demo' : '')
     || (route.kind === 'report' || route.kind === 'project-report' ? '#report' : '')
     || '#top';
@@ -1891,6 +2083,313 @@ function cloneJson(value) {
 
 function formatPackName(value) {
   return String(value).replace(/_pack$/, '').replaceAll('_', ' ');
+}
+
+function createDocPages(rawModules) {
+  return Object.entries(rawModules)
+    .map(([modulePath, body]) => createDocPage(modulePath, body))
+    .sort(compareDocPages);
+}
+
+function createDocPage(modulePath, body) {
+  const sourcePath = normalizeDocFilePath(modulePath.replace('../docs/', ''));
+  const format = sourcePath.endsWith('.json') ? 'json' : 'markdown';
+  const parsedJson = format === 'json' ? safeJsonParse(body) : null;
+  const slug = sourcePathToSlug(sourcePath);
+  const title = format === 'json'
+    ? extractJsonDocTitle(parsedJson?.ok ? parsedJson.value : null, sourcePath)
+    : extractMarkdownTitle(body, sourcePath);
+  const description = format === 'json'
+    ? extractJsonDocDescription(parsedJson?.ok ? parsedJson.value : null, title)
+    : extractMarkdownDescription(body, title);
+  const groupKey = resolveDocGroupKey(sourcePath, slug);
+
+  return {
+    sourcePath,
+    format,
+    slug,
+    routePath: slug ? `/docs/${slug}` : '/docs',
+    title,
+    sidebarTitle: title,
+    description,
+    groupKey,
+    groupLabel: resolveDocGroupLabel(groupKey),
+    body: String(body).trim(),
+    rendered: null,
+  };
+}
+
+function compareDocPages(left, right) {
+  const groupOrder = {
+    overview: 0,
+    guides: 1,
+    concepts: 2,
+    adapters: 3,
+    reference: 4,
+    schemas: 5,
+  };
+  const leftGroup = groupOrder[left.groupKey] ?? 99;
+  const rightGroup = groupOrder[right.groupKey] ?? 99;
+  if (leftGroup !== rightGroup) return leftGroup - rightGroup;
+
+  const leftWeight = resolveDocWeight(left.sourcePath);
+  const rightWeight = resolveDocWeight(right.sourcePath);
+  if (leftWeight !== rightWeight) return leftWeight - rightWeight;
+
+  return left.title.localeCompare(right.title);
+}
+
+function resolveDocWeight(sourcePath) {
+  const explicitOrder = [
+    'index.md',
+    'install.md',
+    'installation.md',
+    'usage.md',
+    'cli.md',
+    'examples.md',
+    'benchmarks.md',
+    'ci-gates.md',
+    'mutation-packs.md',
+    'mutation-engine.md',
+    'architecture.md',
+    'testing.md',
+    'troubleshooting.md',
+    'reference/index.md',
+    'reference/api.md',
+    'schemas.md',
+  ];
+  const explicitIndex = explicitOrder.indexOf(sourcePath);
+  if (explicitIndex !== -1) return explicitIndex;
+  if (sourcePath.endsWith('/index.md')) return 30;
+  if (sourcePath.endsWith('.json')) return 90;
+  return 50;
+}
+
+function resolveDocGroupKey(sourcePath, slug) {
+  if (!slug) return 'overview';
+  const segments = sourcePath.split('/');
+  if (segments.length === 1) return 'guides';
+  return segments[0];
+}
+
+function resolveDocGroupLabel(groupKey) {
+  const labels = {
+    overview: 'Overview',
+    guides: 'Guides',
+    concepts: 'Concepts',
+    adapters: 'Adapters',
+    reference: 'Reference',
+    schemas: 'Schemas',
+  };
+  return labels[groupKey] ?? humanizeDocSegment(groupKey);
+}
+
+function buildDocsSidebarGroups(pages) {
+  const groups = new Map();
+  pages
+    .filter((page) => page.slug)
+    .forEach((page) => {
+      if (!groups.has(page.groupKey)) {
+        groups.set(page.groupKey, {
+          key: page.groupKey,
+          label: page.groupLabel,
+          pages: [],
+        });
+      }
+      groups.get(page.groupKey).pages.push(page);
+    });
+
+  return Array.from(groups.values()).sort((left, right) => compareDocPages(left.pages[0], right.pages[0]));
+}
+
+function pickFeaturedDocPages(pages) {
+  const preferred = ['install', 'usage', 'cli', 'benchmarks', 'ci-gates', 'reference/api'];
+  const selected = preferred
+    .map((slug) => pages.find((page) => page.slug === slug))
+    .filter(Boolean);
+
+  if (selected.length >= 6) return selected;
+
+  const fallback = pages.filter((page) => page.slug && page.groupKey !== 'schemas');
+  for (const page of fallback) {
+    if (selected.length >= 6) break;
+    if (!selected.some((item) => item.slug === page.slug)) selected.push(page);
+  }
+  return selected;
+}
+
+function renderDocBody(page) {
+  if (page.rendered) return page.rendered;
+
+  if (page.format === 'json') {
+    page.rendered = {
+      html: `<pre class="docs-code-block"><code>${escapeHtml(page.body)}</code></pre>`,
+      toc: [],
+    };
+    return page.rendered;
+  }
+
+  marked.setOptions({ gfm: true });
+
+  const parser = new DOMParser();
+  const markup = marked.parse(page.body);
+  const fragment = parser.parseFromString(`<article>${markup}</article>`, 'text/html').body.firstElementChild;
+  const toc = [];
+  const usedIds = new Set();
+
+  if (!fragment) {
+    page.rendered = { html: '', toc };
+    return page.rendered;
+  }
+
+  rewriteDocLinks(fragment, page);
+
+  const leadingTitle = fragment.querySelector('h1');
+  if (leadingTitle) leadingTitle.remove();
+
+  fragment.querySelectorAll('h2, h3, h4').forEach((heading) => {
+    const text = heading.textContent?.trim() ?? '';
+    const id = uniqueDocAnchorId(slugifyDocText(text), usedIds);
+    heading.id = id;
+    toc.push({ id, text, depth: Number(heading.tagName.slice(1)) });
+  });
+
+  fragment.querySelectorAll('pre').forEach((element) => element.classList.add('docs-code-block'));
+  fragment.querySelectorAll('table').forEach((element) => element.classList.add('docs-table'));
+  fragment.querySelectorAll('code').forEach((element) => {
+    if (element.parentElement?.tagName !== 'PRE') element.classList.add('docs-inline-code');
+  });
+  fragment.querySelectorAll('a[href]').forEach((element) => {
+    const href = element.getAttribute('href') ?? '';
+    if (/^https?:\/\//.test(href)) {
+      element.setAttribute('target', '_blank');
+      element.setAttribute('rel', 'noreferrer');
+    }
+  });
+
+  page.rendered = {
+    html: fragment.innerHTML,
+    toc,
+  };
+  return page.rendered;
+}
+
+function rewriteDocLinks(root, page) {
+  root.querySelectorAll('a[href]').forEach((element) => {
+    const href = element.getAttribute('href');
+    if (!href) return;
+    element.setAttribute('href', resolveDocLink(page.sourcePath, href));
+  });
+}
+
+function resolveDocLink(currentSourcePath, href) {
+  if (!href || href.startsWith('#') || /^[a-z]+:/i.test(href)) return href;
+
+  const [targetPath, rawHash = ''] = href.split('#');
+  if (!targetPath) return rawHash ? `#${slugifyDocText(rawHash)}` : href;
+  if (!targetPath.endsWith('.md') && !targetPath.endsWith('.json')) return href;
+
+  const resolvedPath = normalizeDocFilePath(joinDocPaths(dirnameDocPath(currentSourcePath), targetPath));
+  const targetPage = docSourceMap.get(resolvedPath);
+  if (!targetPage) return href;
+
+  const hash = rawHash ? `#${slugifyDocText(decodeURIComponent(rawHash))}` : '';
+  return `${targetPage.routePath}${hash}`;
+}
+
+function extractMarkdownTitle(body, sourcePath) {
+  const match = String(body).match(/^#\s+(.+)$/m);
+  return match?.[1]?.trim() || humanizeDocSegment(sourcePath.split('/').pop()?.replace(/\.md$/, '') ?? 'Docs');
+}
+
+function extractMarkdownDescription(body, title) {
+  const lines = String(body).split('\n');
+  let inCodeFence = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.startsWith('```')) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+    if (inCodeFence || !line || line === `# ${title}`) continue;
+    if (/^(#|>|- |\* |\d+\. )/.test(line)) continue;
+    return line;
+  }
+
+  return 'Reference content sourced directly from the checked-in repository docs.';
+}
+
+function extractJsonDocTitle(value, sourcePath) {
+  if (value && typeof value.title === 'string' && value.title.trim()) return value.title.trim();
+  return humanizeDocSegment(sourcePath.split('/').pop()?.replace(/\.json$/, '') ?? 'Schema');
+}
+
+function extractJsonDocDescription(value, title) {
+  if (value && typeof value.description === 'string' && value.description.trim()) return value.description.trim();
+  return `${title} JSON schema reference.`;
+}
+
+function sourcePathToSlug(sourcePath) {
+  const withoutExtension = sourcePath.replace(/\.(md|json)$/u, '');
+  if (withoutExtension === 'index') return '';
+  if (withoutExtension.endsWith('/index')) return withoutExtension.slice(0, -('/index'.length));
+  return withoutExtension;
+}
+
+function humanizeDocSegment(value) {
+  return String(value)
+    .replace(/\.schema$/u, ' schema')
+    .replace(/[-_.]+/gu, ' ')
+    .replace(/\b\w/gu, (match) => match.toUpperCase())
+    .trim();
+}
+
+function slugifyDocText(value) {
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s-]/gu, '')
+    .replace(/[-\s]+/gu, '-')
+    .replace(/^-+|-+$/gu, '');
+  return normalized || 'section';
+}
+
+function uniqueDocAnchorId(candidate, usedIds) {
+  let next = candidate;
+  let suffix = 2;
+  while (usedIds.has(next)) {
+    next = `${candidate}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(next);
+  return next;
+}
+
+function normalizeDocFilePath(value) {
+  const stack = [];
+  String(value)
+    .replaceAll('\\', '/')
+    .split('/')
+    .forEach((segment) => {
+      if (!segment || segment === '.') return;
+      if (segment === '..') {
+        stack.pop();
+        return;
+      }
+      stack.push(segment);
+    });
+  return stack.join('/');
+}
+
+function dirnameDocPath(value) {
+  const parts = normalizeDocFilePath(value).split('/');
+  parts.pop();
+  return parts.join('/');
+}
+
+function joinDocPaths(basePath, nextPath) {
+  return [basePath, nextPath].filter(Boolean).join('/');
 }
 
 function isObject(value) {
