@@ -27,11 +27,13 @@ if (command === 'validate') {
   const bundle = loadBundle(options.positional[0]);
   const suite = generateMutationSuite(bundle, {
     maxMutations: options.maxMutations,
+    generatedTier: options.generatedTier,
+    maxGeneratedMutations: options.maxGeneratedScenarios,
     riskProfile: options.riskProfile,
   });
   console.log(JSON.stringify(suite, null, 2));
 } else if (command === 'run') {
-  if (options.generatedTier) {
+  if (options.generatedTier && !options.positional[0]) {
     const report = await runGeneratedV2Suite({
       packName: options.packName,
       failOn: options.failOn,
@@ -72,7 +74,9 @@ if (command === 'validate') {
   } else {
     const bundle = loadBundle(options.positional[0]);
     const diagnosis = await diagnoseHarness(bundle, {
-      maxMutations: options.maxMutations ?? 5,
+      maxMutations: options.generatedTier ? options.maxMutations : options.maxMutations ?? 5,
+      generatedTier: options.generatedTier,
+      maxGeneratedMutations: options.maxGeneratedScenarios,
       riskProfile: options.riskProfile,
       runnerKind: options.runnerKind,
       runnerOptions: options.runnerOptions,
@@ -90,6 +94,8 @@ if (command === 'validate') {
   const bundle = loadBundle(options.positional[0]);
   const diagnosis = await diagnoseHarness(bundle, {
     maxMutations: options.maxMutations,
+    generatedTier: options.generatedTier,
+    maxGeneratedMutations: options.maxGeneratedScenarios,
     riskProfile: options.riskProfile,
     runnerKind: options.runnerKind,
     runnerOptions: options.runnerOptions,
@@ -105,6 +111,8 @@ if (command === 'validate') {
   const bundle = loadBundle(options.positional[0]);
   const diagnosis = await diagnoseHarness(bundle, {
     maxMutations: options.maxMutations,
+    generatedTier: options.generatedTier,
+    maxGeneratedMutations: options.maxGeneratedScenarios,
     riskProfile: options.riskProfile,
     runnerKind: options.runnerKind,
     runnerOptions: options.runnerOptions,

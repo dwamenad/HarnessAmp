@@ -101,4 +101,23 @@ node scripts/harnessamp.mjs mutate examples/demo-bundle.json --max-mutations 20
 node scripts/harnessamp.mjs registry
 ```
 
+## Generated v1 Suites
+
+The v1 engine can also expand the same registry into deterministic generated suites:
+
+```bash
+node scripts/harnessamp.mjs mutate examples/demo-bundle.json --generated smoke
+node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated smoke
+node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated nightly --max-generated 500
+```
+
+Generated tiers:
+
+- `smoke`: 400 generated tests
+- `core`: 3,400 generated tests
+- `deep`: 17,000 generated tests
+- `nightly`: 51,000 generated tests
+
+Each generated record keeps the v1 mutation shape, but adds a unique mutation id, the base registry mutation id, and generated metadata for the scenario, risk-profile variant, prompt variant, and context variant.
+
 The default runner is `MockRunner`. Future adapters exist as placeholders for model SDKs, agent frameworks, graph workflows, crew-style workflows, multi-agent runtimes, custom HTTP agents, and MCP-style runners.

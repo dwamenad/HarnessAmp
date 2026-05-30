@@ -7,7 +7,12 @@ import { generateMutationSuite } from '../mutations/registry.js';
 
 export async function diagnoseHarness(bundleInput, options = {}) {
   const normalizedBundle = analyzeBundle(bundleInput).bundle;
-  const suite = generateMutationSuite(bundleInput, {
+  const suite = generateMutationSuite(bundleInput, options.generatedTier ? {
+    riskProfile: options.riskProfile,
+    packs: options.packs,
+    generatedTier: options.generatedTier,
+    maxGeneratedMutations: options.maxGeneratedMutations ?? options.maxGeneratedScenarios ?? options.maxMutations,
+  } : {
     riskProfile: options.riskProfile,
     packs: options.packs,
     maxMutations: options.maxMutations ?? 24,

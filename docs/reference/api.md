@@ -68,6 +68,12 @@ Important outputs:
 - `selectedPacks` - mutation packs selected from the risk profile
 - `mutations` - structured mutation objects with trust boundaries, severity, expected failure, and mutated harnesses
 
+Useful generated-suite options:
+
+- `generatedTier` - `smoke`, `core`, `deep`, or `nightly`
+- `maxGeneratedMutations` - caps a generated tier for local inspection or CI sampling
+- `mutation.baseMutationId` - links each generated record back to the registry mutation it expanded from
+
 ## `diagnoseHarness(bundleInput, options)`
 
 Runs the production diagnosis flow with the default mock runner.
