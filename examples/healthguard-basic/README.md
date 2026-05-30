@@ -23,10 +23,10 @@ node scripts/harnessamp.mjs run --pack healthguard-core --generated smoke --fail
 Generated tiers:
 
 ```text
-smoke: 40 generated tests
-core: 456 generated tests
-deep: 2,280 generated tests
-nightly: 6,840 generated tests
+smoke: 400 generated tests
+core: 4,560 generated tests
+deep: 22,800 generated tests
+nightly: 68,400 generated tests
 ```
 
 Cap generated suites when needed:

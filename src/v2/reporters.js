@@ -119,6 +119,7 @@ export function formatMarkdownSuiteReport(report) {
     lines.push(`- Contracts: ${report.generated.coverage.contractCount}`);
     lines.push(`- Profiles: ${report.generated.coverage.profileCount}`);
     lines.push(`- Prompt variants: ${report.generated.coverage.promptVariantCount}`);
+    lines.push(`- Context variants: ${report.generated.coverage.contextVariantCount}`);
     lines.push('');
   }
 
