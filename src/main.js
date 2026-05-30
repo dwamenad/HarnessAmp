@@ -1,6 +1,7 @@
 import Ajv2020 from 'ajv/dist/2020';
 import { marked } from 'marked';
 import { analyzeBundle, createDemoBundle, safeJsonParse } from './core/engine.js';
+import { compareReportSnapshots, pickComparableReport } from './shared/report-comparison.js';
 import { buildReportSnapshot as createReportSnapshot } from './shared/report-snapshot.js';
 import { MUTATION_PACKS } from './mutations/registry.js';
 import supportProfile from '../examples/risk-profiles/support-agent.json';
@@ -549,6 +550,16 @@ function renderReportSection(activeReportUrl) {
         <h3>Scenario breakdown</h3>
         <div id="case-results" class="case-results"></div>
       </div>
+      <div class="report-insights">
+        <article>
+          <h3>Failure corpus</h3>
+          <div id="failure-corpus-summary" class="insight-grid"></div>
+        </article>
+        <article>
+          <h3>Run comparison</h3>
+          <div id="report-comparison" class="comparison-panel"></div>
+        </article>
+      </div>
       <details class="report-details">
         <summary>View raw report</summary>
         <pre class="report-text" id="report-text"></pre>
@@ -1042,7 +1053,7 @@ function updateReport(context) {
   const recommendation = analysis.recommendations[0]?.detail ?? analysis.recommendations[0]?.title ?? 'Add validation around the weakest wrapper surface.';
   const seed = replaySeed(analysis);
   const failure = weakest?.expectedFailure ?? weakest?.label ?? 'wrapper_brittleness';
-  const reportId = state.reportId || createReportId(analysis);
+  const reportId = createReportId(analysis);
   const snapshot = buildReportSnapshot(analysis, sourceBundle);
   state.reportId = reportId;
   state.reportPath = reportPathFor(state.selectedProjectId, reportId);
@@ -1073,6 +1084,8 @@ function updateReport(context) {
   setText('report-saved', getSavedReports()[reportId] ? 'browser' : 'unsaved');
   setText('report-text', analysis.reportText);
   renderVariantTable(analysis);
+  renderFailureCorpusSummary(snapshot.failureCorpus);
+  renderReportComparison(snapshot);
   renderCaseResults(snapshot.caseResults ?? []);
   renderSchemaStatus(sourceBundle, selected.profile, analysis, bundleType);
   renderBenchmarkPanels(sourceBundle, analysis, preset);
@@ -1259,12 +1272,23 @@ function renderBenchmarkPanels(sourceBundle, analysis) {
   const summary = benchmark.summary ?? {};
   const caseCount = Array.isArray(benchmark.cases) ? benchmark.cases.length : 0;
   const toolCount = Array.isArray(harness.tools) ? harness.tools.length : 0;
+  const readiness = benchmarkReadiness(analysis.bundle);
 
   setText('benchmark-summary-meta', `${analysis.bundle.project} · ${caseCount} cases · ${toolCount} tools`);
   const responsePathCount = finalResponders.length || contract.agents?.length || 1;
   setText('benchmark-cases-meta', `${responsePathCount} response path${responsePathCount === 1 ? '' : 's'} · replayable scenarios`);
 
   contractPanel.innerHTML = `
+    <article>
+      <span>Review readiness</span>
+      <h4>${escapeHtml(readiness.score)}% ready</h4>
+      <p>${escapeHtml(readiness.summary)}</p>
+      <ul class="readiness-list">
+        ${readiness.checks.map((check) => `
+          <li class="${check.ok ? 'is-ready' : 'is-missing'}">${escapeHtml(check.label)} <strong>${check.ok ? 'ready' : 'missing'}</strong></li>
+        `).join('')}
+      </ul>
+    </article>
     <article>
       <span>Mission</span>
       <h4>${escapeHtml(analysis.bundle.project)}</h4>
@@ -1317,6 +1341,42 @@ function renderBenchmarkPanels(sourceBundle, analysis) {
       </div>
     </article>
   `).join('');
+}
+
+function benchmarkReadiness(bundle) {
+  const intent = bundle.intent ?? {};
+  const contract = bundle.contract ?? {};
+  const benchmark = bundle.benchmark ?? {};
+  const harness = bundle.harness ?? {};
+  const globalRules = contract.global ?? {};
+  const cases = Array.isArray(benchmark.cases) ? benchmark.cases : [];
+  const thresholds = benchmark.summary ?? {};
+  const agents = Array.isArray(contract.agents) ? contract.agents : [];
+  const finalResponders = Array.isArray(globalRules.finalResponders) ? globalRules.finalResponders : [];
+
+  const checks = [
+    ['Mission', Boolean(intent.mission)],
+    ['Success signals', Array.isArray(intent.successSignals) && intent.successSignals.length > 0],
+    ['Scenario cases', cases.length >= 3],
+    ['Case assertions', cases.some((item) => Array.isArray(item.assertions) && item.assertions.length > 0)],
+    ['Forbidden behavior', Array.isArray(globalRules.mustNot) && globalRules.mustNot.length > 0],
+    ['Release thresholds', ['baselinePassGate', 'visibleMutatedPassGate', 'hiddenHoldoutPassGate', 'maxRobustnessGap'].every((key) => thresholds[key] != null)],
+    ['Agent coverage', finalResponders.length > 0 || agents.length > 0],
+    ['Tool coverage', Array.isArray(harness.tools) && harness.tools.length > 0],
+  ].map(([label, ok]) => ({ label, ok: Boolean(ok) }));
+
+  const readyCount = checks.filter((item) => item.ok).length;
+  const score = Math.round((readyCount / checks.length) * 100);
+  const missing = checks.filter((item) => !item.ok).map((item) => item.label.toLowerCase());
+  const summary = missing.length
+    ? `Add ${missing.slice(0, 2).join(' and ')} before using this pack as a release gate.`
+    : 'This pack has the core review fields needed for release-gate use.';
+
+  return {
+    score,
+    summary,
+    checks,
+  };
 }
 
 function validateHarnessBundle(bundle) {
@@ -1576,6 +1636,8 @@ function applyLoadedSnapshot(snapshot, options = {}) {
   setText('report-path', reportUrl());
   setText('report-saved', options.localOnly ? 'browser' : 'workspace');
   setText('report-text', snapshot.markdown ?? JSON.stringify(snapshot, null, 2));
+  renderFailureCorpusSummary(snapshot.failureCorpus);
+  renderReportComparison(snapshot);
   renderCaseResults(snapshot.caseResults ?? []);
   renderSnapshotVariantTable(snapshot);
   showFeedback(options.localOnly ? 'Opened the browser-saved report' : 'Opened the workspace report');
@@ -1645,6 +1707,67 @@ function renderCaseResults(caseResults) {
       </div>
     </article>
   `).join('');
+}
+
+function renderFailureCorpusSummary(corpus) {
+  const container = document.querySelector('#failure-corpus-summary');
+  if (!container) return;
+  const summary = corpus?.summary ?? {};
+  container.innerHTML = [
+    ['Entries', summary.entryCount ?? 0],
+    ['Holdout failures', summary.hiddenFailureCount ?? 0],
+    ['Surfaces', summary.uniqueSurfaceCount ?? 0],
+    ['Failure types', summary.uniqueFailureTypeCount ?? 0],
+  ].map(([label, value]) => `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `).join('');
+}
+
+function renderReportComparison(snapshot) {
+  const container = document.querySelector('#report-comparison');
+  if (!container) return;
+
+  const previous = pickComparableReport(snapshot, Object.values(getSavedReports()));
+  const comparison = compareReportSnapshots(snapshot, previous);
+  if (!comparison) {
+    container.innerHTML = `
+      <p class="session-muted">Save this report, run another matching assessment, and HarnessAmp will compare the two runs here.</p>
+    `;
+    return;
+  }
+
+  const metrics = [
+    ['Overall score', comparison.metrics.overallScore],
+    ['Stressed score', comparison.metrics.mutatedPassRate],
+    ['Performance drop', comparison.metrics.robustnessDrop],
+    ['Failure entries', comparison.metrics.failureEntries],
+  ];
+
+  container.innerHTML = `
+    <div class="comparison-header">
+      <span>${escapeHtml(comparison.previousId ?? 'previous')}</span>
+      <strong class="comparison-status comparison-status--${escapeHtml(comparison.status)}">${escapeHtml(comparison.status)}</strong>
+    </div>
+    <div class="comparison-grid">
+      ${metrics.map(([label, metric]) => renderComparisonMetric(label, metric)).join('')}
+    </div>
+  `;
+}
+
+function renderComparisonMetric(label, metric) {
+  const delta = metric?.delta;
+  const deltaLabel = delta == null ? '--' : `${delta > 0 ? '+' : ''}${Math.round(delta)}`;
+  const direction = metric?.improved ? 'improved' : metric?.worsened ? 'regressed' : 'steady';
+  return `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(metric?.current ?? '--')}</strong>
+      <small class="${direction}">${escapeHtml(deltaLabel)}</small>
+    </div>
+  `;
 }
 
 function renderProjectResources() {

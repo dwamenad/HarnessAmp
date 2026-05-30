@@ -415,6 +415,7 @@ export async function saveEvent(event, session = {}) {
 }
 
 async function dispatchRunnerJob(job) {
+  if (await isJobCanceled(job.id)) return;
   await updateJobStatus(job.id, { status: 'dispatching' });
   const runner = await getRunnerById(job.runnerId);
   if (!runner) throw new Error('Runner not found');
@@ -439,11 +440,13 @@ async function dispatchRunnerJob(job) {
   }
 
   const payload = await response.json();
+  if (await isJobCanceled(job.id)) return;
   const observations = Array.isArray(payload) ? payload : payload.observations;
   if (!Array.isArray(observations)) {
     throw new Error('Runner response must be an observation array or { observations }.');
   }
 
+  if (await isJobCanceled(job.id)) return;
   await updateJobStatus(job.id, { status: 'running' });
   const analysis = analyzeBundle(job.payload.pack, observations, {
     intensity: job.payload.pack?.mutationPolicy?.intensity ?? 2,
@@ -460,6 +463,8 @@ async function dispatchRunnerJob(job) {
     thresholds: job.payload.thresholds,
     sourceBundle: job.payload.pack,
   });
+
+  if (await isJobCanceled(job.id)) return;
   const saved = await persistReport({
     snapshot,
     projectId: job.projectId,
@@ -467,6 +472,7 @@ async function dispatchRunnerJob(job) {
     userId: job.userId,
   });
 
+  if (await isJobCanceled(job.id)) return;
   await updateJobStatus(job.id, {
     status: 'completed',
     reportId: saved.id,
@@ -476,6 +482,11 @@ async function dispatchRunnerJob(job) {
       overallScore: snapshot.summary.overallScore,
     },
   });
+}
+
+async function isJobCanceled(jobId) {
+  const current = await readJob(jobId);
+  return current?.status === 'canceled';
 }
 
 async function persistReport({ snapshot, projectId, workspaceId, userId }) {

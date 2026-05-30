@@ -1,3 +1,5 @@
+import { collectFailureCorpus } from '../reports/failure-corpus.js';
+
 export function buildReportSnapshot({
   analysis,
   reportId,
@@ -56,6 +58,7 @@ export function buildReportSnapshot({
       confidence: analysis.summary.confidence,
       label: analysis.summary.label,
     },
+    failureCorpus: collectFailureCorpus(analysis),
     caseResults: buildCaseResults({ analysis, sourceBundle }),
     markdown: analysis.reportText,
   };

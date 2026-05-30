@@ -34,6 +34,20 @@ An `AgentRunResult` should include:
 - `tokenUsage`
 - `metadata`
 
+## Optional Coding-Agent Trace Fields
+
+Coding-agent runners should include trace data either at `trace` or `metadata.trace`.
+
+Supported trace fields:
+
+- `commands` - terminal commands with `command`, `cwd`, `output`, `exitCode`, and `durationMs`
+- `fileDiffs` - file changes with `path`, `diff`, `language`, and `changeType`
+- `sandboxEvents` - sandbox decisions with `action`, `path`, `allowed`, and `policy`
+- `approvals` - approval decisions with `action`, `approved`, `source`, and `reason`
+- `terminalOutput`, `stdout`, `stderr` - redacted textual logs
+
+Adapters may also return `artifacts` or `runArtifacts` directly. HarnessAmp normalizes these into the diagnostic report `runArtifacts` collection. Large raw blobs should be stored externally and referenced with `uri`; reports should default to redacted artifacts.
+
 ## Conformance Expectations
 
 Adapters must preserve enough trace information for HarnessAmp to compute:
@@ -46,6 +60,7 @@ Adapters must preserve enough trace information for HarnessAmp to compute:
 - network sink usage
 - sandbox boundary crossing
 - multimodal hidden instruction following
+- file and terminal behavior associated with coding-agent failures
 
 If an adapter cannot provide a field, it should return an explicit empty value rather than omitting the field.
 

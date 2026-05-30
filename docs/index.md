@@ -12,6 +12,7 @@ Start here when you want the structure of the project without reading the whole 
 - [CLI](cli.md)
 - [Examples](examples.md)
 - [Mutation Engine](mutation-engine.md)
+- [HarnessAmp v2](v2.md)
 - [Wrapper Concept](concepts/wrapper.md)
 - [Trust Boundaries](concepts/trust-boundaries.md)
 - [Robustness Gap](concepts/robustness-gap.md)
