@@ -20,6 +20,10 @@ Flags:
 
 - `--json` prints the full analysis object.
 - `--pack` prints the generated pack payload.
+- `--concurrency <n>` sets how many baseline/mutation run jobs execute at once for `run`, `report`, and `diagnose`.
+- `--run-attempts <n>` retries failed run jobs before the diagnosis fails.
+- `--retry-backoff-ms <n>` waits before retrying a failed run job.
+- `--timeout-ms <n>` fails an individual run job after the configured timeout.
 - no flag prints the markdown report.
 
 Typical terminal-first flow:
@@ -55,7 +59,7 @@ Typical mutation diagnosis flow:
 
 1. Run `node scripts/harnessamp.mjs validate <bundle.json>`.
 2. Run `node scripts/harnessamp.mjs mutate <bundle.json> --max-mutations 20` to inspect selected mutation records.
-3. Run `node scripts/harnessamp.mjs diagnose <bundle.json>` to produce the robustness report.
+3. Run `node scripts/harnessamp.mjs diagnose <bundle.json> --concurrency 4` to produce the robustness report.
 4. Treat `PASS`, `WARN`, and `BLOCK` as the CI/release signal.
 
 Docker workflow:

@@ -74,12 +74,24 @@ Runs the production diagnosis flow with the default mock runner.
 
 Important outputs:
 
+- `runJobs` - per-baseline/per-mutation job states, attempts, timestamps, and errors
 - `baselineRuns` - original task runs
 - `mutationRuns` - mutated task runs
+- `runArtifacts` - normalized redacted artifacts from runner traces, including terminal commands, file diffs, sandbox events, approvals, and logs
 - `deltas` - behavioral changes between original and mutated runs
 - `findings` - classified failures with recommendations
 - `summary` - pass/warn/block verdict and robustness drop
 - `reportText` - markdown robustness report
+
+Useful options:
+
+- `concurrency` - max run jobs in flight at once
+- `maxAttempts` - attempts per run job
+- `retryBackoffMs` - delay before retrying failed run jobs
+- `timeoutMs` - per-run timeout
+- `maxArtifactTextLength` - text cap for inline artifact content
+- `onJobUpdate(job)` - callback for state persistence or progress telemetry
+- `shouldCancel(job)` - callback that can cancel queued work
 
 ## `evaluateDiagnosisGate(diagnosis, thresholds)`
 

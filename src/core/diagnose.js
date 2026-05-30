@@ -1,5 +1,7 @@
 import { analyzeBundle } from './engine.js';
 import { classifyExpectedFailure, getFailureType, severityRank } from './failure-taxonomy.js';
+import { collectRunArtifacts } from './run-artifacts.js';
+import { createRunJobQueue, executeRunJobQueue } from './run-jobs.js';
 import { createRunner } from '../adapters/runners.js';
 import { generateMutationSuite } from '../mutations/registry.js';
 
@@ -11,41 +13,81 @@ export async function diagnoseHarness(bundleInput, options = {}) {
     maxMutations: options.maxMutations ?? 24,
   });
   const runner = options.runner ?? createRunner(options.runnerKind ?? 'mock', options.runnerOptions ?? {});
-  const baselineRuns = [];
-  const mutationRuns = [];
-
-  for (const task of normalizedBundle.harness.scenarios) {
-    baselineRuns.push(await runner.run({
+  const runJobs = createRunJobQueue([
+    ...normalizedBundle.harness.scenarios.map((task) => ({
+      id: `baseline:${task.id}`,
+      kind: 'baseline',
+      label: `Baseline ${task.id}`,
       bundle: normalizedBundle,
       task,
-      environment: options.environment ?? 'local',
-    }));
-  }
-
-  for (const mutation of suite.mutations) {
-    const task = normalizedBundle.harness.scenarios.find((item) => item.id === mutation.taskId)
-      ?? normalizedBundle.harness.scenarios[0]
-      ?? null;
-    mutationRuns.push(await runner.run({
+    })),
+    ...suite.mutations.map((mutation) => ({
+      id: `mutation:${mutation.mutationId}`,
+      kind: 'mutation',
+      label: `Mutation ${mutation.mutationId}`,
       bundle: mutation.bundle,
       mutation,
-      task,
-      environment: options.environment ?? 'local',
-    }));
+      task: normalizedBundle.harness.scenarios.find((item) => item.id === mutation.taskId)
+        ?? normalizedBundle.harness.scenarios[0]
+        ?? null,
+    })),
+  ], {
+    maxAttempts: options.maxAttempts ?? 1,
+  });
+
+  const runQueue = await executeRunJobQueue(runJobs, {
+    runner,
+    environment: options.environment ?? 'local',
+    concurrency: options.concurrency ?? 4,
+    maxAttempts: options.maxAttempts ?? 1,
+    timeoutMs: options.timeoutMs ?? 0,
+    retryBackoffMs: options.retryBackoffMs ?? 0,
+    onJobUpdate: options.onJobUpdate,
+    shouldCancel: options.shouldCancel,
+  });
+
+  if (runQueue.failed.length || runQueue.canceled.length) {
+    const failed = runQueue.failed[0] ?? runQueue.canceled[0];
+    throw new Error(`Diagnosis run job ${failed.id} ${failed.status}: ${failed.error ?? 'no result'}`);
   }
 
+  const baselineRuns = runQueue.jobs
+    .filter((job) => job.kind === 'baseline')
+    .map((job) => job.result);
+  const mutationRuns = runQueue.jobs
+    .filter((job) => job.kind === 'mutation')
+    .map((job) => job.result);
   const deltas = computeBehavioralDeltas(baselineRuns, mutationRuns, suite.mutations);
   const findings = classifyFindings(deltas, suite.mutations);
   const summary = summarizeDiagnosis(normalizedBundle, suite, baselineRuns, mutationRuns, findings);
   const reportText = formatDiagnosticReport(normalizedBundle, summary, findings, deltas, suite);
+  const runArtifacts = collectRunArtifacts([...baselineRuns, ...mutationRuns], {
+    maxTextLength: options.maxArtifactTextLength,
+  });
 
   return {
     version: '1.0.0',
     generatedAt: new Date().toISOString(),
     bundle: normalizedBundle,
     suite,
+    runJobs: runQueue.jobs.map((job) => ({
+      id: job.id,
+      kind: job.kind,
+      label: job.label,
+      taskId: job.taskId,
+      mutationId: job.mutationId,
+      status: job.status,
+      attempts: job.attempts,
+      maxAttempts: job.maxAttempts,
+      error: job.error,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+    })),
     baselineRuns,
     mutationRuns,
+    runArtifacts,
     deltas,
     findings,
     summary,

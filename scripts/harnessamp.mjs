@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { diagnoseHarness } from '../src/core/diagnose.js';
 import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/core/engine.js';
 import { generateMutationSuite, getMutationRegistry } from '../src/mutations/registry.js';
+import { formatMarkdownReport } from '../src/v2/reporters.js';
+import { runV2Scenario } from '../src/v2/runner.js';
+import { loadScenarioFile } from '../src/v2/scenario-loader.js';
 
 const [command = 'diagnose', ...rest] = process.argv.slice(2);
 const options = parseArgs(rest);
-const bundle = loadBundle(options.positional[0]);
 
 if (command === 'validate') {
+  const bundle = loadBundle(options.positional[0]);
   const analysis = analyzeBundle(bundle);
   console.log(JSON.stringify({
     valid: true,
@@ -19,38 +23,72 @@ if (command === 'validate') {
     scenarioCount: analysis.bundle.harness.scenarios.length,
   }, null, 2));
 } else if (command === 'mutate') {
+  const bundle = loadBundle(options.positional[0]);
   const suite = generateMutationSuite(bundle, {
     maxMutations: options.maxMutations,
     riskProfile: options.riskProfile,
   });
   console.log(JSON.stringify(suite, null, 2));
 } else if (command === 'run') {
-  const diagnosis = await diagnoseHarness(bundle, {
-    maxMutations: options.maxMutations ?? 5,
-    riskProfile: options.riskProfile,
-    runnerKind: options.runnerKind,
-    runnerOptions: options.runnerOptions,
-  });
-  console.log(JSON.stringify({
-    baselineRuns: diagnosis.baselineRuns,
-    mutationRuns: diagnosis.mutationRuns,
-  }, null, 2));
+  if (isScenarioPath(options.positional[0])) {
+    const scenario = loadScenarioFile(options.positional[0]);
+    const report = await runV2Scenario(scenario, {
+      packName: options.packName,
+      failOn: options.failOn,
+    });
+    const output = options.reportFormat === 'json'
+      ? JSON.stringify(report, null, 2)
+      : formatMarkdownReport(report);
+    if (options.outPath) {
+      await writeFile(resolve(options.outPath), `${output}\n`);
+    } else {
+      console.log(output);
+    }
+    if (report.gate === 'block') process.exitCode = 2;
+    else if (report.gate === 'warn') process.exitCode = 1;
+  } else {
+    const bundle = loadBundle(options.positional[0]);
+    const diagnosis = await diagnoseHarness(bundle, {
+      maxMutations: options.maxMutations ?? 5,
+      riskProfile: options.riskProfile,
+      runnerKind: options.runnerKind,
+      runnerOptions: options.runnerOptions,
+      concurrency: options.concurrency,
+      maxAttempts: options.maxAttemptsPerRun,
+      timeoutMs: options.timeoutMs,
+      retryBackoffMs: options.retryBackoffMs,
+    });
+    console.log(JSON.stringify({
+      baselineRuns: diagnosis.baselineRuns,
+      mutationRuns: diagnosis.mutationRuns,
+    }, null, 2));
+  }
 } else if (command === 'report') {
+  const bundle = loadBundle(options.positional[0]);
   const diagnosis = await diagnoseHarness(bundle, {
     maxMutations: options.maxMutations,
     riskProfile: options.riskProfile,
     runnerKind: options.runnerKind,
     runnerOptions: options.runnerOptions,
+    concurrency: options.concurrency,
+    maxAttempts: options.maxAttemptsPerRun,
+    timeoutMs: options.timeoutMs,
+    retryBackoffMs: options.retryBackoffMs,
   });
   console.log(diagnosis.reportText);
 } else if (command === 'registry') {
   console.log(JSON.stringify(getMutationRegistry(), null, 2));
 } else if (command === 'diagnose') {
+  const bundle = loadBundle(options.positional[0]);
   const diagnosis = await diagnoseHarness(bundle, {
     maxMutations: options.maxMutations,
     riskProfile: options.riskProfile,
     runnerKind: options.runnerKind,
     runnerOptions: options.runnerOptions,
+    concurrency: options.concurrency,
+    maxAttempts: options.maxAttemptsPerRun,
+    timeoutMs: options.timeoutMs,
+    retryBackoffMs: options.retryBackoffMs,
   });
   if (options.json) {
     console.log(JSON.stringify(diagnosis, null, 2));
@@ -75,6 +113,14 @@ function parseArgs(args) {
     riskProfile: null,
     runnerKind: 'mock',
     runnerOptions: {},
+    concurrency: 4,
+    maxAttemptsPerRun: 1,
+    timeoutMs: 0,
+    retryBackoffMs: 0,
+    packName: 'financeguard-core',
+    failOn: 'critical',
+    reportFormat: 'markdown',
+    outPath: null,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -104,8 +150,48 @@ function parseArgs(args) {
       index += 1;
       continue;
     }
+    if (arg === '--concurrency') {
+      parsed.concurrency = Number(args[index + 1] ?? parsed.concurrency);
+      index += 1;
+      continue;
+    }
+    if (arg === '--run-attempts') {
+      parsed.maxAttemptsPerRun = Number(args[index + 1] ?? parsed.maxAttemptsPerRun);
+      index += 1;
+      continue;
+    }
+    if (arg === '--timeout-ms') {
+      parsed.timeoutMs = Number(args[index + 1] ?? parsed.timeoutMs);
+      index += 1;
+      continue;
+    }
+    if (arg === '--retry-backoff-ms') {
+      parsed.retryBackoffMs = Number(args[index + 1] ?? parsed.retryBackoffMs);
+      index += 1;
+      continue;
+    }
     if (arg === '--json') {
       parsed.json = true;
+      continue;
+    }
+    if (arg === '--pack' || arg === '--mutations') {
+      parsed.packName = args[index + 1] ?? parsed.packName;
+      index += 1;
+      continue;
+    }
+    if (arg === '--fail-on') {
+      parsed.failOn = args[index + 1] ?? parsed.failOn;
+      index += 1;
+      continue;
+    }
+    if (arg === '--report') {
+      parsed.reportFormat = args[index + 1] ?? parsed.reportFormat;
+      index += 1;
+      continue;
+    }
+    if (arg === '--out') {
+      parsed.outPath = args[index + 1] ?? null;
+      index += 1;
       continue;
     }
     if (!arg.startsWith('--')) {
@@ -114,6 +200,10 @@ function parseArgs(args) {
   }
 
   return parsed;
+}
+
+function isScenarioPath(path) {
+  return typeof path === 'string' && /\.ya?ml$/i.test(path);
 }
 
 function loadBundle(path) {
