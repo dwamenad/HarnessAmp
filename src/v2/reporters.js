@@ -110,6 +110,18 @@ export function formatMarkdownSuiteReport(report) {
   lines.push(`- Risk score: ${report.riskScore}`);
   lines.push('');
 
+  if (report.generated) {
+    lines.push('## Generated Coverage');
+    lines.push('');
+    lines.push(`- Tier: ${report.generated.tier}`);
+    lines.push(`- Templates: ${report.generated.coverage.templateCount}`);
+    lines.push(`- Mutation operators: ${report.generated.coverage.mutationOperatorCount}`);
+    lines.push(`- Contracts: ${report.generated.coverage.contractCount}`);
+    lines.push(`- Profiles: ${report.generated.coverage.profileCount}`);
+    lines.push(`- Prompt variants: ${report.generated.coverage.promptVariantCount}`);
+    lines.push('');
+  }
+
   lines.push('## Top Failures');
   lines.push('');
   if (!report.failureCounts.length) {

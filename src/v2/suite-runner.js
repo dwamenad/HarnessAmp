@@ -3,6 +3,10 @@ import { join, resolve } from 'node:path';
 import { loadScenarioFile } from './scenario-loader.js';
 import { runV2Scenario } from './runner.js';
 import { meetsSeverityThreshold, severityRank } from './severity.js';
+import {
+  generateHealthGuardScenarios,
+  summarizeHealthGuardGeneratedCoverage,
+} from './generators/healthguard-generator.js';
 
 export async function runV2Suite(path, options = {}) {
   const scenarioPaths = discoverScenarioPaths(path);
@@ -23,6 +27,39 @@ export async function runV2Suite(path, options = {}) {
   });
 }
 
+export async function runGeneratedV2Suite(options = {}) {
+  const packName = options.packName ?? 'healthguard-core';
+  if (packName !== 'healthguard-core') {
+    throw new Error(`Generated v2 suites are not available for pack: ${packName}`);
+  }
+
+  const tier = options.generatedTier ?? options.tier ?? 'core';
+  const scenarios = generateHealthGuardScenarios({
+    tier,
+    maxScenarios: options.maxGeneratedScenarios,
+  });
+  const reports = [];
+
+  for (const scenario of scenarios) {
+    reports.push(await runV2Scenario(scenario, options));
+  }
+
+  return buildSuiteReport({
+    id: options.suiteId ?? `healthguard-generated-${tier}`,
+    name: options.suiteName ?? `HealthGuard Generated ${capitalize(tier)} Suite`,
+    sourcePath: `generated:healthguard-core:${tier}`,
+    packName,
+    failOn: options.failOn ?? 'critical',
+    reports,
+    generated: {
+      pack: packName,
+      tier,
+      maxGeneratedScenarios: options.maxGeneratedScenarios ?? null,
+      coverage: summarizeHealthGuardGeneratedCoverage(scenarios),
+    },
+  });
+}
+
 export function discoverScenarioPaths(path) {
   const sourcePath = resolve(path);
   const stats = statSync(sourcePath);
@@ -37,7 +74,7 @@ export function discoverScenarioPaths(path) {
     .sort((left, right) => left.localeCompare(right));
 }
 
-function buildSuiteReport({ id, name, sourcePath, packName, failOn, reports }) {
+export function buildSuiteReport({ id, name, sourcePath, packName, failOn, reports, generated = null }) {
   const allResults = reports.flatMap((report) => report.contractResults);
   const failingResults = allResults.filter((result) => !result.passed);
   const blockingFailures = failingResults.filter((result) => meetsSeverityThreshold(result.severity, failOn));
@@ -65,6 +102,7 @@ function buildSuiteReport({ id, name, sourcePath, packName, failOn, reports }) {
     failOn,
     failureCounts,
     reports,
+    generated,
   };
 }
 
@@ -105,4 +143,8 @@ function summarizeFailures(failingResults) {
 function defaultSuiteName(packName) {
   if (packName === 'healthguard-core') return 'HealthGuard Core Suite';
   return 'FinanceGuard Core Suite';
+}
+
+function capitalize(value) {
+  return String(value).charAt(0).toUpperCase() + String(value).slice(1);
 }

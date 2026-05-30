@@ -8,7 +8,7 @@ import { generateMutationSuite, getMutationRegistry } from '../src/mutations/reg
 import { formatMarkdownReport, formatMarkdownSuiteReport } from '../src/v2/reporters.js';
 import { runV2Scenario } from '../src/v2/runner.js';
 import { loadScenarioFile } from '../src/v2/scenario-loader.js';
-import { runV2Suite } from '../src/v2/suite-runner.js';
+import { runGeneratedV2Suite, runV2Suite } from '../src/v2/suite-runner.js';
 
 const [command = 'diagnose', ...rest] = process.argv.slice(2);
 const options = parseArgs(rest);
@@ -31,7 +31,21 @@ if (command === 'validate') {
   });
   console.log(JSON.stringify(suite, null, 2));
 } else if (command === 'run') {
-  if (isV2SuitePath(options.positional[0])) {
+  if (options.generatedTier) {
+    const report = await runGeneratedV2Suite({
+      packName: options.packName,
+      failOn: options.failOn,
+      suiteName: options.suiteName,
+      generatedTier: options.generatedTier,
+      maxGeneratedScenarios: options.maxGeneratedScenarios,
+    });
+    const output = options.reportFormat === 'json'
+      ? JSON.stringify(report, null, 2)
+      : formatMarkdownSuiteReport(report);
+    await writeOrPrint(output, options.outPath);
+    if (report.gate === 'block') process.exitCode = 2;
+    else if (report.gate === 'warn') process.exitCode = 1;
+  } else if (isV2SuitePath(options.positional[0])) {
     const report = await runV2Suite(options.positional[0], {
       packName: options.packName,
       failOn: options.failOn,
@@ -131,6 +145,8 @@ function parseArgs(args) {
     reportFormat: 'markdown',
     outPath: null,
     suiteName: null,
+    generatedTier: null,
+    maxGeneratedScenarios: null,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -206,6 +222,16 @@ function parseArgs(args) {
     }
     if (arg === '--suite-name') {
       parsed.suiteName = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--generated') {
+      parsed.generatedTier = args[index + 1] ?? 'core';
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-generated') {
+      parsed.maxGeneratedScenarios = Number(args[index + 1] ?? 0);
       index += 1;
       continue;
     }

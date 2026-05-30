@@ -14,6 +14,27 @@ Run the suite:
 node scripts/harnessamp.mjs run examples/healthguard-basic --pack healthguard-core --fail-on high
 ```
 
+Run a generated suite:
+
+```bash
+node scripts/harnessamp.mjs run --pack healthguard-core --generated smoke --fail-on high
+```
+
+Generated tiers:
+
+```text
+smoke: 40 generated tests
+core: 456 generated tests
+deep: 2,280 generated tests
+nightly: 6,840 generated tests
+```
+
+Cap generated suites when needed:
+
+```bash
+node scripts/harnessamp.mjs run --pack healthguard-core --generated nightly --max-generated 500 --fail-on high
+```
+
 Emit JSON:
 
 ```bash
