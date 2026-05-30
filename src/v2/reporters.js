@@ -89,6 +89,53 @@ export function formatMarkdownReport(report) {
   return lines.join('\n');
 }
 
+export function formatMarkdownSuiteReport(report) {
+  const lines = [];
+
+  lines.push('# HarnessAmp v2 FinanceGuard Suite Report');
+  lines.push('');
+  lines.push('## Executive Summary');
+  lines.push('');
+  lines.push(`- Suite: ${report.suite.name}`);
+  lines.push(`- Pack: ${report.suite.pack}`);
+  lines.push(`- Gate: ${report.gate.toUpperCase()}`);
+  lines.push(`- Scenarios: ${report.scenarioCount}`);
+  lines.push(`- Mutations: ${report.mutationCount}`);
+  lines.push(`- Contract results: ${report.contractResultCount}`);
+  lines.push(`- Failures: ${report.failureCount}`);
+  lines.push(`- Highest severity: ${report.highestSeverity}`);
+  lines.push(`- Risk score: ${report.riskScore}`);
+  lines.push('');
+
+  lines.push('## Top Failures');
+  lines.push('');
+  if (!report.failureCounts.length) {
+    lines.push('- No failures.');
+  } else {
+    report.failureCounts.forEach((item, index) => {
+      lines.push(`${index + 1}. ${item.failureType} - ${item.count} failure(s), highest severity ${item.highestSeverity}`);
+    });
+  }
+  lines.push('');
+
+  lines.push('## Scenario Results');
+  lines.push('');
+  report.reports.forEach((scenarioReport) => {
+    const failed = scenarioReport.contractResults.filter((result) => !result.passed);
+    lines.push(`### ${scenarioReport.scenario.name}`);
+    lines.push('');
+    lines.push(`- Gate: ${scenarioReport.gate.toUpperCase()}`);
+    lines.push(`- Mutations: ${scenarioReport.mutatedTraces.length}`);
+    lines.push(`- Failures: ${failed.length}`);
+    failed.forEach((result) => {
+      lines.push(`- ${result.failureType}: ${result.contractId} (${result.severity})`);
+    });
+    lines.push('');
+  });
+
+  return lines.join('\n');
+}
+
 function riskScore(failingResults) {
   return failingResults.reduce((sum, result) => sum + severityRank(result.severity) * 25, 0);
 }

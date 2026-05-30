@@ -4,8 +4,9 @@ import { spawnSync } from 'node:child_process';
 
 import { loadScenarioFile } from '../src/v2/scenario-loader.js';
 import { runV2Scenario } from '../src/v2/runner.js';
-import { formatMarkdownReport } from '../src/v2/reporters.js';
+import { formatMarkdownReport, formatMarkdownSuiteReport } from '../src/v2/reporters.js';
 import { getFinanceGuardPack } from '../src/v2/packs/financeguard.js';
+import { discoverScenarioPaths, runV2Suite } from '../src/v2/suite-runner.js';
 
 const scenarioPath = 'examples/financeguard-basic/scenario.yaml';
 const scenarioCases = [
@@ -40,6 +41,14 @@ test('FinanceGuard core pack exposes six operators and ten contracts', () => {
     'sensitive_data_injection',
     'fraud_dispute_offramp',
   ]);
+});
+
+test('FinanceGuard suite discovers all scenario YAML files', () => {
+  const paths = discoverScenarioPaths('examples/financeguard-basic');
+
+  assert.equal(paths.length, 6);
+  assert.ok(paths.every((path) => path.endsWith('.yaml')));
+  assert.ok(paths.every((path) => !path.endsWith('financeguard-core.yaml')));
 });
 
 for (const [path, failureType, contractId] of scenarioCases) {
@@ -81,6 +90,22 @@ test('FinanceGuard Markdown report includes v2 failure evidence', async () => {
   assert.match(markdown, /Recommended gate:\nBlock release\./);
 });
 
+test('FinanceGuard suite aggregates scenario reports', async () => {
+  const report = await runV2Suite('examples/financeguard-basic', {
+    packName: 'financeguard-core',
+    failOn: 'high',
+  });
+  const markdown = formatMarkdownSuiteReport(report);
+
+  assert.equal(report.gate, 'block');
+  assert.equal(report.scenarioCount, 6);
+  assert.equal(report.mutationCount, 6);
+  assert.equal(report.failureCount, 6);
+  assert.match(markdown, /HarnessAmp v2 FinanceGuard Suite Report/);
+  assert.match(markdown, /missing_value_blindness/);
+  assert.match(markdown, /advice_boundary_overstep/);
+});
+
 test('CLI v2 run exits nonzero on critical FinanceGuard failure', () => {
   const result = spawnSync(process.execPath, [
     'scripts/harnessamp.mjs',
@@ -98,4 +123,24 @@ test('CLI v2 run exits nonzero on critical FinanceGuard failure', () => {
   assert.equal(result.status, 2, result.stderr);
   assert.match(result.stdout, /Gate: BLOCK/);
   assert.match(result.stdout, /Failure: missing_value_blindness/);
+});
+
+test('CLI v2 suite run exits nonzero and prints aggregate report', () => {
+  const result = spawnSync(process.execPath, [
+    'scripts/harnessamp.mjs',
+    'run',
+    'examples/financeguard-basic',
+    '--pack',
+    'financeguard-core',
+    '--fail-on',
+    'high',
+  ], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stdout, /HarnessAmp v2 FinanceGuard Suite Report/);
+  assert.match(result.stdout, /Scenarios: 6/);
+  assert.match(result.stdout, /Gate: BLOCK/);
 });

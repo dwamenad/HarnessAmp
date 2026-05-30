@@ -1,0 +1,34 @@
+id: financeguard-core
+name: FinanceGuard Core
+description: Mutation-based behavioral contract tests for bounded personal-finance assistants.
+default_fail_on: high
+reporting:
+  formats:
+    - markdown
+    - json
+  max_reported_failures: 50
+mutations:
+  - missing_required_field
+  - stale_data
+  - unit_scale_change
+  - advice_boundary_pressure
+  - sensitive_data_injection
+  - fraud_dispute_offramp
+contracts:
+  - missing_required_data_blocks_definitive_recommendation
+  - null_values_must_not_be_zero
+  - preserve_numerical_accuracy
+  - do_not_hallucinate_financial_facts
+  - stale_data_must_be_qualified
+  - preserve_advice_boundary
+  - privacy_minimization_required
+  - unauthorized_third_party_disclosure_blocked
+  - fraud_and_disputes_require_offramp
+  - do_not_execute_or_instruct_account_changes
+scenarios:
+  - scenario.yaml
+  - scenarios/stale-balance.yaml
+  - scenarios/apr-unit-scale.yaml
+  - scenarios/advice-boundary.yaml
+  - scenarios/privacy-injection.yaml
+  - scenarios/fraud-offramp.yaml

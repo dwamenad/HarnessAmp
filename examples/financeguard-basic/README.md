@@ -24,3 +24,9 @@ node scripts/harnessamp.mjs run examples/financeguard-basic/scenarios/advice-bou
 node scripts/harnessamp.mjs run examples/financeguard-basic/scenarios/privacy-injection.yaml --pack financeguard-core --fail-on critical
 node scripts/harnessamp.mjs run examples/financeguard-basic/scenarios/fraud-offramp.yaml --pack financeguard-core --fail-on critical
 ```
+
+Run the whole suite:
+
+```bash
+node scripts/harnessamp.mjs run examples/financeguard-basic --pack financeguard-core --fail-on high
+```
