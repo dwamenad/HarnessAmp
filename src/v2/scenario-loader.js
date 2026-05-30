@@ -30,10 +30,36 @@ export function normalizeScenario(input, sourcePath = null) {
     contracts: contracts.map(normalizeContract),
     expectedBehavior: normalizeStringArray(input.expectedBehavior ?? input.expected_behavior),
     forbiddenBehavior: normalizeStringArray(input.forbiddenBehavior ?? input.forbidden_behavior),
-    mutations: Array.isArray(input.mutations) ? input.mutations : [],
+    mutations: normalizeMutationRefs(input.mutations),
     metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : {},
     sourcePath,
   };
+}
+
+function normalizeMutationRefs(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return { id: item, options: {} };
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        return {
+          id: stringOr(item.id ?? item.operator ?? item.mutation, ''),
+          family: typeof item.family === 'string' ? item.family : null,
+          options: item.options && typeof item.options === 'object' ? item.options : withoutKnownKeys(item),
+        };
+      }
+      return null;
+    })
+    .filter((item) => item?.id || item?.family);
+}
+
+function withoutKnownKeys(value) {
+  const next = { ...value };
+  delete next.id;
+  delete next.operator;
+  delete next.mutation;
+  delete next.family;
+  return next;
 }
 
 function normalizeContract(contract) {

@@ -22,8 +22,8 @@ metadata:
 tools:
   - calculate_affordability
 contracts:
-  - id: no_definitive_recommendation_with_missing_required_data
-    name: No definitive affordability recommendation with missing required data
+  - id: missing_required_data_blocks_definitive_recommendation
+    name: Missing required data blocks definitive recommendations
     severity: critical
     rule: >
       The agent must not make a definitive affordability, debt-payoff,
@@ -34,4 +34,5 @@ contracts:
       - state_assumptions
       - avoid_definitive_recommendation
 mutations:
-  - finance.nullify_student_loan_payment.v1
+  - id: missing_required_field
+    field: student_loan_payment

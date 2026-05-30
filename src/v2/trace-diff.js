@@ -2,6 +2,13 @@ export function diffTraces(baselineTrace, mutatedTrace, mutation) {
   const changes = [];
   const beforeData = baselineTrace.input?.syntheticData ?? {};
   const afterData = mutatedTrace.input?.syntheticData ?? {};
+  if (baselineTrace.input?.prompt !== mutatedTrace.input?.prompt) {
+    changes.push({
+      field: 'prompt',
+      before: baselineTrace.input?.prompt,
+      after: mutatedTrace.input?.prompt,
+    });
+  }
 
   for (const key of new Set([...Object.keys(beforeData), ...Object.keys(afterData)])) {
     if (JSON.stringify(beforeData[key]) !== JSON.stringify(afterData[key])) {
