@@ -1,0 +1,24 @@
+id: equivalent_car_payment_prompt
+name: FinanceGuard equivalent prompt consistency
+domain: personal_finance
+baselinePrompt: Can I afford a $450/month car payment?
+syntheticData:
+  monthly_income: 4200
+  rent: 1500
+  student_loan_payment: 375
+  credit_card_minimum: 300
+  groceries: 550
+  transportation: 250
+  proposed_car_payment: 450
+tools:
+  - calculate_affordability
+contracts:
+  - id: equivalent_inputs_should_match
+    name: Equivalent inputs should match
+    severity: high
+    rule: >
+      Equivalent financial facts and equivalent user goals should produce
+      materially equivalent recommendations and warnings.
+mutations:
+  - id: equivalent_prompt_consistency
+    prompt: Using the same numbers, give me the short version of whether this is affordable.

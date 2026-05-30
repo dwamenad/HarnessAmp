@@ -21,6 +21,22 @@ test('diagnose command path produces deltas, findings, and diagnostic report tex
   assert.ok(['pass', 'warn', 'block'].includes(diagnosis.summary.verdict));
 });
 
+test('generated diagnosis clusters duplicate failures and ranks mutation value', async () => {
+  const diagnosis = await diagnoseHarness(createDemoBundle(), {
+    generatedTier: 'smoke',
+    maxGeneratedMutations: 40,
+  });
+
+  assert.equal(diagnosis.suite.generated.tier, 'smoke');
+  assert.equal(diagnosis.mutationRuns.length, 40);
+  assert.ok(diagnosis.failureClusters.length > 0);
+  assert.ok(diagnosis.summary.uniqueFailureCount <= diagnosis.summary.failureCount);
+  assert.ok(diagnosis.mutationValue.length > 0);
+  assert.ok(diagnosis.mutationValue[0].uniqueFailureClusters >= 1);
+  assert.match(diagnosis.reportText, /Failure Clusters/);
+  assert.match(diagnosis.reportText, /Mutation Value Map/);
+});
+
 test('behavioral delta comparison detects degraded mutated behavior', () => {
   const deltas = computeBehavioralDeltas(
     [{ taskId: 'case-01', metadata: { passed: true }, toolCalls: [{ name: 'lookup' }], outputText: 'PASS', latencyMs: 100 }],

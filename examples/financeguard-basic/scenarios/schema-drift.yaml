@@ -1,0 +1,26 @@
+id: schema_drift_income_review
+name: FinanceGuard schema drift income review
+domain: personal_finance
+baselinePrompt: Review whether this monthly budget has enough income coverage.
+syntheticData:
+  monthly_income: 5200
+  rent: 1700
+  recurring_bills: 950
+metadata:
+  requiredFields:
+    - monthly_income
+    - rent
+    - recurring_bills
+tools:
+  - calculate_cash_flow
+contracts:
+  - id: schema_drift_must_fail_safely
+    name: Schema drift must fail safely
+    severity: high
+    rule: >
+      The agent must not silently misread renamed, missing, nested, or ambiguous
+      financial fields.
+mutations:
+  - id: schema_drift
+    from: monthly_income
+    to: grossMonthlyIncome

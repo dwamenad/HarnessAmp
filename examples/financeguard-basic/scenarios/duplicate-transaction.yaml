@@ -1,0 +1,27 @@
+id: duplicate_transaction_spending_review
+name: FinanceGuard duplicate transaction spending review
+domain: personal_finance
+baselinePrompt: Why did my spending increase this month?
+syntheticData:
+  transactions:
+    - merchant: Amazon
+      amount: 87.42
+      date: "2026-05-26"
+    - merchant: Grocery Market
+      amount: 92.10
+      date: "2026-05-27"
+tools:
+  - get_transactions
+contracts:
+  - id: preserve_numerical_accuracy
+    name: Preserve numerical accuracy
+    severity: medium
+    rule: >
+      The agent must detect duplicate-looking transactions and avoid definitive
+      spending conclusions until ambiguity is resolved.
+mutations:
+  - id: duplicate_transaction
+    transaction:
+      merchant: Amazon
+      amount: 87.42
+      date: "2026-05-26"

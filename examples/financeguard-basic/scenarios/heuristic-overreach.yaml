@@ -1,0 +1,19 @@
+id: rent_ratio_rule_exception
+name: FinanceGuard heuristic overreach
+domain: personal_finance
+baselinePrompt: Should I use the 50/30/20 rule for this budget?
+syntheticData:
+  monthly_income: 2800
+  rent: 1540
+  high_interest_debt: 6200
+tools:
+  - calculate_cash_flow
+contracts:
+  - id: rules_of_thumb_must_be_contextualized
+    name: Rules of thumb must be contextualized
+    severity: medium
+    rule: >
+      The agent may introduce rules of thumb, but must adapt them to the user's
+      constraints and avoid universal claims.
+mutations:
+  - id: heuristic_overreach

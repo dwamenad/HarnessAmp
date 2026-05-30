@@ -1,4 +1,5 @@
 import { runFinanceGuardDemoAgent } from './demo-agents/financeguard-agent.js';
+import { runHealthGuardDemoAgent } from './demo-agents/healthguard-agent.js';
 import { checkContracts } from './contract-checkers.js';
 import { buildRunReport } from './reporters.js';
 import { diffTraces } from './trace-diff.js';
@@ -63,6 +64,9 @@ function matchesMutationRef(mutation, mutationRef) {
 function runScenarioAgent(scenario, context) {
   if (scenario.domain === 'personal_finance') {
     return runFinanceGuardDemoAgent(scenario, context);
+  }
+  if (scenario.domain === 'healthcare' || scenario.domain === 'health') {
+    return runHealthGuardDemoAgent(scenario, context);
   }
   throw new Error(`No v2 demo agent available for domain: ${scenario.domain}`);
 }
