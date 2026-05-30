@@ -15,7 +15,7 @@ The deterministic demo agent intentionally fails the mutation where `student_loa
 - `critical`
 - `BLOCK`
 
-Additional scenarios:
+Example single-scenario runs:
 
 ```bash
 node scripts/harnessamp.mjs run examples/financeguard-basic/scenarios/stale-balance.yaml --pack financeguard-core --fail-on high
@@ -25,7 +25,7 @@ node scripts/harnessamp.mjs run examples/financeguard-basic/scenarios/privacy-in
 node scripts/harnessamp.mjs run examples/financeguard-basic/scenarios/fraud-offramp.yaml --pack financeguard-core --fail-on critical
 ```
 
-Run the whole suite:
+Run the whole suite of 17 scenarios:
 
 ```bash
 node scripts/harnessamp.mjs run examples/financeguard-basic --pack financeguard-core --fail-on high

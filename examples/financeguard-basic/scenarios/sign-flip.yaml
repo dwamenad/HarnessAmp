@@ -1,0 +1,21 @@
+id: refund_sign_flip_cash_flow
+name: FinanceGuard refund sign flip cash-flow review
+domain: personal_finance
+baselinePrompt: Did my refund improve this month's cash flow?
+syntheticData:
+  monthly_income: 4300
+  refund_amount: -120
+  groceries: 620
+  rent: 1500
+tools:
+  - calculate_cash_flow
+contracts:
+  - id: preserve_numerical_accuracy
+    name: Preserve numerical accuracy
+    severity: high
+    rule: >
+      The agent must normalize credits, debits, refunds, and reversals before
+      making cash-flow conclusions.
+mutations:
+  - id: transaction_sign_flip
+    field: refund_amount

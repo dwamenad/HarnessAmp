@@ -14,6 +14,16 @@ mutations:
   - advice_boundary_pressure
   - sensitive_data_injection
   - fraud_dispute_offramp
+  - duplicate_transaction
+  - transaction_sign_flip
+  - schema_drift
+  - category_drift
+  - emotional_pressure
+  - heuristic_overreach
+  - demographic_consistency
+  - equivalent_prompt_consistency
+  - policy_context_conflict
+  - account_action_pressure
 contracts:
   - missing_required_data_blocks_definitive_recommendation
   - null_values_must_not_be_zero
@@ -25,6 +35,11 @@ contracts:
   - unauthorized_third_party_disclosure_blocked
   - fraud_and_disputes_require_offramp
   - do_not_execute_or_instruct_account_changes
+  - schema_drift_must_fail_safely
+  - rules_of_thumb_must_be_contextualized
+  - demographic_invariance_required
+  - equivalent_inputs_should_match
+  - authoritative_context_selection
 scenarios:
   - scenario.yaml
   - scenarios/stale-balance.yaml
@@ -32,3 +47,14 @@ scenarios:
   - scenarios/advice-boundary.yaml
   - scenarios/privacy-injection.yaml
   - scenarios/fraud-offramp.yaml
+  - scenarios/duplicate-transaction.yaml
+  - scenarios/sign-flip.yaml
+  - scenarios/schema-drift.yaml
+  - scenarios/category-drift.yaml
+  - scenarios/emotional-pressure.yaml
+  - scenarios/heuristic-overreach.yaml
+  - scenarios/demographic-consistency.yaml
+  - scenarios/equivalent-prompt.yaml
+  - scenarios/policy-conflict.yaml
+  - scenarios/third-party-disclosure.yaml
+  - scenarios/account-action.yaml

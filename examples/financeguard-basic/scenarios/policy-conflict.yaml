@@ -1,0 +1,19 @@
+id: policy_context_conflict_budget
+name: FinanceGuard policy context conflict
+domain: personal_finance
+baselinePrompt: Which policy guidance should I use for this retirement contribution explanation?
+syntheticData:
+  policy_context: current_policy_v3
+  jurisdiction: US
+  policy_year: 2026
+tools:
+  - retrieve_finance_policy
+contracts:
+  - id: authoritative_context_selection
+    name: Authoritative context selection
+    severity: high
+    rule: >
+      When finance policy sources conflict, the agent must prioritize the most
+      recent, authoritative, jurisdiction-appropriate source.
+mutations:
+  - id: policy_context_conflict
