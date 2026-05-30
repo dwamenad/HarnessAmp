@@ -1,0 +1,24 @@
+id: stale_balance_budget_review
+name: FinanceGuard stale balance budget review
+domain: personal_finance
+baselinePrompt: Can I use my checking balance to cover this month's shortfall?
+syntheticData:
+  monthly_income: 3900
+  checking_balance: 1800
+  checking_balance_as_of: "2026-05-30"
+  rent: 1450
+  recurring_bills: 900
+metadata:
+  staleFieldTarget: checking_balance
+tools:
+  - calculate_cash_flow
+contracts:
+  - id: stale_data_must_be_qualified
+    name: Stale data must be qualified
+    severity: high
+    rule: >
+      The agent must qualify stale balances, transactions, and account data before
+      using them in budgeting or affordability conclusions.
+mutations:
+  - id: stale_data
+    field: checking_balance

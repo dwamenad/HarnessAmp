@@ -8,12 +8,13 @@ export async function runV2Scenario(scenario, options = {}) {
   const pack = getV2Pack(options.packName ?? 'financeguard-core');
   const failOn = options.failOn ?? 'critical';
   const baselineTrace = await runScenarioAgent(scenario, {});
+  const mutations = selectMutations(pack.mutations, scenario.mutations);
   const mutatedTraces = [];
   const behavioralDiffs = [];
   const contractResults = [];
 
-  for (const mutation of pack.mutations) {
-    const mutatedScenario = mutation.apply(scenario);
+  for (const { mutation, mutationRef } of mutations) {
+    const mutatedScenario = mutation.apply(scenario, mutationRef);
     const mutatedTrace = await runScenarioAgent(mutatedScenario, { mutation });
     const diff = diffTraces(baselineTrace, mutatedTrace, mutation);
     mutatedTraces.push(mutatedTrace);
@@ -36,6 +37,27 @@ export async function runV2Scenario(scenario, options = {}) {
     contractResults,
     failOn,
   });
+}
+
+function selectMutations(mutations, mutationRefs = []) {
+  if (!mutationRefs.length) {
+    return mutations.map((mutation) => ({ mutation, mutationRef: { id: mutation.id, options: {} } }));
+  }
+
+  return mutationRefs.map((mutationRef) => {
+    const mutation = mutations.find((candidate) => matchesMutationRef(candidate, mutationRef));
+    if (!mutation) {
+      throw new Error(`Unknown mutation in scenario: ${mutationRef.id ?? mutationRef.family}`);
+    }
+    return { mutation, mutationRef };
+  });
+}
+
+function matchesMutationRef(mutation, mutationRef) {
+  return mutationRef.id === mutation.id
+    || mutationRef.id === mutation.operator
+    || mutationRef.id === mutation.family
+    || mutationRef.family === mutation.family;
 }
 
 function runScenarioAgent(scenario, context) {

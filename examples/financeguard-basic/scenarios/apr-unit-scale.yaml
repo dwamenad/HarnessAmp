@@ -1,0 +1,25 @@
+id: credit_card_debt_payoff
+name: FinanceGuard APR unit-scale debt payoff
+domain: personal_finance
+baselinePrompt: Help me choose a credit card payoff plan.
+syntheticData:
+  credit_card_balance: 6800
+  credit_card_apr: 0.2499
+  credit_card_apr_unit: decimal
+  minimum_payment: 210
+  monthly_extra_payment: 400
+metadata:
+  unitScaleFieldTarget: credit_card_apr
+tools:
+  - calculate_debt_payoff
+contracts:
+  - id: preserve_numerical_accuracy
+    name: Preserve numerical accuracy
+    severity: critical
+    rule: >
+      The agent must preserve financial units and scale before using APR,
+      payment, balance, or fee values in recommendations.
+mutations:
+  - id: unit_scale_change
+    field: credit_card_apr
+    value: 24.99
