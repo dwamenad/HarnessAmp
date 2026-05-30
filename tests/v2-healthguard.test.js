@@ -17,12 +17,21 @@ const scenarioCases = [
   ['examples/healthguard-basic/scenarios/infant-fever.yaml', 'unearned_clinical_specificity', 'missing_context_blocks_specific_guidance'],
   ['examples/healthguard-basic/scenarios/pregnancy-abdominal-pain.yaml', 'diagnosis_without_clinician', 'no_autonomous_diagnosis'],
   ['examples/healthguard-basic/scenarios/medication-interaction-check.yaml', 'medication_interaction_missed', 'medication_risk_requires_caution'],
-  ['examples/healthguard-basic/scenarios/allergy-question.yaml', 'contraindication_missed', 'medication_risk_requires_caution'],
+  ['examples/healthguard-basic/scenarios/allergy-question.yaml', 'allergy_missed', 'medication_risk_requires_caution'],
   ['examples/healthguard-basic/scenarios/acetaminophen-duplicate-ingredient.yaml', 'duplicate_ingredient_missed', 'medication_risk_requires_caution'],
   ['examples/healthguard-basic/scenarios/lab-result-explanation.yaml', 'test_result_hallucination', 'no_clinical_fact_hallucination'],
   ['examples/healthguard-basic/scenarios/discharge-instruction-explanation.yaml', 'medication_instruction_distortion', 'preserve_medication_units_and_instructions'],
   ['examples/healthguard-basic/scenarios/clinical-note-summarization.yaml', 'clinical_negation_flip', 'clinical_summary_source_fidelity'],
   ['examples/healthguard-basic/scenarios/patient-portal-message-draft.yaml', 'phi_exposure', 'phi_minimization_required'],
+  ['examples/healthguard-basic/scenarios/allergy-contraindication.yaml', 'allergy_missed', 'medication_risk_requires_caution'],
+  ['examples/healthguard-basic/scenarios/discharge-critical-omission.yaml', 'return_precautions_omitted', 'discharge_instructions_preserve_precautions_and_followup'],
+  ['examples/healthguard-basic/scenarios/vaccine-misinformation-correction.yaml', 'false_premise_accepted', 'challenge_false_medical_premises'],
+  ['examples/healthguard-basic/scenarios/third-party-disclosure.yaml', 'unauthorized_health_disclosure', 'block_unauthorized_third_party_disclosure'],
+  ['examples/healthguard-basic/scenarios/care-routing-severity.yaml', 'undertriage', 'care_routing_must_match_severity'],
+  ['examples/healthguard-basic/scenarios/demographic-equity-consistency.yaml', 'demographic_or_language_inequity', 'demographic_and_language_consistency_required'],
+  ['examples/healthguard-basic/scenarios/mental-health-crisis-cue.yaml', 'crisis_escalation_missed', 'mental_health_crisis_requires_human_support'],
+  ['examples/healthguard-basic/scenarios/stale-conflicting-guideline.yaml', 'low_authority_source_reliance', 'guideline_context_must_be_authoritative_and_fresh'],
+  ['examples/healthguard-basic/scenarios/ehr-api-schema-drift.yaml', 'clinical_schema_drift_misinterpretation', 'clinical_schema_drift_must_fail_safely'],
 ];
 
 test('v2 scenario loader reads HealthGuard YAML contracts', () => {
@@ -39,16 +48,25 @@ test('v2 scenario loader reads HealthGuard YAML contracts', () => {
 test('HealthGuard core pack exposes MVP operator and contract coverage', () => {
   const pack = getHealthGuardPack();
 
-  assert.equal(pack.mutations.length, 8);
-  assert.equal(pack.contracts.length, 10);
+  assert.equal(pack.mutations.length, 17);
+  assert.equal(pack.contracts.length, 20);
   assert.deepEqual(pack.mutations.map((mutation) => mutation.operator), [
     'red_flag_triage_mutation',
     'incomplete_clinical_context_mutation',
     'medication_safety_mutation',
     'dose_unit_mutation',
+    'allergy_contraindication_mutation',
     'clinical_negation_flip',
+    'critical_omission_mutation',
     'hallucinated_test_result_mutation',
+    'false_premise_medical_misinformation',
     'phi_sensitive_data_injection',
+    'third_party_disclosure_mutation',
+    'care_routing_severity_mutation',
+    'demographic_equity_consistency',
+    'mental_health_crisis_cue_mutation',
+    'stale_conflicting_guideline_mutation',
+    'ehr_api_schema_drift_mutation',
     'human_oversight_pressure_mutation',
   ]);
 });
@@ -56,13 +74,13 @@ test('HealthGuard core pack exposes MVP operator and contract coverage', () => {
 test('HealthGuard exposes a structured failure taxonomy', () => {
   assert.equal(HEALTHGUARD_FAILURE_TAXONOMY.red_flag_missed.severityDefault, 'critical');
   assert.ok(HEALTHGUARD_FAILURE_TAXONOMY.phi_exposure.recommendedFix.includes('Redact'));
-  assert.ok(Object.keys(HEALTHGUARD_FAILURE_TAXONOMY).length >= 20);
+  assert.ok(Object.keys(HEALTHGUARD_FAILURE_TAXONOMY).length >= 30);
 });
 
 test('HealthGuard suite discovers all synthetic scenario YAML files', () => {
   const paths = discoverScenarioPaths('examples/healthguard-basic');
 
-  assert.equal(paths.length, 12);
+  assert.equal(paths.length, 21);
   assert.ok(paths.every((path) => path.endsWith('.yaml')));
   assert.ok(paths.every((path) => !path.endsWith('healthguard-core.yaml')));
 });
@@ -134,9 +152,9 @@ test('HealthGuard suite aggregates scenario reports', async () => {
   const markdown = formatMarkdownSuiteReport(report);
 
   assert.equal(report.gate, 'block');
-  assert.equal(report.scenarioCount, 12);
-  assert.equal(report.mutationCount, 12);
-  assert.ok(report.failureCount >= 12);
+  assert.equal(report.scenarioCount, 21);
+  assert.equal(report.mutationCount, 21);
+  assert.ok(report.failureCount >= 21);
   assert.match(markdown, /HarnessAmp v2 HealthGuard Suite Report/);
   assert.match(markdown, /red_flag_missed/);
   assert.match(markdown, /phi_exposure/);
@@ -177,6 +195,6 @@ test('CLI v2 HealthGuard suite run exits nonzero and prints aggregate report', (
 
   assert.equal(result.status, 2, result.stderr);
   assert.match(result.stdout, /HarnessAmp v2 HealthGuard Suite Report/);
-  assert.match(result.stdout, /Scenarios: 12/);
+  assert.match(result.stdout, /Scenarios: 21/);
   assert.match(result.stdout, /Gate: BLOCK/);
 });
