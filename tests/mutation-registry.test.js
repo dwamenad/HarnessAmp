@@ -61,10 +61,13 @@ test('v1 generated smoke suite expands records without breaking mutation shape',
   const coverage = summarizeGeneratedMutationCoverage(suite.mutations);
 
   assert.equal(suite.generated.tier, 'smoke');
+  assert.equal(suite.generated.optimization.prioritization, 'risk');
   assert.equal(suite.mutations.length, 400);
   assert.equal(new Set(suite.mutations.map((mutation) => mutation.mutationId)).size, 400);
   assert.ok(suite.mutations.every((mutation) => mutation.bundle.mutation.id === mutation.mutationId));
   assert.ok(suite.mutations.every((mutation) => mutation.baseMutationId));
+  assert.equal(suite.mutations[0].severity, 'critical');
+  assert.equal(suite.mutations[0].generated.priorityRank, 1);
   assert.equal(coverage.baseMutationCount, 8);
   assert.equal(coverage.taskCount, 5);
   assert.equal(coverage.contextVariantCount, 10);
@@ -94,6 +97,38 @@ test('v1 generated suites can be capped deterministically', () => {
   );
 });
 
+test('v1 generated suites can be sharded into deterministic windows', () => {
+  const shard = generateMutationSuite(createDemoBundle(), {
+    generatedTier: 'nightly',
+    shardIndex: 2,
+    shardCount: 10,
+  });
+
+  assert.equal(shard.generated.logicalMutationCount, 51000);
+  assert.equal(shard.generated.shard.index, 2);
+  assert.equal(shard.generated.shard.count, 10);
+  assert.equal(shard.generated.shard.startIndex, 5100);
+  assert.equal(shard.generated.shard.endIndex, 10200);
+  assert.equal(shard.mutations.length, 5100);
+  assert.equal(shard.mutations[0].generated.generatedIndex, 5100);
+  assert.match(shard.mutations[0].mutationId, /\.generated\.nightly\.05101$/);
+});
+
+test('v1 generated suites support risk filters for smart sampling', () => {
+  const suite = generateMutationSuite(createDemoBundle(), {
+    generatedTier: 'core',
+    maxGeneratedMutations: 40,
+    surfaces: 'permission,network',
+    severities: 'critical',
+  });
+  const coverage = summarizeGeneratedMutationCoverage(suite.mutations);
+
+  assert.equal(suite.generated.optimization.filters.surfaces.length, 2);
+  assert.ok(suite.mutations.every((mutation) => mutation.severity === 'critical'));
+  assert.ok(suite.mutations.every((mutation) => ['permission', 'network'].includes(mutation.surface)));
+  assert.ok(coverage.baseMutationCount >= 1);
+});
+
 test('CLI can inspect a capped v1 generated mutation suite', () => {
   const result = spawnSync(process.execPath, [
     'scripts/harnessamp.mjs',
@@ -113,5 +148,30 @@ test('CLI can inspect a capped v1 generated mutation suite', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(suite.generated.tier, 'smoke');
   assert.equal(suite.mutations.length, 25);
-  assert.equal(suite.generated.coverage.contextVariantCount, 10);
+  assert.ok(suite.generated.coverage.contextVariantCount >= 1);
+});
+
+test('CLI can inspect a sharded generated mutation suite', () => {
+  const result = spawnSync(process.execPath, [
+    'scripts/harnessamp.mjs',
+    'mutate',
+    'examples/demo-bundle.json',
+    '--generated',
+    'nightly',
+    '--max-generated',
+    '100',
+    '--shard',
+    '2/10',
+  ], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  const suite = JSON.parse(result.stdout);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(suite.generated.shard.index, 2);
+  assert.equal(suite.generated.shard.count, 10);
+  assert.equal(suite.generated.shard.mutationCount, 10);
+  assert.equal(suite.mutations.length, 10);
 });

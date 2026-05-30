@@ -29,6 +29,12 @@ if (command === 'validate') {
     maxMutations: options.maxMutations,
     generatedTier: options.generatedTier,
     maxGeneratedMutations: options.maxGeneratedScenarios,
+    shard: options.shard,
+    shardIndex: options.shardIndex,
+    shardCount: options.shardCount,
+    surfaces: options.surfaces,
+    severities: options.severities,
+    prioritization: options.prioritization,
     riskProfile: options.riskProfile,
   });
   console.log(JSON.stringify(suite, null, 2));
@@ -77,6 +83,12 @@ if (command === 'validate') {
       maxMutations: options.generatedTier ? options.maxMutations : options.maxMutations ?? 5,
       generatedTier: options.generatedTier,
       maxGeneratedMutations: options.maxGeneratedScenarios,
+      shard: options.shard,
+      shardIndex: options.shardIndex,
+      shardCount: options.shardCount,
+      surfaces: options.surfaces,
+      severities: options.severities,
+      prioritization: options.prioritization,
       riskProfile: options.riskProfile,
       runnerKind: options.runnerKind,
       runnerOptions: options.runnerOptions,
@@ -96,6 +108,12 @@ if (command === 'validate') {
     maxMutations: options.maxMutations,
     generatedTier: options.generatedTier,
     maxGeneratedMutations: options.maxGeneratedScenarios,
+    shard: options.shard,
+    shardIndex: options.shardIndex,
+    shardCount: options.shardCount,
+    surfaces: options.surfaces,
+    severities: options.severities,
+    prioritization: options.prioritization,
     riskProfile: options.riskProfile,
     runnerKind: options.runnerKind,
     runnerOptions: options.runnerOptions,
@@ -113,6 +131,12 @@ if (command === 'validate') {
     maxMutations: options.maxMutations,
     generatedTier: options.generatedTier,
     maxGeneratedMutations: options.maxGeneratedScenarios,
+    shard: options.shard,
+    shardIndex: options.shardIndex,
+    shardCount: options.shardCount,
+    surfaces: options.surfaces,
+    severities: options.severities,
+    prioritization: options.prioritization,
     riskProfile: options.riskProfile,
     runnerKind: options.runnerKind,
     runnerOptions: options.runnerOptions,
@@ -155,6 +179,12 @@ function parseArgs(args) {
     suiteName: null,
     generatedTier: null,
     maxGeneratedScenarios: null,
+    shard: null,
+    shardIndex: null,
+    shardCount: null,
+    surfaces: null,
+    severities: null,
+    prioritization: 'risk',
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -240,6 +270,36 @@ function parseArgs(args) {
     }
     if (arg === '--max-generated') {
       parsed.maxGeneratedScenarios = Number(args[index + 1] ?? 0);
+      index += 1;
+      continue;
+    }
+    if (arg === '--shard') {
+      parsed.shard = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--shard-index') {
+      parsed.shardIndex = Number(args[index + 1] ?? 0);
+      index += 1;
+      continue;
+    }
+    if (arg === '--shard-count') {
+      parsed.shardCount = Number(args[index + 1] ?? 0);
+      index += 1;
+      continue;
+    }
+    if (arg === '--surface' || arg === '--changed-surface') {
+      parsed.surfaces = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--severity') {
+      parsed.severities = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--prioritization' || arg === '--priority') {
+      parsed.prioritization = args[index + 1] ?? parsed.prioritization;
       index += 1;
       continue;
     }

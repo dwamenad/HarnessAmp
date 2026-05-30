@@ -109,6 +109,8 @@ The v1 engine can also expand the same registry into deterministic generated sui
 node scripts/harnessamp.mjs mutate examples/demo-bundle.json --generated smoke
 node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated smoke
 node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated nightly --max-generated 500
+node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated nightly --shard 1/10
+node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated core --severity critical,high --surface permission,network
 ```
 
 Generated tiers:
@@ -118,6 +120,15 @@ Generated tiers:
 - `deep`: 17,000 generated tests
 - `nightly`: 51,000 generated tests
 
-Each generated record keeps the v1 mutation shape, but adds a unique mutation id, the base registry mutation id, and generated metadata for the scenario, risk-profile variant, prompt variant, and context variant.
+Each generated record keeps the v1 mutation shape, but adds a unique mutation id, the base registry mutation id, and generated metadata for the scenario, risk-profile variant, prompt variant, context variant, priority rank, and risk score.
+
+Generated suites are risk-prioritized by default. Critical/high-severity permission, network, tool-output, sandbox, and multimodal mutations appear earlier while the coordinate generator still round-robins across base mutation templates so capped runs do not collapse to one narrow failure mode.
+
+Large generated suites can be sharded with `--shard 1/10` or `--shard-index 1 --shard-count 10`. Shards use global deterministic mutation indexes, so shard `2/10` of `nightly` starts at generated test 5,101.
+
+Generated diagnosis reports include:
+
+- `failureClusters` - repeated generated findings deduplicated by base mutation, surface, expected failure, and failure type
+- `mutationValue` - a ranked map of base mutations by unique failure clusters, failure rate, and redundant findings
 
 The default runner is `MockRunner`. Future adapters exist as placeholders for model SDKs, agent frameworks, graph workflows, crew-style workflows, multi-agent runtimes, custom HTTP agents, and MCP-style runners.

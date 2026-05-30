@@ -12,6 +12,12 @@ export async function diagnoseHarness(bundleInput, options = {}) {
     packs: options.packs,
     generatedTier: options.generatedTier,
     maxGeneratedMutations: options.maxGeneratedMutations ?? options.maxGeneratedScenarios ?? options.maxMutations,
+    shard: options.shard,
+    shardIndex: options.shardIndex,
+    shardCount: options.shardCount,
+    surfaces: options.surfaces,
+    severities: options.severities,
+    prioritization: options.prioritization,
   } : {
     riskProfile: options.riskProfile,
     packs: options.packs,
@@ -64,8 +70,10 @@ export async function diagnoseHarness(bundleInput, options = {}) {
     .map((job) => job.result);
   const deltas = computeBehavioralDeltas(baselineRuns, mutationRuns, suite.mutations);
   const findings = classifyFindings(deltas, suite.mutations);
-  const summary = summarizeDiagnosis(normalizedBundle, suite, baselineRuns, mutationRuns, findings);
-  const reportText = formatDiagnosticReport(normalizedBundle, summary, findings, deltas, suite);
+  const failureClusters = clusterFindings(findings);
+  const mutationValue = summarizeMutationValue(mutationRuns, suite.mutations, findings, failureClusters);
+  const summary = summarizeDiagnosis(normalizedBundle, suite, baselineRuns, mutationRuns, findings, failureClusters, mutationValue);
+  const reportText = formatDiagnosticReport(normalizedBundle, summary, findings, deltas, suite, failureClusters, mutationValue);
   const runArtifacts = collectRunArtifacts([...baselineRuns, ...mutationRuns], {
     maxTextLength: options.maxArtifactTextLength,
   });
@@ -95,6 +103,8 @@ export async function diagnoseHarness(bundleInput, options = {}) {
     runArtifacts,
     deltas,
     findings,
+    failureClusters,
+    mutationValue,
     summary,
     reportText,
   };
@@ -151,7 +161,109 @@ export function classifyFindings(deltas, mutations) {
     });
 }
 
-function summarizeDiagnosis(bundle, suite, baselineRuns, mutationRuns, findings) {
+export function clusterFindings(findings) {
+  const groups = new Map();
+  for (const finding of findings) {
+    const mutation = finding.mutation ?? {};
+    const failureTypeIds = finding.failureTypes.map((item) => item.id).sort();
+    const baseMutationId = mutation.baseMutationId ?? mutation.mutationId ?? finding.mutationId;
+    const key = [
+      baseMutationId,
+      mutation.surface ?? 'unknown',
+      mutation.expectedFailure ?? 'unknown',
+      failureTypeIds.join('+'),
+    ].join('|');
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: key,
+        baseMutationId,
+        mutationFamily: mutation.mutationFamily ?? 'unknown',
+        surface: mutation.surface ?? 'unknown',
+        expectedFailure: mutation.expectedFailure ?? 'unknown',
+        failureTypeIds,
+        highestSeverity: finding.highestSeverity,
+        count: 0,
+        affectedTasks: new Set(),
+        affectedGeneratedContexts: new Set(),
+        affectedRiskProfiles: new Set(),
+        exampleMutationIds: [],
+        recommendation: finding.recommendation,
+      });
+    }
+
+    const cluster = groups.get(key);
+    cluster.count += 1;
+    cluster.highestSeverity = highestSeverity([cluster.highestSeverity, finding.highestSeverity]);
+    if (finding.delta?.after?.taskId) cluster.affectedTasks.add(finding.delta.after.taskId);
+    if (mutation.generated?.contextVariantId) cluster.affectedGeneratedContexts.add(mutation.generated.contextVariantId);
+    if (mutation.generated?.riskProfileVariantId) cluster.affectedRiskProfiles.add(mutation.generated.riskProfileVariantId);
+    if (cluster.exampleMutationIds.length < 5) cluster.exampleMutationIds.push(finding.mutationId);
+  }
+
+  return Array.from(groups.values())
+    .map((cluster) => ({
+      ...cluster,
+      affectedTasks: Array.from(cluster.affectedTasks).sort(),
+      affectedGeneratedContexts: Array.from(cluster.affectedGeneratedContexts).sort(),
+      affectedRiskProfiles: Array.from(cluster.affectedRiskProfiles).sort(),
+    }))
+    .sort((a, b) => severityRank(b.highestSeverity) - severityRank(a.highestSeverity) || b.count - a.count);
+}
+
+function summarizeMutationValue(runs, mutations, findings, failureClusters) {
+  const mutationById = new Map(mutations.map((mutation) => [mutation.mutationId, mutation]));
+  const clusterIdsByBaseMutation = new Map();
+  for (const cluster of failureClusters) {
+    if (!clusterIdsByBaseMutation.has(cluster.baseMutationId)) {
+      clusterIdsByBaseMutation.set(cluster.baseMutationId, new Set());
+    }
+    clusterIdsByBaseMutation.get(cluster.baseMutationId).add(cluster.id);
+  }
+
+  const findingCountByBaseMutation = new Map();
+  findings.forEach((finding) => {
+    const baseMutationId = finding.mutation?.baseMutationId ?? finding.mutationId;
+    findingCountByBaseMutation.set(baseMutationId, (findingCountByBaseMutation.get(baseMutationId) ?? 0) + 1);
+  });
+
+  const groups = new Map();
+  runs.forEach((run) => {
+    const mutation = mutationById.get(run.mutationId);
+    const baseMutationId = mutation?.baseMutationId ?? mutation?.mutationId ?? run.mutationId ?? 'unknown';
+    if (!groups.has(baseMutationId)) {
+      groups.set(baseMutationId, {
+        baseMutationId,
+        operation: mutation?.operation ?? 'unknown',
+        mutationFamily: mutation?.mutationFamily ?? 'unknown',
+        surface: mutation?.surface ?? 'unknown',
+        severity: mutation?.severity ?? 'low',
+        total: 0,
+        failed: 0,
+        failureRate: 0,
+        uniqueFailureClusters: 0,
+        redundantFailures: 0,
+      });
+    }
+    const group = groups.get(baseMutationId);
+    group.total += 1;
+    if (!run.metadata?.passed) group.failed += 1;
+    group.failureRate = Math.round((group.failed / group.total) * 100);
+  });
+
+  groups.forEach((group, baseMutationId) => {
+    group.uniqueFailureClusters = clusterIdsByBaseMutation.get(baseMutationId)?.size ?? 0;
+    group.redundantFailures = Math.max(0, (findingCountByBaseMutation.get(baseMutationId) ?? 0) - group.uniqueFailureClusters);
+    group.valueScore = group.uniqueFailureClusters * 1000
+      + severityRank(group.severity) * 100
+      + group.failureRate;
+  });
+
+  return Array.from(groups.values())
+    .sort((a, b) => b.valueScore - a.valueScore || b.failed - a.failed || a.baseMutationId.localeCompare(b.baseMutationId));
+}
+
+function summarizeDiagnosis(bundle, suite, baselineRuns, mutationRuns, findings, failureClusters, mutationValue) {
   const originalPassRate = passRate(baselineRuns);
   const mutatedPassRate = passRate(mutationRuns);
   const robustnessDrop = Math.max(0, originalPassRate - mutatedPassRate);
@@ -177,6 +289,9 @@ function summarizeDiagnosis(bundle, suite, baselineRuns, mutationRuns, findings)
     mostSensitiveMutationCategory: categoryRates[0] ?? null,
     verdict,
     failureCount: findings.length,
+    uniqueFailureCount: failureClusters.length,
+    topFailureCluster: failureClusters[0] ?? null,
+    highestValueMutation: mutationValue[0] ?? null,
     mutationSensitivity: categoryRates,
   };
 }
@@ -198,7 +313,7 @@ function summarizeMutationSensitivity(runs, mutations) {
   return Array.from(groups.values()).sort((a, b) => b.failureRate - a.failureRate || b.failed - a.failed);
 }
 
-export function formatDiagnosticReport(bundle, summary, findings, deltas, suite) {
+export function formatDiagnosticReport(bundle, summary, findings, deltas, suite, failureClusters = [], mutationValue = []) {
   const lines = [];
   lines.push('# HarnessAmp Robustness Report');
   lines.push('');
@@ -210,8 +325,16 @@ export function formatDiagnosticReport(bundle, summary, findings, deltas, suite)
   lines.push(`- Mutated pass rate: ${summary.mutatedPassRate}%`);
   lines.push(`- Robustness drop: ${summary.robustnessDrop} points`);
   lines.push(`- Highest-risk failure type: ${summary.highestRiskFailureType.label}`);
+  lines.push(`- Unique failure clusters: ${summary.uniqueFailureCount ?? failureClusters.length}`);
   lines.push(`- Most sensitive mutation category: ${summary.mostSensitiveMutationCategory?.mutationFamily ?? 'none'}`);
   lines.push(`- CI/CD recommendation: ${summary.verdict.toUpperCase()}`);
+  if (suite.generated) {
+    lines.push(`- Generated tier: ${suite.generated.tier}`);
+    if (suite.generated.shard) {
+      lines.push(`- Generated shard: ${suite.generated.shard.index}/${suite.generated.shard.count} (${suite.generated.shard.mutationCount}/${suite.generated.shard.logicalMutationCount} tests)`);
+    }
+    lines.push(`- Generated prioritization: ${suite.generated.optimization?.prioritization ?? 'risk'}`);
+  }
   lines.push('');
   lines.push('## Mutation Packs');
   lines.push('');
@@ -233,6 +356,20 @@ export function formatDiagnosticReport(bundle, summary, findings, deltas, suite)
   summary.mutationSensitivity.forEach((item) => {
     lines.push(`- ${item.mutationFamily}: ${item.failureRate}% failure rate (${item.failed}/${item.total})`);
   });
+  lines.push('');
+  lines.push('## Failure Clusters');
+  lines.push('');
+  failureClusters.slice(0, 10).forEach((cluster) => {
+    lines.push(`- ${cluster.baseMutationId}: ${cluster.count} finding(s), severity ${cluster.highestSeverity}, surface ${cluster.surface}, failure ${cluster.failureTypeIds.join(', ') || cluster.expectedFailure}.`);
+  });
+  if (!failureClusters.length) lines.push('- No clustered failures.');
+  lines.push('');
+  lines.push('## Mutation Value Map');
+  lines.push('');
+  mutationValue.slice(0, 10).forEach((item) => {
+    lines.push(`- ${item.baseMutationId}: ${item.uniqueFailureClusters} unique cluster(s), ${item.failureRate}% failure rate (${item.failed}/${item.total}), ${item.redundantFailures} redundant finding(s).`);
+  });
+  if (!mutationValue.length) lines.push('- No mutation value data.');
   lines.push('');
   lines.push('## High-Risk Findings');
   lines.push('');

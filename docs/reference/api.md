@@ -72,6 +72,10 @@ Useful generated-suite options:
 
 - `generatedTier` - `smoke`, `core`, `deep`, or `nightly`
 - `maxGeneratedMutations` - caps a generated tier for local inspection or CI sampling
+- `shard` - a `1/10` style generated-suite shard
+- `shardIndex` and `shardCount` - numeric shard controls for worker orchestration
+- `surfaces` and `severities` - smart-sampling filters for changed or high-risk areas
+- `prioritization` - `risk` by default, or `registry` to preserve registry order
 - `mutation.baseMutationId` - links each generated record back to the registry mutation it expanded from
 
 ## `diagnoseHarness(bundleInput, options)`
@@ -86,6 +90,8 @@ Important outputs:
 - `runArtifacts` - normalized redacted artifacts from runner traces, including terminal commands, file diffs, sandbox events, approvals, and logs
 - `deltas` - behavioral changes between original and mutated runs
 - `findings` - classified failures with recommendations
+- `failureClusters` - deduplicated root-cause groups for repeated generated failures
+- `mutationValue` - base-mutation ranking by unique failure clusters, failure rate, and redundant findings
 - `summary` - pass/warn/block verdict and robustness drop
 - `reportText` - markdown robustness report
 
