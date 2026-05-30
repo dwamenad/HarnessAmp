@@ -1,4 +1,5 @@
 import { meetsSeverityThreshold, severityRank } from './severity.js';
+import { sanitizeReportText, sanitizeReportValue } from './report-sanitizer.js';
 
 export function buildRunReport({ scenario, pack, baselineTrace, mutatedTraces, behavioralDiffs, contractResults, failOn }) {
   const failingResults = contractResults.filter((result) => !result.passed);
@@ -7,7 +8,7 @@ export function buildRunReport({ scenario, pack, baselineTrace, mutatedTraces, b
     .map((result) => result.severity)
     .sort((left, right) => severityRank(right) - severityRank(left))[0] ?? 'low';
 
-  return {
+  return sanitizeReportValue({
     version: '2.0.0-alpha',
     runId: `${scenario.id}__${pack.id}`,
     domain: scenario.domain,
@@ -28,7 +29,8 @@ export function buildRunReport({ scenario, pack, baselineTrace, mutatedTraces, b
     highestSeverity: maxSeverity,
     gate: blockingFailures.length ? 'block' : failingResults.length ? 'warn' : 'pass',
     failOn,
-  };
+    sanitized: true,
+  });
 }
 
 export function formatMarkdownReport(report) {
@@ -86,13 +88,14 @@ export function formatMarkdownReport(report) {
     lines.push(`- ${diff.mutationId}: ${diff.summary}`);
   });
 
-  return lines.join('\n');
+  return sanitizeReportText(lines.join('\n'));
 }
 
 export function formatMarkdownSuiteReport(report) {
   const lines = [];
+  const title = report.suite.pack === 'healthguard-core' ? 'HealthGuard' : 'FinanceGuard';
 
-  lines.push('# HarnessAmp v2 FinanceGuard Suite Report');
+  lines.push(`# HarnessAmp v2 ${title} Suite Report`);
   lines.push('');
   lines.push('## Executive Summary');
   lines.push('');
@@ -133,7 +136,7 @@ export function formatMarkdownSuiteReport(report) {
     lines.push('');
   });
 
-  return lines.join('\n');
+  return sanitizeReportText(lines.join('\n'));
 }
 
 function riskScore(failingResults) {

@@ -14,8 +14,8 @@ export async function runV2Suite(path, options = {}) {
   }
 
   return buildSuiteReport({
-    id: options.suiteId ?? 'financeguard-core-suite',
-    name: options.suiteName ?? 'FinanceGuard Core Suite',
+    id: options.suiteId ?? `${options.packName ?? 'financeguard-core'}-suite`,
+    name: options.suiteName ?? defaultSuiteName(options.packName ?? 'financeguard-core'),
     sourcePath: resolve(path),
     packName: options.packName ?? 'financeguard-core',
     failOn: options.failOn ?? 'critical',
@@ -33,7 +33,7 @@ export function discoverScenarioPaths(path) {
   const paths = [];
   collectYamlFiles(sourcePath, paths);
   return paths
-    .filter((item) => !item.endsWith('financeguard-core.yaml'))
+    .filter((item) => !/\/(?:financeguard|healthguard)-core\.ya?ml$/i.test(item))
     .sort((left, right) => left.localeCompare(right));
 }
 
@@ -100,4 +100,9 @@ function summarizeFailures(failingResults) {
     }
   }
   return Array.from(counts.values()).sort((left, right) => right.count - left.count || severityRank(right.highestSeverity) - severityRank(left.highestSeverity));
+}
+
+function defaultSuiteName(packName) {
+  if (packName === 'healthguard-core') return 'HealthGuard Core Suite';
+  return 'FinanceGuard Core Suite';
 }
