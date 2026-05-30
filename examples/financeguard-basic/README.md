@@ -30,3 +30,24 @@ Run the whole suite of 17 scenarios:
 ```bash
 node scripts/harnessamp.mjs run examples/financeguard-basic --pack financeguard-core --fail-on high
 ```
+
+Run a generated suite:
+
+```bash
+node scripts/harnessamp.mjs run --pack financeguard-core --generated smoke --fail-on high
+```
+
+Generated tiers:
+
+```text
+smoke: 400 generated tests
+core: 3,400 generated tests
+deep: 17,000 generated tests
+nightly: 51,000 generated tests
+```
+
+Cap generated suites when needed:
+
+```bash
+node scripts/harnessamp.mjs run --pack financeguard-core --generated nightly --max-generated 500 --fail-on high
+```

@@ -4,6 +4,10 @@ import { loadScenarioFile } from './scenario-loader.js';
 import { runV2Scenario } from './runner.js';
 import { meetsSeverityThreshold, severityRank } from './severity.js';
 import {
+  generateFinanceGuardScenarios,
+  summarizeFinanceGuardGeneratedCoverage,
+} from './generators/financeguard-generator.js';
+import {
   generateHealthGuardScenarios,
   summarizeHealthGuardGeneratedCoverage,
 } from './generators/healthguard-generator.js';
@@ -29,12 +33,9 @@ export async function runV2Suite(path, options = {}) {
 
 export async function runGeneratedV2Suite(options = {}) {
   const packName = options.packName ?? 'healthguard-core';
-  if (packName !== 'healthguard-core') {
-    throw new Error(`Generated v2 suites are not available for pack: ${packName}`);
-  }
-
   const tier = options.generatedTier ?? options.tier ?? 'core';
-  const scenarios = generateHealthGuardScenarios({
+  const generator = generatedGeneratorFor(packName);
+  const scenarios = generator.generate({
     tier,
     maxScenarios: options.maxGeneratedScenarios,
   });
@@ -45,9 +46,9 @@ export async function runGeneratedV2Suite(options = {}) {
   }
 
   return buildSuiteReport({
-    id: options.suiteId ?? `healthguard-generated-${tier}`,
-    name: options.suiteName ?? `HealthGuard Generated ${capitalize(tier)} Suite`,
-    sourcePath: `generated:healthguard-core:${tier}`,
+    id: options.suiteId ?? `${packName.replace('-core', '')}-generated-${tier}`,
+    name: options.suiteName ?? `${generatedSuiteLabel(packName)} Generated ${capitalize(tier)} Suite`,
+    sourcePath: `generated:${packName}:${tier}`,
     packName,
     failOn: options.failOn ?? 'critical',
     reports,
@@ -55,7 +56,7 @@ export async function runGeneratedV2Suite(options = {}) {
       pack: packName,
       tier,
       maxGeneratedScenarios: options.maxGeneratedScenarios ?? null,
-      coverage: summarizeHealthGuardGeneratedCoverage(scenarios),
+      coverage: generator.summarize(scenarios),
     },
   });
 }
@@ -143,6 +144,28 @@ function summarizeFailures(failingResults) {
 function defaultSuiteName(packName) {
   if (packName === 'healthguard-core') return 'HealthGuard Core Suite';
   return 'FinanceGuard Core Suite';
+}
+
+function generatedGeneratorFor(packName) {
+  if (packName === 'healthguard-core') {
+    return {
+      generate: generateHealthGuardScenarios,
+      summarize: summarizeHealthGuardGeneratedCoverage,
+    };
+  }
+  if (packName === 'financeguard-core') {
+    return {
+      generate: generateFinanceGuardScenarios,
+      summarize: summarizeFinanceGuardGeneratedCoverage,
+    };
+  }
+  throw new Error(`Generated v2 suites are not available for pack: ${packName}`);
+}
+
+function generatedSuiteLabel(packName) {
+  if (packName === 'healthguard-core') return 'HealthGuard';
+  if (packName === 'financeguard-core') return 'FinanceGuard';
+  return packName;
 }
 
 function capitalize(value) {
