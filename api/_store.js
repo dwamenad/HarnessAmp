@@ -1,4 +1,14 @@
 import crypto from 'node:crypto';
+import {
+  applyBenchmarkPackEdits,
+  cloneJson,
+  diffBenchmarkPacks,
+  nextBenchmarkVersionNumber,
+  normalizeGoldenCaseVisibility,
+  normalizeReviewDecision,
+  statusForReviewDecision,
+  validateBenchmarkPackCandidate,
+} from '../src/core/benchmark-lifecycle.js';
 import { analyzeBundle } from '../src/core/engine.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
 import { ensureSchema, hasPostgresConfig, query } from './_db.js';
@@ -11,10 +21,20 @@ const memory = globalThis.__harnessAmpStore ?? {
   runners: new Map(),
   reports: new Map(),
   jobs: new Map(),
+  benchmarkPacks: new Map(),
+  benchmarkVersions: new Map(),
+  benchmarkReviews: new Map(),
+  promotionCandidates: new Map(),
+  goldenCases: new Map(),
   events: [],
 };
 
 globalThis.__harnessAmpStore = memory;
+memory.benchmarkPacks ??= new Map();
+memory.benchmarkVersions ??= new Map();
+memory.benchmarkReviews ??= new Map();
+memory.promotionCandidates ??= new Map();
+memory.goldenCases ??= new Map();
 
 export async function getOrCreateGitHubUser(profile) {
   if (useMemory()) {
@@ -391,6 +411,439 @@ export async function cancelRunnerJob({ jobId, userId }) {
   return updateJobStatus(jobId, { status: 'canceled' });
 }
 
+export async function listBenchmarkPacks({ projectId, userId }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership) throw new Error('Project membership not found');
+
+  if (useMemory()) {
+    return Array.from(memory.benchmarkPacks.values())
+      .filter((pack) => pack.projectId === projectId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map((pack) => benchmarkPackSummary(pack));
+  }
+
+  await ensureSchema();
+  const result = await query(
+    `select * from benchmark_packs where project_id = $1 order by updated_at desc`,
+    [projectId],
+  );
+  return result.rows.map((row) => benchmarkPackSummary(normalizeBenchmarkPackRow(row)));
+}
+
+export async function getBenchmarkPack({ benchmarkId, userId }) {
+  const benchmark = await readBenchmarkPack(benchmarkId);
+  if (!benchmark) return null;
+  const membership = await getProjectMembership(userId, benchmark.projectId);
+  if (!membership) return null;
+  return buildBenchmarkDetail(benchmark);
+}
+
+export async function createBenchmarkVersion({ projectId, userId, pack, benchmarkId = null, source = 'manual' }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can create benchmark versions');
+  }
+
+  const validation = validateBenchmarkPackCandidate(pack);
+  if (!validation.ok) {
+    throw new Error(`Invalid benchmark pack: ${validation.errors.join('; ')}`);
+  }
+
+  if (useMemory()) {
+    let benchmark = benchmarkId ? memory.benchmarkPacks.get(benchmarkId) : null;
+    if (benchmarkId && (!benchmark || benchmark.projectId !== projectId)) {
+      throw new Error('Benchmark pack not found');
+    }
+    if (!benchmark) {
+      benchmark = {
+        id: createId('bench'),
+        projectId,
+        workspaceId: membership.workspaceId,
+        name: validation.summary.project,
+        slug: slugify(validation.summary.project),
+        description: validation.summary.description,
+        latestVersionId: null,
+        approvedVersionId: null,
+        createdBy: userId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      memory.benchmarkPacks.set(benchmark.id, benchmark);
+    }
+
+    const versions = benchmarkVersionsFor(benchmark.id);
+    const version = {
+      id: createId('benchver'),
+      benchmarkId: benchmark.id,
+      projectId,
+      workspaceId: membership.workspaceId,
+      versionNumber: nextBenchmarkVersionNumber(versions),
+      status: 'draft',
+      source,
+      pack: cloneJson(pack),
+      validation,
+      readiness: validation.summary,
+      createdBy: userId,
+      approvedBy: null,
+      approvedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    memory.benchmarkVersions.set(version.id, version);
+    benchmark.latestVersionId = version.id;
+    benchmark.name = validation.summary.project;
+    benchmark.description = validation.summary.description;
+    benchmark.updatedAt = version.updatedAt;
+    memory.benchmarkPacks.set(benchmark.id, benchmark);
+    return {
+      benchmark: benchmarkPackSummary(benchmark),
+      version: benchmarkVersionSummary(version),
+    };
+  }
+
+  await ensureSchema();
+  let benchmark = benchmarkId ? await readBenchmarkPack(benchmarkId) : null;
+  if (benchmarkId && (!benchmark || benchmark.projectId !== projectId)) {
+    throw new Error('Benchmark pack not found');
+  }
+
+  if (!benchmark) {
+    const inserted = await query(
+      `insert into benchmark_packs (id, project_id, workspace_id, name, slug, description, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       returning *`,
+      [
+        createId('bench'),
+        projectId,
+        membership.workspaceId,
+        validation.summary.project,
+        slugify(validation.summary.project),
+        validation.summary.description,
+        userId,
+      ],
+    );
+    benchmark = normalizeBenchmarkPackRow(inserted.rows[0]);
+  }
+
+  const existing = await query(
+    `select * from benchmark_versions where benchmark_pack_id = $1`,
+    [benchmark.id],
+  );
+  const versionId = createId('benchver');
+  const versionNumber = nextBenchmarkVersionNumber(existing.rows);
+  const insertedVersion = await query(
+    `insert into benchmark_versions
+       (id, benchmark_pack_id, project_id, workspace_id, version_number, status, source, pack, validation, readiness, created_by)
+     values ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10)
+     returning *`,
+    [
+      versionId,
+      benchmark.id,
+      projectId,
+      membership.workspaceId,
+      versionNumber,
+      source,
+      pack,
+      validation,
+      validation.summary,
+      userId,
+    ],
+  );
+  await query(
+    `update benchmark_packs
+     set latest_version_id = $2,
+         name = $3,
+         description = $4,
+         updated_at = now()
+     where id = $1`,
+    [benchmark.id, versionId, validation.summary.project, validation.summary.description],
+  );
+
+  const version = normalizeBenchmarkVersionRow(insertedVersion.rows[0]);
+  benchmark = await readBenchmarkPack(benchmark.id);
+  return {
+    benchmark: benchmarkPackSummary(benchmark),
+    version: benchmarkVersionSummary(version),
+  };
+}
+
+export async function editBenchmarkVersion({ versionId, userId, edits = {} }) {
+  const baseVersion = await readBenchmarkVersion(versionId);
+  if (!baseVersion) throw new Error('Benchmark version not found');
+  if (baseVersion.status === 'archived' || baseVersion.status === 'rejected') {
+    throw new Error('Cannot edit an archived or rejected benchmark version');
+  }
+  const membership = await getProjectMembership(userId, baseVersion.projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can edit benchmark versions');
+  }
+
+  const editedPack = applyBenchmarkPackEdits(baseVersion.pack, edits);
+  const diff = diffBenchmarkPacks(baseVersion.pack, editedPack);
+  if (diff.summary.changeCount === 0) {
+    return {
+      benchmark: benchmarkPackSummary(await readBenchmarkPack(baseVersion.benchmarkId)),
+      baseVersion: benchmarkVersionSummary(baseVersion),
+      version: benchmarkVersionSummary(baseVersion),
+      diff,
+      unchanged: true,
+    };
+  }
+
+  const result = await createBenchmarkVersion({
+    projectId: baseVersion.projectId,
+    userId,
+    benchmarkId: baseVersion.benchmarkId,
+    pack: editedPack,
+    source: `edit:v${baseVersion.versionNumber}`,
+  });
+
+  return {
+    ...result,
+    baseVersion: benchmarkVersionSummary(baseVersion),
+    diff,
+    unchanged: false,
+  };
+}
+
+export async function reviewBenchmarkVersion({ versionId, userId, decision, comments = '' }) {
+  const version = await readBenchmarkVersion(versionId);
+  if (!version) throw new Error('Benchmark version not found');
+  const membership = await getProjectMembership(userId, version.projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can review benchmark versions');
+  }
+
+  const normalizedDecision = normalizeReviewDecision(decision);
+  const nextStatus = statusForReviewDecision(normalizedDecision, version.status);
+  const now = new Date().toISOString();
+
+  if (useMemory()) {
+    const review = {
+      id: createId('benchrev'),
+      versionId: version.id,
+      benchmarkId: version.benchmarkId,
+      projectId: version.projectId,
+      workspaceId: version.workspaceId,
+      reviewerId: userId,
+      decision: normalizedDecision,
+      comments,
+      readinessSnapshot: cloneJson(version.readiness),
+      createdAt: now,
+    };
+    memory.benchmarkReviews.set(review.id, review);
+    const nextVersion = {
+      ...version,
+      status: nextStatus,
+      approvedBy: nextStatus === 'approved' ? userId : version.approvedBy,
+      approvedAt: nextStatus === 'approved' ? now : version.approvedAt,
+      updatedAt: now,
+    };
+    memory.benchmarkVersions.set(version.id, nextVersion);
+    const benchmark = memory.benchmarkPacks.get(version.benchmarkId);
+    if (benchmark) {
+      benchmark.latestVersionId = version.id;
+      if (nextStatus === 'approved') benchmark.approvedVersionId = version.id;
+      benchmark.updatedAt = now;
+      memory.benchmarkPacks.set(benchmark.id, benchmark);
+    }
+    return {
+      review,
+      version: benchmarkVersionSummary(nextVersion),
+      benchmark: benchmark ? benchmarkPackSummary(benchmark) : null,
+    };
+  }
+
+  await ensureSchema();
+  const reviewId = createId('benchrev');
+  const insertedReview = await query(
+    `insert into benchmark_reviews
+       (id, benchmark_version_id, benchmark_pack_id, project_id, workspace_id, reviewer_id, decision, comments, readiness_snapshot)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     returning *`,
+    [
+      reviewId,
+      version.id,
+      version.benchmarkId,
+      version.projectId,
+      version.workspaceId,
+      userId,
+      normalizedDecision,
+      comments,
+      version.readiness,
+    ],
+  );
+  const updatedVersion = await query(
+    `update benchmark_versions
+     set status = $2,
+         approved_by = case when $2 = 'approved' then $3 else approved_by end,
+         approved_at = case when $2 = 'approved' then now() else approved_at end,
+         updated_at = now()
+     where id = $1
+     returning *`,
+    [version.id, nextStatus, userId],
+  );
+  await query(
+    `update benchmark_packs
+     set latest_version_id = $2,
+         approved_version_id = case when $3 = 'approved' then $2 else approved_version_id end,
+         updated_at = now()
+     where id = $1`,
+    [version.benchmarkId, version.id, nextStatus],
+  );
+
+  const benchmark = await readBenchmarkPack(version.benchmarkId);
+  return {
+    review: normalizeBenchmarkReviewRow(insertedReview.rows[0]),
+    version: benchmarkVersionSummary(normalizeBenchmarkVersionRow(updatedVersion.rows[0])),
+    benchmark: benchmarkPackSummary(benchmark),
+  };
+}
+
+export async function createPromotionCandidate({
+  versionId,
+  userId,
+  sourceType = 'report',
+  sourceId = null,
+  caseData,
+  visibility = 'visible',
+  notes = '',
+}) {
+  const version = await readBenchmarkVersion(versionId);
+  if (!version) throw new Error('Benchmark version not found');
+  if (version.status === 'rejected' || version.status === 'archived') {
+    throw new Error('Cannot promote cases into a rejected or archived benchmark version');
+  }
+  const membership = await getProjectMembership(userId, version.projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can propose golden cases');
+  }
+  if (!caseData || typeof caseData !== 'object' || Array.isArray(caseData)) {
+    throw new Error('Promotion candidate case data is required');
+  }
+  const normalizedVisibility = normalizeGoldenCaseVisibility(visibility);
+
+  if (useMemory()) {
+    const candidate = {
+      id: createId('promote'),
+      versionId: version.id,
+      benchmarkId: version.benchmarkId,
+      projectId: version.projectId,
+      workspaceId: version.workspaceId,
+      sourceType,
+      sourceId,
+      status: 'proposed',
+      visibility: normalizedVisibility,
+      caseData: cloneJson(caseData),
+      notes,
+      createdBy: userId,
+      promotedBy: null,
+      promotedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    memory.promotionCandidates.set(candidate.id, candidate);
+    return candidate;
+  }
+
+  await ensureSchema();
+  const inserted = await query(
+    `insert into promotion_candidates
+       (id, benchmark_version_id, benchmark_pack_id, project_id, workspace_id, source_type, source_id, status, visibility, case_data, notes, created_by)
+     values ($1, $2, $3, $4, $5, $6, $7, 'proposed', $8, $9, $10, $11)
+     returning *`,
+    [
+      createId('promote'),
+      version.id,
+      version.benchmarkId,
+      version.projectId,
+      version.workspaceId,
+      sourceType,
+      sourceId,
+      normalizedVisibility,
+      caseData,
+      notes,
+      userId,
+    ],
+  );
+  return normalizePromotionCandidateRow(inserted.rows[0]);
+}
+
+export async function promoteBenchmarkCandidate({ candidateId, userId }) {
+  const candidate = await readPromotionCandidate(candidateId);
+  if (!candidate) throw new Error('Promotion candidate not found');
+  const membership = await getProjectMembership(userId, candidate.projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can promote golden cases');
+  }
+  if (candidate.status === 'promoted') {
+    const existing = goldenCasesForCandidate(candidate.id)[0] ?? null;
+    return { candidate, goldenCase: existing };
+  }
+  if (candidate.status !== 'proposed') {
+    throw new Error(`Cannot promote candidate with status ${candidate.status}`);
+  }
+
+  if (useMemory()) {
+    const now = new Date().toISOString();
+    const goldenCase = {
+      id: createId('golden'),
+      versionId: candidate.versionId,
+      benchmarkId: candidate.benchmarkId,
+      projectId: candidate.projectId,
+      workspaceId: candidate.workspaceId,
+      promotionCandidateId: candidate.id,
+      visibility: candidate.visibility,
+      caseData: cloneJson(candidate.caseData),
+      createdBy: userId,
+      createdAt: now,
+    };
+    memory.goldenCases.set(goldenCase.id, goldenCase);
+    const nextCandidate = {
+      ...candidate,
+      status: 'promoted',
+      promotedBy: userId,
+      promotedAt: now,
+      updatedAt: now,
+    };
+    memory.promotionCandidates.set(candidate.id, nextCandidate);
+    return { candidate: nextCandidate, goldenCase };
+  }
+
+  await ensureSchema();
+  const insertedGolden = await query(
+    `insert into golden_cases
+       (id, benchmark_version_id, benchmark_pack_id, project_id, workspace_id, promotion_candidate_id, visibility, case_data, created_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     returning *`,
+    [
+      createId('golden'),
+      candidate.versionId,
+      candidate.benchmarkId,
+      candidate.projectId,
+      candidate.workspaceId,
+      candidate.id,
+      candidate.visibility,
+      candidate.caseData,
+      userId,
+    ],
+  );
+  const updatedCandidate = await query(
+    `update promotion_candidates
+     set status = 'promoted',
+         promoted_by = $2,
+         promoted_at = now(),
+         updated_at = now()
+     where id = $1
+     returning *`,
+    [candidate.id, userId],
+  );
+  return {
+    candidate: normalizePromotionCandidateRow(updatedCandidate.rows[0]),
+    goldenCase: normalizeGoldenCaseRow(insertedGolden.rows[0]),
+  };
+}
+
 export async function saveEvent(event, session = {}) {
   if (useMemory()) {
     memory.events.push({
@@ -612,6 +1065,76 @@ async function getRunnerById(runnerId) {
   return result.rows[0] ? normalizeRunnerRow(result.rows[0]) : null;
 }
 
+async function readBenchmarkPack(benchmarkId) {
+  if (!benchmarkId) return null;
+  if (useMemory()) {
+    return memory.benchmarkPacks.get(benchmarkId) ?? null;
+  }
+
+  await ensureSchema();
+  const result = await query('select * from benchmark_packs where id = $1 limit 1', [benchmarkId]);
+  return result.rows[0] ? normalizeBenchmarkPackRow(result.rows[0]) : null;
+}
+
+async function readBenchmarkVersion(versionId) {
+  if (!versionId) return null;
+  if (useMemory()) {
+    return memory.benchmarkVersions.get(versionId) ?? null;
+  }
+
+  await ensureSchema();
+  const result = await query('select * from benchmark_versions where id = $1 limit 1', [versionId]);
+  return result.rows[0] ? normalizeBenchmarkVersionRow(result.rows[0]) : null;
+}
+
+async function readPromotionCandidate(candidateId) {
+  if (!candidateId) return null;
+  if (useMemory()) {
+    return memory.promotionCandidates.get(candidateId) ?? null;
+  }
+
+  await ensureSchema();
+  const result = await query('select * from promotion_candidates where id = $1 limit 1', [candidateId]);
+  return result.rows[0] ? normalizePromotionCandidateRow(result.rows[0]) : null;
+}
+
+async function buildBenchmarkDetail(benchmark) {
+  if (useMemory()) {
+    const versions = benchmarkVersionsFor(benchmark.id).sort((left, right) => right.versionNumber - left.versionNumber);
+    const reviews = Array.from(memory.benchmarkReviews.values())
+      .filter((review) => review.benchmarkId === benchmark.id)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const promotionCandidates = Array.from(memory.promotionCandidates.values())
+      .filter((candidate) => candidate.benchmarkId === benchmark.id)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const goldenCases = Array.from(memory.goldenCases.values())
+      .filter((item) => item.benchmarkId === benchmark.id)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return {
+      benchmark: benchmarkPackSummary(benchmark),
+      versions: summarizeBenchmarkVersions(versions),
+      reviews,
+      promotionCandidates,
+      goldenCases,
+    };
+  }
+
+  await ensureSchema();
+  const [versions, reviews, promotionCandidates, goldenCases] = await Promise.all([
+    query('select * from benchmark_versions where benchmark_pack_id = $1 order by version_number desc', [benchmark.id]),
+    query('select * from benchmark_reviews where benchmark_pack_id = $1 order by created_at desc', [benchmark.id]),
+    query('select * from promotion_candidates where benchmark_pack_id = $1 order by created_at desc', [benchmark.id]),
+    query('select * from golden_cases where benchmark_pack_id = $1 order by created_at desc', [benchmark.id]),
+  ]);
+  return {
+    benchmark: benchmarkPackSummary(benchmark),
+    versions: summarizeBenchmarkVersions(versions.rows.map(normalizeBenchmarkVersionRow)),
+    reviews: reviews.rows.map(normalizeBenchmarkReviewRow),
+    promotionCandidates: promotionCandidates.rows.map(normalizePromotionCandidateRow),
+    goldenCases: goldenCases.rows.map(normalizeGoldenCaseRow),
+  };
+}
+
 async function getProjectMembership(userId, projectId) {
   if (useMemory()) {
     const project = memory.projects.get(projectId);
@@ -676,6 +1199,77 @@ function reportSummary(report) {
     summary: report.summary,
     project: report.snapshot?.suite?.project ?? null,
     profile: report.snapshot?.suite?.profile ?? null,
+  };
+}
+
+function benchmarkVersionsFor(benchmarkId) {
+  return Array.from(memory.benchmarkVersions.values()).filter((version) => version.benchmarkId === benchmarkId);
+}
+
+function summarizeBenchmarkVersions(versions) {
+  const ordered = [...versions].sort((left, right) => left.versionNumber - right.versionNumber);
+  const previousById = new Map();
+  ordered.forEach((version, index) => {
+    previousById.set(version.id, ordered[index - 1] ?? null);
+  });
+  return versions.map((version) => benchmarkVersionSummary(version, previousById.get(version.id)));
+}
+
+function goldenCasesForCandidate(candidateId) {
+  return Array.from(memory.goldenCases.values()).filter((item) => item.promotionCandidateId === candidateId);
+}
+
+function benchmarkPackSummary(benchmark) {
+  if (!benchmark) return null;
+  const versions = useMemory()
+    ? benchmarkVersionsFor(benchmark.id)
+    : [];
+  const latestVersion = useMemory()
+    ? versions.find((version) => version.id === benchmark.latestVersionId) ?? null
+    : null;
+  const approvedVersion = useMemory()
+    ? versions.find((version) => version.id === benchmark.approvedVersionId) ?? null
+    : null;
+  return {
+    id: benchmark.id,
+    projectId: benchmark.projectId,
+    workspaceId: benchmark.workspaceId,
+    name: benchmark.name,
+    slug: benchmark.slug,
+    description: benchmark.description,
+    latestVersionId: benchmark.latestVersionId,
+    approvedVersionId: benchmark.approvedVersionId,
+    versionCount: useMemory() ? versions.length : undefined,
+    latestVersion: latestVersion ? benchmarkVersionSummary(latestVersion) : undefined,
+    approvedVersion: approvedVersion ? benchmarkVersionSummary(approvedVersion) : undefined,
+    createdBy: benchmark.createdBy,
+    createdAt: benchmark.createdAt,
+    updatedAt: benchmark.updatedAt,
+  };
+}
+
+function benchmarkVersionSummary(version, previousVersion = null) {
+  if (!version) return null;
+  return {
+    id: version.id,
+    benchmarkId: version.benchmarkId,
+    projectId: version.projectId,
+    workspaceId: version.workspaceId,
+    versionNumber: version.versionNumber,
+    status: version.status,
+    source: version.source,
+    readiness: version.readiness,
+    validation: {
+      ok: Boolean(version.validation?.ok),
+      errors: version.validation?.errors ?? [],
+    },
+    pack: version.pack,
+    createdBy: version.createdBy,
+    approvedBy: version.approvedBy,
+    approvedAt: version.approvedAt,
+    createdAt: version.createdAt,
+    updatedAt: version.updatedAt,
+    diffFromPrevious: previousVersion ? diffBenchmarkPacks(previousVersion.pack, version.pack) : null,
   };
 }
 
@@ -751,6 +1345,93 @@ function normalizeJobRow(row) {
     error: row.error,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+  };
+}
+
+function normalizeBenchmarkPackRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    slug: row.slug,
+    description: row.description ?? '',
+    latestVersionId: row.latest_version_id,
+    approvedVersionId: row.approved_version_id,
+    createdBy: row.created_by,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function normalizeBenchmarkVersionRow(row) {
+  return {
+    id: row.id,
+    benchmarkId: row.benchmark_pack_id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    versionNumber: Number(row.version_number),
+    status: row.status,
+    source: row.source,
+    pack: row.pack,
+    validation: row.validation,
+    readiness: row.readiness,
+    createdBy: row.created_by,
+    approvedBy: row.approved_by,
+    approvedAt: row.approved_at ? String(row.approved_at) : null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function normalizeBenchmarkReviewRow(row) {
+  return {
+    id: row.id,
+    versionId: row.benchmark_version_id,
+    benchmarkId: row.benchmark_pack_id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    reviewerId: row.reviewer_id,
+    decision: row.decision,
+    comments: row.comments ?? '',
+    readinessSnapshot: row.readiness_snapshot,
+    createdAt: String(row.created_at),
+  };
+}
+
+function normalizePromotionCandidateRow(row) {
+  return {
+    id: row.id,
+    versionId: row.benchmark_version_id,
+    benchmarkId: row.benchmark_pack_id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    sourceType: row.source_type,
+    sourceId: row.source_id,
+    status: row.status,
+    visibility: row.visibility,
+    caseData: row.case_data,
+    notes: row.notes ?? '',
+    createdBy: row.created_by,
+    promotedBy: row.promoted_by,
+    promotedAt: row.promoted_at ? String(row.promoted_at) : null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function normalizeGoldenCaseRow(row) {
+  return {
+    id: row.id,
+    versionId: row.benchmark_version_id,
+    benchmarkId: row.benchmark_pack_id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    promotionCandidateId: row.promotion_candidate_id,
+    visibility: row.visibility,
+    caseData: row.case_data,
+    createdBy: row.created_by,
+    createdAt: String(row.created_at),
   };
 }
 

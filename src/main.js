@@ -231,6 +231,11 @@ const defaultState = {
   workspaceProjects: [],
   projectReports: [],
   projectRunners: [],
+  projectBenchmarks: [],
+  benchmarkDetail: null,
+  selectedBenchmarkId: '',
+  selectedBenchmarkVersionId: '',
+  selectedPromotionCandidateId: '',
   activeJobId: '',
   activeJobStatus: '',
   loadedServerReport: null,
@@ -625,6 +630,12 @@ function renderWorkspaceSection(isAuthed) {
             <p class="session-muted">Without signing in, saved reports stay in this browser only.</p>
           `}
         </div>
+        <div class="workspace-panel workspace-panel--benchmarks">
+          <h3>Benchmark truth</h3>
+          ${isAuthed ? renderBenchmarkLifecycleControls() : `
+            <p class="session-muted">Sign in to create reviewed benchmark versions and promote golden cases.</p>
+          `}
+        </div>
       </div>
     </section>
   `;
@@ -849,6 +860,7 @@ function bindEvents() {
     if (event.target.checked) syncCustomEditorsToPreset();
     state.useCustomInput = event.target.checked;
     persistState();
+    render();
     runDiagnosis();
   });
   bindIfPresent('#bundle-json', 'input', (event) => {
@@ -932,6 +944,31 @@ function bindEvents() {
     persistState();
   });
   bindIfPresent('#dispatch-job', 'click', dispatchProjectJob);
+  bindBenchmarkLifecycleEvents();
+}
+
+function bindBenchmarkLifecycleEvents() {
+  bindIfPresent('#benchmark-select', 'change', async (event) => {
+    state.selectedBenchmarkId = event.target.value;
+    state.selectedBenchmarkVersionId = '';
+    state.selectedPromotionCandidateId = '';
+    persistState();
+    await refreshBenchmarkDetail();
+    renderProjectResources();
+  });
+  bindIfPresent('#benchmark-version-select', 'change', (event) => {
+    state.selectedBenchmarkVersionId = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#promotion-candidate-select', 'change', (event) => {
+    state.selectedPromotionCandidateId = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#create-benchmark-draft', 'click', createBenchmarkDraftFromActivePack);
+  bindIfPresent('#save-benchmark-edits', 'click', saveBenchmarkEditsAsDraft);
+  bindIfPresent('#approve-benchmark-version', 'click', approveSelectedBenchmarkVersion);
+  bindIfPresent('#propose-golden-case', 'click', proposeGoldenCaseFromActiveReport);
+  bindIfPresent('#promote-golden-case', 'click', promoteSelectedGoldenCandidate);
 }
 
 function runDiagnosis() {
@@ -1779,6 +1816,15 @@ function renderProjectResources() {
 
   const projectRole = document.querySelector('#project-role-display');
   if (projectRole) projectRole.value = activeProjectRole();
+
+  const benchmarkSelect = document.querySelector('#benchmark-select');
+  if (benchmarkSelect) benchmarkSelect.innerHTML = renderBenchmarkOptions();
+
+  const benchmarkPanel = document.querySelector('.workspace-panel--benchmarks');
+  if (benchmarkPanel && state.sessionStatus === 'authenticated') {
+    benchmarkPanel.innerHTML = `<h3>Benchmark truth</h3>${renderBenchmarkLifecycleControls()}`;
+    bindBenchmarkLifecycleEvents();
+  }
 }
 
 function renderWorkspaceOptions() {
@@ -1817,6 +1863,127 @@ function renderProjectReportList() {
   `).join('');
 }
 
+function renderBenchmarkLifecycleControls() {
+  const detail = state.benchmarkDetail;
+  const selectedBenchmark = state.projectBenchmarks.find((benchmark) => benchmark.id === state.selectedBenchmarkId)
+    ?? state.projectBenchmarks[0]
+    ?? null;
+  const latestVersion = detail?.versions?.find((version) => version.id === state.selectedBenchmarkVersionId)
+    ?? detail?.versions?.[0]
+    ?? selectedBenchmark?.latestVersion
+    ?? null;
+  const approvedVersion = detail?.versions?.find((version) => version.id === selectedBenchmark?.approvedVersionId)
+    ?? selectedBenchmark?.approvedVersion
+    ?? null;
+  const proposedCandidates = detail?.promotionCandidates?.filter((candidate) => candidate.status === 'proposed') ?? [];
+  const promotedCases = detail?.goldenCases ?? [];
+  const editablePack = latestVersion?.pack ?? {};
+  const globalRules = editablePack.contract?.global ?? {};
+
+  return `
+    <p class="session-muted">Create reviewed source-of-truth versions from the active pack, then promote report evidence into visible or holdout goldens.</p>
+    <label><span>Benchmark pack</span><select id="benchmark-select">${renderBenchmarkOptions()}</select></label>
+    <label><span>Version</span><select id="benchmark-version-select">${renderBenchmarkVersionOptions(detail?.versions ?? [])}</select></label>
+    <div class="benchmark-truth-summary">
+      <div><span>Latest</span><strong>${escapeHtml(latestVersion ? `v${latestVersion.versionNumber} ${latestVersion.status}` : 'none')}</strong></div>
+      <div><span>Approved</span><strong>${escapeHtml(approvedVersion ? `v${approvedVersion.versionNumber}` : 'none')}</strong></div>
+      <div><span>Goldens</span><strong>${escapeHtml(promotedCases.length)}</strong></div>
+      <div><span>Proposed</span><strong>${escapeHtml(proposedCandidates.length)}</strong></div>
+    </div>
+    <div class="inline-actions benchmark-actions">
+      <button class="button button--secondary" id="create-benchmark-draft" type="button">Create draft</button>
+      <button class="button button--secondary" id="approve-benchmark-version" type="button">Approve version</button>
+    </div>
+    <div class="benchmark-edit-grid">
+      <label><span>Mission</span><textarea id="benchmark-edit-mission" ${latestVersion ? '' : 'disabled'}>${escapeHtml(editablePack.intent?.mission ?? '')}</textarea></label>
+      <label><span>Required behavior</span><textarea id="benchmark-edit-must" ${latestVersion ? '' : 'disabled'}>${escapeHtml(listToEditorText(globalRules.must))}</textarea></label>
+      <label><span>Forbidden behavior</span><textarea id="benchmark-edit-must-not" ${latestVersion ? '' : 'disabled'}>${escapeHtml(listToEditorText(globalRules.mustNot))}</textarea></label>
+      <div class="benchmark-diff-panel" id="benchmark-version-diff">${renderBenchmarkVersionDiff(latestVersion)}</div>
+    </div>
+    <div class="inline-actions benchmark-actions">
+      <button class="button button--secondary" id="save-benchmark-edits" type="button">Save edited draft</button>
+      <span class="session-muted">Edits create a new draft version and preserve the previous version.</span>
+    </div>
+    <div class="inline-actions benchmark-actions">
+      <button class="button button--secondary" id="propose-golden-case" type="button">Propose holdout</button>
+      <button class="button button--secondary" id="promote-golden-case" type="button">Promote case</button>
+    </div>
+    <label><span>Promotion candidate</span><select id="promotion-candidate-select">${renderPromotionCandidateOptions(proposedCandidates)}</select></label>
+    <div class="benchmark-truth-list" id="benchmark-truth-list">${renderBenchmarkTruthList(detail)}</div>
+  `;
+}
+
+function renderBenchmarkVersionDiff(version) {
+  const diff = version?.diffFromPrevious;
+  if (!diff) {
+    return `
+      <strong>Version diff</strong>
+      <p>No prior version to compare yet.</p>
+    `;
+  }
+  const fieldRows = diff.changedFields.slice(0, 5).map((item) => `
+    <li><span>${escapeHtml(item.field)}</span><strong>${escapeHtml(diffValuePreview(item.after))}</strong></li>
+  `).join('');
+  const summaryRows = [
+    ['Fields', diff.summary.fieldChangeCount],
+    ['Cases', diff.summary.caseChangeCount],
+    ['Tools', diff.summary.toolChangeCount],
+  ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
+  return `
+    <strong>Version diff</strong>
+    <div class="benchmark-diff-summary">${summaryRows}</div>
+    ${fieldRows ? `<ul>${fieldRows}</ul>` : '<p>No field-level changes in this version.</p>'}
+  `;
+}
+
+function renderBenchmarkOptions() {
+  if (!state.projectBenchmarks.length) {
+    return '<option value="">No benchmark packs</option>';
+  }
+  return state.projectBenchmarks.map((benchmark) => `
+    <option value="${benchmark.id}" ${benchmark.id === state.selectedBenchmarkId ? 'selected' : ''}>${escapeHtml(benchmark.name)} · ${escapeHtml(benchmark.latestVersion?.status ?? 'draft')}</option>
+  `).join('');
+}
+
+function renderBenchmarkVersionOptions(versions) {
+  if (!versions.length) {
+    return '<option value="">No versions</option>';
+  }
+  return versions.map((version) => `
+    <option value="${version.id}" ${version.id === state.selectedBenchmarkVersionId ? 'selected' : ''}>v${escapeHtml(version.versionNumber)} · ${escapeHtml(version.status)} · ${escapeHtml(version.readiness?.readinessScore ?? '--')}%</option>
+  `).join('');
+}
+
+function renderPromotionCandidateOptions(candidates) {
+  if (!candidates.length) {
+    return '<option value="">No proposed cases</option>';
+  }
+  return candidates.map((candidate) => `
+    <option value="${candidate.id}" ${candidate.id === state.selectedPromotionCandidateId ? 'selected' : ''}>${escapeHtml(candidate.caseData?.title ?? candidate.caseData?.id ?? candidate.id)} · ${escapeHtml(candidate.visibility)}</option>
+  `).join('');
+}
+
+function renderBenchmarkTruthList(detail) {
+  if (!detail?.versions?.length) {
+    return '<p class="session-muted">No benchmark source of truth has been saved for this project yet.</p>';
+  }
+  const versions = detail.versions.slice(0, 3).map((version) => `
+    <article>
+      <strong>v${escapeHtml(version.versionNumber)} · ${escapeHtml(version.status)}</strong>
+      <span>${escapeHtml(version.readiness?.project ?? detail.benchmark?.name ?? 'Benchmark')}</span>
+      <small>${escapeHtml(version.readiness?.readinessScore ?? '--')}% readiness · ${escapeHtml(version.createdAt)}</small>
+    </article>
+  `).join('');
+  const goldens = (detail.goldenCases ?? []).slice(0, 3).map((item) => `
+    <article>
+      <strong>${escapeHtml(item.visibility)} golden</strong>
+      <span>${escapeHtml(item.caseData?.title ?? item.caseData?.id ?? item.id)}</span>
+      <small>${escapeHtml(item.createdAt)}</small>
+    </article>
+  `).join('');
+  return `${versions}${goldens}`;
+}
+
 function activeProjectRole() {
   return currentProject()?.role ?? state.projectRole ?? 'viewer';
 }
@@ -1849,9 +2016,14 @@ async function refreshSession() {
     state.workspaceProjects = [];
     state.projectReports = [];
     state.projectRunners = [];
+    state.projectBenchmarks = [];
+    state.benchmarkDetail = null;
     state.selectedWorkspaceId = '';
     state.selectedProjectId = '';
     state.selectedRunnerId = '';
+    state.selectedBenchmarkId = '';
+    state.selectedBenchmarkVersionId = '';
+    state.selectedPromotionCandidateId = '';
   }
   persistState();
 }
@@ -1872,26 +2044,60 @@ async function refreshProjectsForWorkspace(preferredProjectId = null) {
     state.workspaceProjects = [];
     state.projectReports = [];
     state.projectRunners = [];
+    state.projectBenchmarks = [];
+    state.benchmarkDetail = null;
   }
 }
 
 async function refreshProjectResources() {
   if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId) return;
   try {
-    const [reportsPayload, runnersPayload] = await Promise.all([
+    const [reportsPayload, runnersPayload, benchmarksPayload] = await Promise.all([
       fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/reports`),
       fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/runners`),
+      fetchJson(`/api/benchmarks?projectId=${encodeURIComponent(state.selectedProjectId)}`),
     ]);
     state.projectReports = reportsPayload.reports ?? [];
     state.projectRunners = runnersPayload.runners ?? [];
+    state.projectBenchmarks = benchmarksPayload.benchmarks ?? [];
     if (!state.projectRunners.some((runner) => runner.id === state.selectedRunnerId)) {
       state.selectedRunnerId = state.projectRunners[0]?.id ?? '';
     }
+    if (!state.projectBenchmarks.some((benchmark) => benchmark.id === state.selectedBenchmarkId)) {
+      state.selectedBenchmarkId = state.projectBenchmarks[0]?.id ?? '';
+    }
+    await refreshBenchmarkDetail();
   } catch {
     state.projectReports = [];
     state.projectRunners = [];
+    state.projectBenchmarks = [];
+    state.benchmarkDetail = null;
   }
   persistState();
+}
+
+async function refreshBenchmarkDetail() {
+  if (state.sessionStatus !== 'authenticated' || !state.selectedBenchmarkId) {
+    state.benchmarkDetail = null;
+    state.selectedBenchmarkVersionId = '';
+    state.selectedPromotionCandidateId = '';
+    return;
+  }
+  try {
+    const detail = await fetchJson(`/api/benchmarks?id=${encodeURIComponent(state.selectedBenchmarkId)}`);
+    state.benchmarkDetail = detail;
+    if (!detail.versions?.some((version) => version.id === state.selectedBenchmarkVersionId)) {
+      state.selectedBenchmarkVersionId = detail.versions?.[0]?.id ?? '';
+    }
+    const proposed = detail.promotionCandidates?.filter((candidate) => candidate.status === 'proposed') ?? [];
+    if (!proposed.some((candidate) => candidate.id === state.selectedPromotionCandidateId)) {
+      state.selectedPromotionCandidateId = proposed[0]?.id ?? '';
+    }
+  } catch {
+    state.benchmarkDetail = null;
+    state.selectedBenchmarkVersionId = '';
+    state.selectedPromotionCandidateId = '';
+  }
 }
 
 async function createWorkspaceFromDraft() {
@@ -1985,6 +2191,176 @@ async function dispatchProjectJob() {
   }
 }
 
+async function createBenchmarkDraftFromActivePack() {
+  if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId) {
+    showFeedback('Select a signed-in project first');
+    return;
+  }
+  if (!state.analysis) runDiagnosis();
+  const sourceBundle = activeSourceBundle();
+  const pack = isBenchmarkPackShape(sourceBundle)
+    ? sourceBundle
+    : state.analysis?.exportPack;
+  if (!pack) {
+    showFeedback('Run an evaluation before creating a benchmark draft');
+    return;
+  }
+
+  try {
+    const payload = await fetchJson(`/api/benchmarks?projectId=${encodeURIComponent(state.selectedProjectId)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        benchmarkId: state.selectedBenchmarkId || null,
+        source: isBenchmarkPackShape(sourceBundle) ? 'console-pack' : 'console-report-export',
+        pack,
+      }),
+    });
+    state.selectedBenchmarkId = payload.benchmark.id;
+    state.selectedBenchmarkVersionId = payload.version.id;
+    await refreshProjectResources();
+    renderProjectResources();
+    showFeedback(`Created benchmark draft v${payload.version.versionNumber}`);
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function approveSelectedBenchmarkVersion() {
+  const versionId = state.selectedBenchmarkVersionId || state.benchmarkDetail?.versions?.[0]?.id;
+  if (!versionId) {
+    showFeedback('Create a benchmark draft first');
+    return;
+  }
+
+  try {
+    const payload = await fetchJson(`/api/benchmarks?action=review&versionId=${encodeURIComponent(versionId)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        decision: 'approve',
+        comments: 'Approved from the product console.',
+      }),
+    });
+    state.selectedBenchmarkId = payload.benchmark.id;
+    state.selectedBenchmarkVersionId = payload.version.id;
+    await refreshProjectResources();
+    renderProjectResources();
+    showFeedback(`Approved benchmark v${payload.version.versionNumber}`);
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function saveBenchmarkEditsAsDraft() {
+  const versionId = state.selectedBenchmarkVersionId || state.benchmarkDetail?.versions?.[0]?.id;
+  if (!versionId) {
+    showFeedback('Create a benchmark draft first');
+    return;
+  }
+
+  const mission = document.querySelector('#benchmark-edit-mission')?.value ?? '';
+  const mustText = document.querySelector('#benchmark-edit-must')?.value ?? '';
+  const mustNotText = document.querySelector('#benchmark-edit-must-not')?.value ?? '';
+
+  try {
+    const payload = await fetchJson(`/api/benchmarks?action=edit&versionId=${encodeURIComponent(versionId)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        edits: {
+          intentMission: mission,
+          mustText,
+          mustNotText,
+        },
+      }),
+    });
+    state.selectedBenchmarkId = payload.benchmark.id;
+    state.selectedBenchmarkVersionId = payload.version.id;
+    await refreshProjectResources();
+    renderProjectResources();
+    showFeedback(payload.unchanged ? 'No benchmark edits to save' : `Saved edited draft v${payload.version.versionNumber}`);
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function proposeGoldenCaseFromActiveReport() {
+  const versionId = state.selectedBenchmarkVersionId || state.benchmarkDetail?.versions?.[0]?.id;
+  if (!versionId) {
+    showFeedback('Approve or select a benchmark version first');
+    return;
+  }
+  if (!state.analysis) runDiagnosis();
+  const snapshot = activeReportSnapshot();
+  const caseData = buildGoldenCaseFromReport(snapshot);
+
+  try {
+    const payload = await fetchJson(`/api/benchmarks?action=promotion&versionId=${encodeURIComponent(versionId)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sourceType: 'report',
+        sourceId: snapshot.id ?? state.reportId,
+        visibility: 'holdout',
+        notes: 'Proposed from the active report in the product console.',
+        case: caseData,
+      }),
+    });
+    state.selectedPromotionCandidateId = payload.candidate.id;
+    await refreshBenchmarkDetail();
+    renderProjectResources();
+    showFeedback('Proposed holdout golden case');
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function promoteSelectedGoldenCandidate() {
+  const candidateId = state.selectedPromotionCandidateId
+    || state.benchmarkDetail?.promotionCandidates?.find((candidate) => candidate.status === 'proposed')?.id;
+  if (!candidateId) {
+    showFeedback('Propose a golden case first');
+    return;
+  }
+
+  try {
+    const payload = await fetchJson(`/api/benchmarks?action=promote&candidateId=${encodeURIComponent(candidateId)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    state.selectedPromotionCandidateId = '';
+    await refreshBenchmarkDetail();
+    renderProjectResources();
+    showFeedback(`${payload.goldenCase.visibility} golden case promoted`);
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+function buildGoldenCaseFromReport(snapshot) {
+  const selectedCase = (snapshot.caseResults ?? []).find((item) => item.status === 'fail' || item.status === 'warn')
+    ?? snapshot.caseResults?.[0];
+  const finding = snapshot.findings?.[0];
+  const mutationId = finding?.mutationId ?? snapshot.deltas?.[0]?.mutationId ?? 'wrapper';
+  const baseId = selectedCase?.id ?? mutationId;
+  return {
+    id: `golden-${slugifyDocText(baseId)}-${Date.now().toString(36)}`,
+    title: selectedCase?.title ?? `Golden holdout for ${humanizeDocSegment(mutationId)}`,
+    tier: 'holdout',
+    input: selectedCase?.input ?? `Replay report ${snapshot.id ?? state.reportId} against ${mutationId}.`,
+    assertions: selectedCase?.assertions?.length
+      ? selectedCase.assertions
+      : [finding?.recommendation ?? 'Preserve approved benchmark behavior under wrapper mutation.'],
+    forbiddenActions: selectedCase?.forbiddenActions ?? [],
+    expectedMilestones: selectedCase?.expectedMilestones ?? [],
+    rubricFields: selectedCase?.scorerFields ?? [],
+    sourceReportId: snapshot.id ?? state.reportId,
+    sourceMutationId: mutationId,
+  };
+}
+
 async function pollJob(jobId) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
@@ -2041,9 +2417,14 @@ async function logout() {
   state.workspaceProjects = [];
   state.projectReports = [];
   state.projectRunners = [];
+  state.projectBenchmarks = [];
+  state.benchmarkDetail = null;
   state.selectedWorkspaceId = '';
   state.selectedProjectId = '';
   state.selectedRunnerId = '';
+  state.selectedBenchmarkId = '';
+  state.selectedBenchmarkVersionId = '';
+  state.selectedPromotionCandidateId = '';
   persistState();
   render();
   if (getRoute().kind !== 'docs') runDiagnosis();
@@ -2246,6 +2627,8 @@ function loadState() {
       workspaceProjects: [],
       projectReports: [],
       projectRunners: [],
+      projectBenchmarks: [],
+      benchmarkDetail: null,
       loadedServerReport: null,
       sessionStatus: 'loading',
       runnerStatus: '',
@@ -2268,6 +2651,8 @@ function persistState() {
     workspaceProjects,
     projectReports,
     projectRunners,
+    projectBenchmarks,
+    benchmarkDetail,
     loadedServerReport,
     activeJobStatus,
     runnerStatus,
@@ -2623,6 +3008,17 @@ function renderCaseSection(label, items) {
 
 function renderGateRow(label, value) {
   return `<li>${escapeHtml(label)} <strong>${escapeHtml(value ?? '--')}</strong></li>`;
+}
+
+function listToEditorText(items) {
+  return Array.isArray(items) ? items.join('\n') : '';
+}
+
+function diffValuePreview(value) {
+  if (Array.isArray(value)) return value.slice(0, 2).join('; ') || 'empty';
+  if (value == null) return 'empty';
+  if (typeof value === 'object') return JSON.stringify(value).slice(0, 90);
+  return String(value).slice(0, 120);
 }
 
 function setText(id, value) {

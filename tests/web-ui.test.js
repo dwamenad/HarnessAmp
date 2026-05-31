@@ -20,6 +20,18 @@ test('web demo exposes production demo controls', () => {
     'workspace-select',
     'project-select',
     'runner-select',
+    'benchmark-select',
+    'benchmark-version-select',
+    'promotion-candidate-select',
+    'create-benchmark-draft',
+    'approve-benchmark-version',
+    'propose-golden-case',
+    'promote-golden-case',
+    'save-benchmark-edits',
+    'benchmark-edit-mission',
+    'benchmark-edit-must',
+    'benchmark-edit-must-not',
+    'benchmark-version-diff',
   ].forEach((id) => assert.match(source, new RegExp(`id="${id}"`)));
 });
 
@@ -61,7 +73,13 @@ test('web app splits the product landing page from the operator surface', () => 
     'validateRiskProfile',
     'validateDiagnosticSnapshot',
     'benchmarkReadiness',
+    'renderBenchmarkLifecycleControls',
+    'renderBenchmarkVersionDiff',
+    'saveBenchmarkEditsAsDraft',
+    'createBenchmarkDraftFromActivePack',
+    '/api/benchmarks',
     'Review readiness',
+    'Benchmark truth',
     'runHttpRunner',
     'browser-mvp-benchmark',
   ].forEach((text) => assert.match(source, new RegExp(text)));

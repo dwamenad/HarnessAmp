@@ -115,3 +115,84 @@ Important outputs:
 - `shouldFail` - whether the process should exit non-zero
 - `metrics.robustnessGap` - original pass rate minus mutated pass rate
 - `checks` - threshold-by-threshold pass/fail results
+
+## Benchmark Lifecycle API
+
+`/api/benchmarks` is the API-backed benchmark truth layer. It requires an authenticated session and project membership.
+
+### `GET /api/benchmarks?projectId=<project-id>`
+
+Lists benchmark packs for a project.
+
+Returns:
+
+- `benchmarks` - pack summaries with latest and approved version ids
+
+### `GET /api/benchmarks?id=<benchmark-id>`
+
+Returns the benchmark detail payload.
+
+Returns:
+
+- `benchmark` - pack summary
+- `versions` - draft, reviewed, approved, rejected, or archived versions
+- `reviews` - review decisions and comments
+- `promotionCandidates` - proposed or promoted golden-case candidates
+- `goldenCases` - promoted visible or holdout cases
+
+### `POST /api/benchmarks?projectId=<project-id>`
+
+Creates a draft benchmark version. Pass an optional `benchmarkId` to add a new version to an existing pack.
+
+Body:
+
+- `pack` - benchmark-pack payload
+- `source` - optional source label, such as `manual`, `trace-compiler`, or `report-promotion`
+- `benchmarkId` - optional existing benchmark pack id
+
+### `POST /api/benchmarks?action=review&versionId=<version-id>`
+
+Records a benchmark review and updates the version state.
+
+Supported decisions:
+
+- `reviewed`
+- `request_changes`
+- `approve`
+- `reject`
+- `archive`
+
+### `POST /api/benchmarks?action=edit&versionId=<version-id>`
+
+Creates a new draft version from an existing benchmark version and returns the field/case/tool diff.
+
+Body:
+
+- `edits.intentMission` - replacement mission text
+- `edits.mustText` - newline-separated required behaviors
+- `edits.mustNotText` - newline-separated forbidden behaviors
+- `edits.successSignalsText` - optional newline-separated success signals
+- `edits.casePatch` - optional single-case patch with `id`, `title`, `input`, `assertionsText`, and `forbiddenActionsText`
+
+Important outputs:
+
+- `baseVersion` - source version used for the edit
+- `version` - new draft version
+- `diff` - changed fields plus case and tool changes
+- `unchanged` - true when the edit did not change the pack
+
+### `POST /api/benchmarks?action=promotion&versionId=<version-id>`
+
+Creates a promotion candidate from a report, trace, or manually reviewed case.
+
+Body:
+
+- `case` - benchmark case payload to promote
+- `visibility` - `visible` or `holdout`
+- `sourceType` - optional source type, default `report`
+- `sourceId` - optional source id
+- `notes` - optional reviewer note
+
+### `POST /api/benchmarks?action=promote&candidateId=<candidate-id>`
+
+Promotes a candidate into `golden_cases` and marks the candidate as `promoted`.

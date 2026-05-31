@@ -45,9 +45,37 @@ test('supports report export actions and local snapshot save', async ({ page }) 
   await expect(page.locator('#action-feedback')).toContainText('Saved to this browser');
 });
 
+test('creates and promotes a benchmark golden from the console', async ({ page }) => {
+  await page.locator('#bundle-preset-select').selectOption('support-mvp-benchmark');
+  await page.locator('#workspace').scrollIntoViewIfNeeded();
+  await expect(page.getByText('Benchmark truth')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Create draft' }).click();
+  await expect(page.locator('#action-feedback')).toContainText('Created benchmark draft');
+  await expect(page.locator('#benchmark-version-select')).toContainText('draft');
+
+  await page.locator('#benchmark-edit-mission').fill('Resolve customer-support requests with edited release-review guardrails.');
+  await page.getByRole('button', { name: 'Save edited draft' }).click();
+  await expect(page.locator('#action-feedback')).toContainText('Saved edited draft');
+  await expect(page.locator('#benchmark-version-select')).toContainText('v2');
+  await expect(page.locator('#benchmark-version-diff')).toContainText('intent.mission');
+
+  await page.getByRole('button', { name: 'Approve version' }).click();
+  await expect(page.locator('#action-feedback')).toContainText('Approved benchmark');
+  await expect(page.locator('#benchmark-version-select')).toContainText('approved');
+
+  await page.getByRole('button', { name: 'Propose holdout' }).click();
+  await expect(page.locator('#action-feedback')).toContainText('Proposed holdout golden case');
+  await expect(page.locator('#promotion-candidate-select')).not.toContainText('No proposed cases');
+
+  await page.getByRole('button', { name: 'Promote case' }).click();
+  await expect(page.locator('#action-feedback')).toContainText('golden case promoted');
+  await expect(page.locator('#benchmark-truth-list')).toContainText('holdout golden');
+});
+
 test('docs routes resolve to the install section', async ({ page }) => {
   await page.goto('/docs/install');
-  await expect(page.locator('#docs-install')).toContainText('Clone the repository');
+  await expect(page.locator('.docs-article')).toContainText('Clone the repository');
 });
 
 test('report pathname routes still render the shared report section', async ({ page }) => {
