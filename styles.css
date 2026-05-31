@@ -830,6 +830,10 @@ section[id] {
   align-content: start;
 }
 
+.workspace-panel--benchmarks {
+  grid-column: 1 / -1;
+}
+
 .workspace-panel h3 {
   margin: 0;
   padding: 18px 20px;
@@ -917,6 +921,161 @@ section[id] {
 .project-report-list {
   display: grid;
   gap: 1px;
+}
+
+.benchmark-truth-summary {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.benchmark-truth-summary div {
+  min-height: 92px;
+  background: rgba(8, 9, 8, 0.96);
+  padding: 18px;
+}
+
+.benchmark-truth-summary span,
+.benchmark-truth-list small {
+  display: block;
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.benchmark-truth-summary strong {
+  display: block;
+  margin-top: 10px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 26px;
+  letter-spacing: 0;
+}
+
+.benchmark-actions {
+  min-height: 58px;
+}
+
+.benchmark-actions .button {
+  border-color: var(--line);
+}
+
+.benchmark-edit-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.benchmark-edit-grid label,
+.benchmark-diff-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 190px;
+  background: rgba(8, 9, 8, 0.96);
+  padding: 18px;
+}
+
+.benchmark-edit-grid textarea {
+  min-height: 128px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: #050605;
+  color: var(--accent-2);
+  padding: 12px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.benchmark-diff-panel > strong {
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.benchmark-diff-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.benchmark-diff-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.benchmark-diff-summary div {
+  display: grid;
+  gap: 6px;
+  background: #050605;
+  padding: 10px;
+}
+
+.benchmark-diff-summary span,
+.benchmark-diff-panel li span {
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.benchmark-diff-panel ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.benchmark-diff-panel li {
+  display: grid;
+  gap: 4px;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 8px;
+  list-style: none;
+}
+
+.benchmark-diff-panel li strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.benchmark-truth-list {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.benchmark-truth-list article {
+  display: grid;
+  gap: 8px;
+  min-height: 120px;
+  background: #0b0c0b;
+  padding: 18px;
+}
+
+.benchmark-truth-list strong,
+.benchmark-truth-list span {
+  display: block;
+}
+
+.benchmark-truth-list span {
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .project-report-item {
@@ -1952,6 +2111,8 @@ section[id] {
   .integration-grid,
   .artifact-grid,
   .workspace-grid,
+  .benchmark-edit-grid,
+  .benchmark-truth-list,
   .case-results {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -2015,6 +2176,10 @@ section[id] {
   .report-insights,
   .insight-grid,
   .comparison-grid,
+  .benchmark-truth-summary,
+  .benchmark-edit-grid,
+  .benchmark-diff-summary,
+  .benchmark-truth-list,
   .docs-meta {
     grid-template-columns: 1fr;
   }

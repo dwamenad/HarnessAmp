@@ -32,6 +32,10 @@ test('resolveApiRequest mirrors Vercel rewrite params', () => {
   assert.equal(jobsRoute?.query.projectId, 'project_123');
   assert.equal(jobsRoute?.query.resource, 'jobs');
   assert.equal(jobsRoute?.query.foo, 'bar');
+
+  const benchmarksRoute = resolveApiRequest('http://127.0.0.1:3000/api/benchmarks?projectId=project_123');
+  assert.equal(benchmarksRoute?.name, 'benchmarks');
+  assert.equal(benchmarksRoute?.query.projectId, 'project_123');
 });
 
 test('dev api server returns a seeded session when dev auth is enabled', async () => {

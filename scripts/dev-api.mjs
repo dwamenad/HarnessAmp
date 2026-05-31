@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import authHandler from '../api/auth.js';
+import benchmarksHandler from '../api/benchmarks.js';
 import eventsHandler from '../api/events.js';
 import jobsHandler from '../api/jobs.js';
 import projectsHandler from '../api/projects.js';
@@ -16,6 +17,7 @@ const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 
 const HANDLERS = {
   auth: authHandler,
+  benchmarks: benchmarksHandler,
   events: eventsHandler,
   jobs: jobsHandler,
   projects: projectsHandler,
@@ -116,6 +118,12 @@ const ROUTES = [
     name: 'events',
     pattern: /^\/api\/events$/u,
     handler: HANDLERS.events,
+    buildQuery: (url) => withQuery(url),
+  },
+  {
+    name: 'benchmarks',
+    pattern: /^\/api\/benchmarks$/u,
+    handler: HANDLERS.benchmarks,
     buildQuery: (url) => withQuery(url),
   },
   {

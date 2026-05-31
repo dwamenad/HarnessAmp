@@ -73,6 +73,84 @@ export async function ensureSchema() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists benchmark_packs (
+      id text primary key,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      name text not null,
+      slug text not null,
+      description text,
+      latest_version_id text,
+      approved_version_id text,
+      created_by text not null references users(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists benchmark_versions (
+      id text primary key,
+      benchmark_pack_id text not null references benchmark_packs(id) on delete cascade,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      version_number integer not null,
+      status text not null,
+      source text not null,
+      pack jsonb not null,
+      validation jsonb not null,
+      readiness jsonb not null,
+      created_by text not null references users(id) on delete cascade,
+      approved_by text references users(id) on delete set null,
+      approved_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (benchmark_pack_id, version_number)
+    );
+
+    create table if not exists benchmark_reviews (
+      id text primary key,
+      benchmark_version_id text not null references benchmark_versions(id) on delete cascade,
+      benchmark_pack_id text not null references benchmark_packs(id) on delete cascade,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      reviewer_id text not null references users(id) on delete cascade,
+      decision text not null,
+      comments text,
+      readiness_snapshot jsonb not null,
+      created_at timestamptz not null default now()
+    );
+
+    create table if not exists promotion_candidates (
+      id text primary key,
+      benchmark_version_id text not null references benchmark_versions(id) on delete cascade,
+      benchmark_pack_id text not null references benchmark_packs(id) on delete cascade,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      source_type text not null,
+      source_id text,
+      status text not null,
+      visibility text not null,
+      case_data jsonb not null,
+      notes text,
+      created_by text not null references users(id) on delete cascade,
+      promoted_by text references users(id) on delete set null,
+      promoted_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists golden_cases (
+      id text primary key,
+      benchmark_version_id text not null references benchmark_versions(id) on delete cascade,
+      benchmark_pack_id text not null references benchmark_packs(id) on delete cascade,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      promotion_candidate_id text references promotion_candidates(id) on delete set null,
+      visibility text not null,
+      case_data jsonb not null,
+      created_by text not null references users(id) on delete cascade,
+      created_at timestamptz not null default now()
+    );
+
     create table if not exists runner_jobs (
       id text primary key,
       project_id text not null references projects(id) on delete cascade,

@@ -10,7 +10,10 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1 --port 4174',
     url: 'http://127.0.0.1:4174',
-    reuseExistingServer: !process.env.CI,
+    env: {
+      HARNESSAMP_DEV_AUTH: '1',
+    },
+    reuseExistingServer: false,
   },
   projects: [
     {
