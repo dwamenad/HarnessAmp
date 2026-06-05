@@ -19,6 +19,14 @@ export const CLI_COMMANDS = [
     name: 'report',
     description: 'Render a stored diagnostic report.',
   },
+  {
+    name: 'worker',
+    description: 'Poll the local HarnessAmp API for queued runner jobs and execute them.',
+  },
+  {
+    name: 'benchmark',
+    description: 'Validate, import, edit, review, diff, and export benchmark lifecycle files.',
+  },
 ];
 
 export function listCliCommands() {

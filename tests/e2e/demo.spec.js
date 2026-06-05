@@ -55,14 +55,25 @@ test('creates and promotes a benchmark golden from the console', async ({ page }
   await expect(page.locator('#benchmark-version-select')).toContainText('draft');
 
   await page.locator('#benchmark-edit-mission').fill('Resolve customer-support requests with edited release-review guardrails.');
+  await page.locator('#benchmark-edit-thresholds').fill('baselinePassGate: 91\nvisibleMutatedPassGate: 82\nhiddenHoldoutPassGate: 77\nmaxRobustnessGap: 12');
+  await page.locator('#benchmark-edit-tags').fill('support\nrelease-gate');
   await page.getByRole('button', { name: 'Save edited draft' }).click();
   await expect(page.locator('#action-feedback')).toContainText('Saved edited draft');
   await expect(page.locator('#benchmark-version-select')).toContainText('v2');
   await expect(page.locator('#benchmark-version-diff')).toContainText('intent.mission');
 
-  await page.getByRole('button', { name: 'Approve version' }).click();
+  await page.locator('#benchmark-review-decision').selectOption('approve');
+  await page.locator('#benchmark-review-comments').fill('Approved with updated benchmark editor metadata.');
+  await page.locator('#benchmark-reviewer-id').fill('qa-reviewer@example.com');
+  await page.getByRole('button', { name: 'Assign reviewer' }).click();
+  await expect(page.locator('#action-feedback')).toContainText('Assigned qa-reviewer@example.com');
+  await expect(page.locator('#benchmark-truth-list')).toContainText('qa-reviewer@example.com');
+  await page.locator('#benchmark-review-decision').selectOption('approve');
+  await page.locator('#benchmark-review-comments').fill('Approved with updated benchmark editor metadata.');
+  await page.getByRole('button', { name: 'Record review' }).click();
   await expect(page.locator('#action-feedback')).toContainText('Approved benchmark');
   await expect(page.locator('#benchmark-version-select')).toContainText('approved');
+  await expect(page.locator('#benchmark-truth-list')).toContainText('Approved with updated benchmark editor metadata.');
 
   await page.getByRole('button', { name: 'Propose holdout' }).click();
   await expect(page.locator('#action-feedback')).toContainText('Proposed holdout golden case');

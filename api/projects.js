@@ -84,10 +84,17 @@ export default async function handler(request, response) {
         thresholds: body.thresholds ?? {},
         profileId: body.profileId ?? null,
         presetId: body.presetId ?? null,
+        idempotencyKey: body.idempotencyKey ?? request.headers?.['idempotency-key'] ?? null,
+        maxAttempts: body.maxAttempts ?? 1,
+        timeoutMs: body.timeoutMs ?? 0,
+        retryBackoffMs: body.retryBackoffMs ?? 0,
       });
       response.status(200).json({
         jobId: job.id,
         status: job.status,
+        idempotencyKey: job.idempotencyKey,
+        attempts: job.attempts,
+        maxAttempts: job.maxAttempts,
       });
       return;
     }

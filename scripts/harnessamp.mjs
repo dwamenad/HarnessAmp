@@ -2,8 +2,18 @@
 import { readFileSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import {
+  diffBenchmarkLifecycleInputs,
+  editBenchmarkLifecycleDocument,
+  exportBenchmarkPack,
+  importBenchmarkPack,
+  reviewBenchmarkLifecycleDocument,
+  summarizeBenchmarkLifecycleDocument,
+} from '../src/core/benchmark-cli.js';
+import { validateBenchmarkPackCandidate } from '../src/core/benchmark-lifecycle.js';
 import { diagnoseHarness } from '../src/core/diagnose.js';
 import { analyzeBundle, createDemoBundle, safeJsonParse } from '../src/core/engine.js';
+import { runLocalApiWorker } from '../src/core/local-worker.js';
 import { generateMutationSuite, getMutationRegistry } from '../src/mutations/registry.js';
 import { formatMarkdownReport, formatMarkdownSuiteReport } from '../src/v2/reporters.js';
 import { runV2Scenario } from '../src/v2/runner.js';
@@ -125,6 +135,10 @@ if (command === 'validate') {
   console.log(diagnosis.reportText);
 } else if (command === 'registry') {
   console.log(JSON.stringify(getMutationRegistry(), null, 2));
+} else if (command === 'worker') {
+  await runWorkerCommand(options);
+} else if (command === 'benchmark') {
+  await runBenchmarkCommand(options);
 } else if (command === 'diagnose') {
   const bundle = loadBundle(options.positional[0]);
   const diagnosis = await diagnoseHarness(bundle, {
@@ -160,6 +174,105 @@ if (command === 'validate') {
   process.exitCode = 2;
 }
 
+async function runWorkerCommand(parsedOptions) {
+  try {
+    const result = await runLocalApiWorker({
+      apiUrl: parsedOptions.apiUrl,
+      projectId: parsedOptions.projectId,
+      workerId: parsedOptions.workerId,
+      once: parsedOptions.once,
+      intervalMs: parsedOptions.intervalMs,
+      maxJobs: parsedOptions.maxJobs,
+      log: (line) => console.log(line),
+    });
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 2;
+  }
+}
+
+async function runBenchmarkCommand(parsedOptions) {
+  const [subcommand = 'validate', inputPath, comparePath] = parsedOptions.positional;
+
+  if (subcommand === 'validate') {
+    const pack = loadJsonFile(inputPath);
+    console.log(JSON.stringify(validateBenchmarkPackCandidate(pack), null, 2));
+    return;
+  }
+
+  if (subcommand === 'import') {
+    const pack = loadJsonFile(inputPath);
+    const document = importBenchmarkPack(pack, {
+      source: parsedOptions.source ?? 'cli-import',
+      userId: parsedOptions.userId,
+    });
+    await writeBenchmarkOutput(document, parsedOptions.outPath);
+    console.log(JSON.stringify(summarizeBenchmarkLifecycleDocument(document), null, 2));
+    return;
+  }
+
+  if (subcommand === 'export') {
+    const document = loadJsonFile(inputPath);
+    const pack = exportBenchmarkPack(document, parsedOptions.version ?? 'approved');
+    await writeOrPrint(JSON.stringify(pack, null, 2), parsedOptions.outPath);
+    return;
+  }
+
+  if (subcommand === 'edit') {
+    const input = loadJsonFile(inputPath);
+    const edits = parsedOptions.editsPath ? loadJsonFile(parsedOptions.editsPath) : {};
+    const result = editBenchmarkLifecycleDocument(input, edits, {
+      version: parsedOptions.version ?? 'latest',
+      source: parsedOptions.source,
+      userId: parsedOptions.userId,
+    });
+    await writeBenchmarkOutput(result.document, parsedOptions.outPath);
+    console.log(JSON.stringify({
+      summary: summarizeBenchmarkLifecycleDocument(result.document),
+      baseVersion: result.baseVersion.versionNumber,
+      version: result.version.versionNumber,
+      unchanged: result.unchanged,
+      diff: result.diff.summary,
+    }, null, 2));
+    return;
+  }
+
+  if (subcommand === 'review') {
+    const document = loadJsonFile(inputPath);
+    const result = reviewBenchmarkLifecycleDocument(document, {
+      version: parsedOptions.version ?? 'latest',
+      decision: parsedOptions.decision ?? 'reviewed',
+      comments: parsedOptions.comments ?? '',
+      userId: parsedOptions.userId,
+    });
+    await writeBenchmarkOutput(result.document, parsedOptions.outPath);
+    console.log(JSON.stringify({
+      summary: summarizeBenchmarkLifecycleDocument(result.document),
+      review: result.review,
+      version: {
+        versionNumber: result.version.versionNumber,
+        status: result.version.status,
+      },
+    }, null, 2));
+    return;
+  }
+
+  if (subcommand === 'diff') {
+    const before = loadJsonFile(inputPath);
+    const after = loadJsonFile(comparePath);
+    const diff = diffBenchmarkLifecycleInputs(before, after, {
+      beforeVersion: parsedOptions.beforeVersion ?? parsedOptions.version ?? 'latest',
+      afterVersion: parsedOptions.afterVersion ?? parsedOptions.version ?? 'latest',
+    });
+    console.log(JSON.stringify(diff, null, 2));
+    return;
+  }
+
+  console.error(`Unknown benchmark command: ${subcommand}`);
+  process.exitCode = 2;
+}
+
 function parseArgs(args) {
   const parsed = {
     positional: [],
@@ -185,6 +298,20 @@ function parseArgs(args) {
     surfaces: null,
     severities: null,
     prioritization: 'risk',
+    editsPath: null,
+    decision: null,
+    comments: '',
+    version: null,
+    beforeVersion: null,
+    afterVersion: null,
+    source: null,
+    userId: 'cli',
+    apiUrl: 'http://127.0.0.1:3000',
+    projectId: null,
+    workerId: `harnessamp-worker-${process.pid}`,
+    once: false,
+    intervalMs: 2000,
+    maxJobs: Infinity,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -303,6 +430,75 @@ function parseArgs(args) {
       index += 1;
       continue;
     }
+    if (arg === '--edits') {
+      parsed.editsPath = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--decision') {
+      parsed.decision = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--comments') {
+      parsed.comments = args[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--version') {
+      parsed.version = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--before-version') {
+      parsed.beforeVersion = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--after-version') {
+      parsed.afterVersion = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--source') {
+      parsed.source = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--user' || arg === '--reviewer') {
+      parsed.userId = args[index + 1] ?? parsed.userId;
+      index += 1;
+      continue;
+    }
+    if (arg === '--api-url') {
+      parsed.apiUrl = args[index + 1] ?? parsed.apiUrl;
+      index += 1;
+      continue;
+    }
+    if (arg === '--project-id') {
+      parsed.projectId = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--worker-id') {
+      parsed.workerId = args[index + 1] ?? parsed.workerId;
+      index += 1;
+      continue;
+    }
+    if (arg === '--once') {
+      parsed.once = true;
+      continue;
+    }
+    if (arg === '--interval-ms') {
+      parsed.intervalMs = Number(args[index + 1] ?? parsed.intervalMs);
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-jobs') {
+      parsed.maxJobs = Number(args[index + 1] ?? parsed.maxJobs);
+      index += 1;
+      continue;
+    }
     if (!arg.startsWith('--')) {
       parsed.positional.push(arg);
     }
@@ -338,4 +534,18 @@ function loadBundle(path) {
   const parsed = safeJsonParse(text);
   if (!parsed.ok) throw parsed.error;
   return parsed.value;
+}
+
+function loadJsonFile(path) {
+  if (!path) throw new Error('A JSON file path is required.');
+  const text = readFileSync(resolve(path), 'utf8');
+  const parsed = safeJsonParse(text);
+  if (!parsed.ok) throw parsed.error;
+  return parsed.value;
+}
+
+async function writeBenchmarkOutput(document, outPath) {
+  if (outPath) {
+    await writeFile(resolve(outPath), `${JSON.stringify(document, null, 2)}\n`);
+  }
 }

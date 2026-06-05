@@ -14,6 +14,11 @@ npm run collect:failures -- examples/demo-bundle.json examples/cli/observed-runs
 npm run release:gate -- examples/demo-bundle.json examples/cli/observed-runs.json
 npm run diagnose -- examples/demo-bundle.json
 node scripts/harnessamp.mjs mutate examples/demo-bundle.json --max-mutations 20
+node scripts/harnessamp.mjs worker --project-id <project-id> --api-url http://127.0.0.1:3000
+node scripts/harnessamp.mjs benchmark import examples/benchmarks/support-mvp/benchmark-pack.json --out benchmark.lifecycle.json
+node scripts/harnessamp.mjs benchmark edit benchmark.lifecycle.json --edits benchmark-edits.json --out benchmark.lifecycle.json
+node scripts/harnessamp.mjs benchmark review benchmark.lifecycle.json --decision approve --comments "Approved for release gate." --out benchmark.lifecycle.json
+node scripts/harnessamp.mjs benchmark export benchmark.lifecycle.json --version approved --out benchmark-pack.json
 ```
 
 Flags:
@@ -25,6 +30,15 @@ Flags:
 - `--retry-backoff-ms <n>` waits before retrying a failed run job.
 - `--timeout-ms <n>` fails an individual run job after the configured timeout.
 - no flag prints the markdown report.
+
+Worker flags:
+
+- `--project-id <id>` selects the project whose queued/retrying runner jobs should be claimed.
+- `--api-url <url>` points at the local HarnessAmp API, defaulting to `http://127.0.0.1:3000`.
+- `--worker-id <id>` records the worker label on claimed jobs.
+- `--once` polls once and exits.
+- `--interval-ms <n>` controls polling delay for long-running workers.
+- `--max-jobs <n>` exits after processing that many jobs.
 
 Typical terminal-first flow:
 
@@ -40,6 +54,14 @@ Typical trace compiler flow:
 2. Run `npm run compile:traces -- <trace-corpus.json>`.
 3. Review the generated `intent`, `contract`, and `benchmark` draft.
 4. Promote the approved draft into your benchmark source of truth before running wrapper mutations.
+
+Typical benchmark lifecycle flow:
+
+1. Run `node scripts/harnessamp.mjs benchmark validate <benchmark-pack.json>` before importing a pack.
+2. Run `node scripts/harnessamp.mjs benchmark import <benchmark-pack.json> --out benchmark.lifecycle.json` to create a local lifecycle file.
+3. Run `node scripts/harnessamp.mjs benchmark edit benchmark.lifecycle.json --edits edits.json --out benchmark.lifecycle.json` to create an immutable draft version from the same edit payload used by the API.
+4. Run `node scripts/harnessamp.mjs benchmark review benchmark.lifecycle.json --decision approve --comments "..." --out benchmark.lifecycle.json`.
+5. Run `node scripts/harnessamp.mjs benchmark export benchmark.lifecycle.json --version approved --out benchmark-pack.json` for CI or teammate handoff.
 
 Typical failure corpus flow:
 
@@ -61,6 +83,13 @@ Typical mutation diagnosis flow:
 2. Run `node scripts/harnessamp.mjs mutate <bundle.json> --max-mutations 20` to inspect selected mutation records.
 3. Run `node scripts/harnessamp.mjs diagnose <bundle.json> --concurrency 4` to produce the robustness report.
 4. Treat `PASS`, `WARN`, and `BLOCK` as the CI/release signal.
+
+Typical local worker flow:
+
+1. Start the local app/API with `npm run dev`.
+2. Register a runner and enqueue jobs from the console.
+3. Run `node scripts/harnessamp.mjs worker --project-id <project-id> --once` to process currently queued jobs.
+4. Omit `--once` to keep polling for new queued or retrying jobs.
 
 Docker workflow:
 

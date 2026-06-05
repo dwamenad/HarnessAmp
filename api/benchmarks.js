@@ -1,6 +1,7 @@
 import { badRequest, methodNotAllowed, readJsonBody, serverError, unauthorized } from './_http.js';
 import { readSessionContext } from './_session.js';
 import {
+  assignBenchmarkReviewer,
   createBenchmarkVersion,
   createPromotionCandidate,
   editBenchmarkVersion,
@@ -102,6 +103,23 @@ export default async function handler(request, response) {
         return;
       }
 
+      if (action === 'assign-reviewer') {
+        const versionId = stringQuery(request.query?.versionId) || stringQuery(body.versionId);
+        const reviewer = stringQuery(body.reviewer);
+        if (!versionId || !reviewer) {
+          badRequest(response, 'versionId and reviewer are required');
+          return;
+        }
+        const assignment = await assignBenchmarkReviewer({
+          versionId,
+          userId: session.user.id,
+          reviewer,
+          notes: body.notes || '',
+        });
+        response.status(200).json({ assignment });
+        return;
+      }
+
       if (action === 'promotion') {
         const versionId = stringQuery(request.query?.versionId) || stringQuery(body.versionId);
         if (!versionId || !body.case) {
@@ -150,6 +168,10 @@ export default async function handler(request, response) {
       return;
     }
     if (error instanceof Error && error.message.includes('golden case visibility')) {
+      response.status(400).json({ error: error.message });
+      return;
+    }
+    if (error instanceof Error && error.message.startsWith('Invalid benchmark edits:')) {
       response.status(400).json({ error: error.message });
       return;
     }

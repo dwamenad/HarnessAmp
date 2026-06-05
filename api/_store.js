@@ -24,15 +24,20 @@ const memory = globalThis.__harnessAmpStore ?? {
   benchmarkPacks: new Map(),
   benchmarkVersions: new Map(),
   benchmarkReviews: new Map(),
+  benchmarkReviewAssignments: new Map(),
   promotionCandidates: new Map(),
   goldenCases: new Map(),
   events: [],
 };
 
+const RUNNER_JOB_TERMINAL_STATUSES = new Set(['completed', 'failed', 'canceled']);
+const RUNNER_JOB_CLAIMABLE_STATUSES = new Set(['queued', 'retrying']);
+
 globalThis.__harnessAmpStore = memory;
 memory.benchmarkPacks ??= new Map();
 memory.benchmarkVersions ??= new Map();
 memory.benchmarkReviews ??= new Map();
+memory.benchmarkReviewAssignments ??= new Map();
 memory.promotionCandidates ??= new Map();
 memory.goldenCases ??= new Map();
 
@@ -354,7 +359,19 @@ export async function listRunners({ projectId, userId }) {
   return result.rows.map(normalizeRunnerRow);
 }
 
-export async function createRunnerJob({ projectId, runnerId, userId, pack, thresholds, profileId, presetId }) {
+export async function createRunnerJob({
+  projectId,
+  runnerId,
+  userId,
+  pack,
+  thresholds,
+  profileId,
+  presetId,
+  idempotencyKey = null,
+  maxAttempts = 1,
+  timeoutMs = 0,
+  retryBackoffMs = 0,
+}) {
   const membership = await getProjectMembership(userId, projectId);
   if (!membership || !canMutateProject(membership.role)) {
     throw new Error('Only owners and maintainers can create jobs');
@@ -371,24 +388,29 @@ export async function createRunnerJob({ projectId, runnerId, userId, pack, thres
     profileId,
     presetId,
   };
+  const normalizedIdempotencyKey = normalizeOptionalText(idempotencyKey);
+  if (normalizedIdempotencyKey) {
+    const existing = await findRunnerJobByIdempotencyKey({
+      projectId,
+      runnerId,
+      idempotencyKey: normalizedIdempotencyKey,
+    });
+    if (existing) return existing;
+  }
 
   const job = await persistJob({
     id: createId('job'),
     projectId,
     runnerId,
     userId,
-    status: 'queued',
-    payload,
     workspaceId: membership.workspaceId,
-  });
-
-  queueMicrotask(() => {
-    dispatchRunnerJob(job).catch(async (error) => {
-      await updateJobStatus(job.id, {
-        status: 'failed',
-        error: error.message,
-      });
-    });
+    status: 'queued',
+    idempotencyKey: normalizedIdempotencyKey,
+    payload,
+    attempts: 0,
+    maxAttempts: normalizePositiveInteger(maxAttempts, 1),
+    timeoutMs: normalizeNonNegativeInteger(timeoutMs, 0),
+    retryBackoffMs: normalizeNonNegativeInteger(retryBackoffMs, 0),
   });
 
   return job;
@@ -401,6 +423,38 @@ export async function getRunnerJob({ jobId, userId }) {
   return membership ? job : null;
 }
 
+export async function listRunnerJobs({ projectId, userId, statuses = [] }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership) throw new Error('Project membership not found');
+  const normalizedStatuses = normalizeStatusFilter(statuses);
+
+  if (useMemory()) {
+    return Array.from(memory.jobs.values())
+      .filter((job) => job.projectId === projectId)
+      .filter((job) => !normalizedStatuses.length || normalizedStatuses.includes(job.status))
+      .sort((left, right) => {
+        const leftNext = left.nextRunAt ?? left.createdAt;
+        const rightNext = right.nextRunAt ?? right.createdAt;
+        return leftNext.localeCompare(rightNext);
+      });
+  }
+
+  await ensureSchema();
+  const params = [projectId];
+  const statusClause = normalizedStatuses.length
+    ? `and status = any($2)`
+    : '';
+  if (normalizedStatuses.length) params.push(normalizedStatuses);
+  const result = await query(
+    `select * from runner_jobs
+     where project_id = $1
+       ${statusClause}
+     order by coalesce(next_run_at, created_at) asc`,
+    params,
+  );
+  return result.rows.map(normalizeJobRow);
+}
+
 export async function cancelRunnerJob({ jobId, userId }) {
   const job = await readJob(jobId);
   if (!job) return null;
@@ -408,7 +462,56 @@ export async function cancelRunnerJob({ jobId, userId }) {
   if (!membership || !canMutateProject(membership.role)) {
     throw new Error('Only owners and maintainers can cancel jobs');
   }
-  return updateJobStatus(jobId, { status: 'canceled' });
+  if (RUNNER_JOB_TERMINAL_STATUSES.has(job.status)) return job;
+  return updateJobStatus(jobId, {
+    status: 'canceled',
+    error: null,
+    claimedBy: null,
+    lockedAt: null,
+    nextRunAt: null,
+    finishedAt: new Date().toISOString(),
+  });
+}
+
+export async function retryRunnerJob({ jobId, userId }) {
+  const job = await readJob(jobId);
+  if (!job) return null;
+  const membership = await getProjectMembership(userId, job.projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can retry jobs');
+  }
+  if (job.status === 'completed' || job.status === 'canceled') {
+    throw new Error(`Cannot retry a ${job.status} job`);
+  }
+  return updateJobStatus(jobId, {
+    status: 'retrying',
+    error: null,
+    claimedBy: null,
+    lockedAt: null,
+    nextRunAt: new Date().toISOString(),
+    finishedAt: null,
+  });
+}
+
+export async function claimRunnerJob({ jobId, userId, workerId = 'api-worker' }) {
+  const job = await readJob(jobId);
+  if (!job) return null;
+  const membership = await getProjectMembership(userId, job.projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can claim jobs');
+  }
+  return claimJobForWorker(job, workerId);
+}
+
+export async function runRunnerJobWorker({ jobId, userId, workerId = 'api-worker' }) {
+  const claimed = await claimRunnerJob({ jobId, userId, workerId });
+  if (!claimed) return null;
+
+  try {
+    return await dispatchRunnerJob(claimed);
+  } catch (error) {
+    return markRunnerJobFailure(claimed.id, error);
+  }
 }
 
 export async function listBenchmarkPacks({ projectId, userId }) {
@@ -700,6 +803,56 @@ export async function reviewBenchmarkVersion({ versionId, userId, decision, comm
   };
 }
 
+export async function assignBenchmarkReviewer({ versionId, userId, reviewer, notes = '' }) {
+  const version = await readBenchmarkVersion(versionId);
+  if (!version) throw new Error('Benchmark version not found');
+  const membership = await getProjectMembership(userId, version.projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can assign benchmark reviewers');
+  }
+  const reviewerLabel = typeof reviewer === 'string' ? reviewer.trim() : '';
+  if (!reviewerLabel) throw new Error('Reviewer is required');
+  const now = new Date().toISOString();
+
+  if (useMemory()) {
+    const assignment = {
+      id: createId('benchassign'),
+      versionId: version.id,
+      benchmarkId: version.benchmarkId,
+      projectId: version.projectId,
+      workspaceId: version.workspaceId,
+      reviewer: reviewerLabel,
+      status: 'assigned',
+      notes,
+      assignedBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    memory.benchmarkReviewAssignments.set(assignment.id, assignment);
+    return assignment;
+  }
+
+  await ensureSchema();
+  const inserted = await query(
+    `insert into benchmark_review_assignments
+       (id, benchmark_version_id, benchmark_pack_id, project_id, workspace_id, reviewer, status, notes, assigned_by, created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, 'assigned', $7, $8, $9, $9)
+     returning *`,
+    [
+      createId('benchassign'),
+      version.id,
+      version.benchmarkId,
+      version.projectId,
+      version.workspaceId,
+      reviewerLabel,
+      notes,
+      userId,
+      now,
+    ],
+  );
+  return normalizeBenchmarkReviewAssignmentRow(inserted.rows[0]);
+}
+
 export async function createPromotionCandidate({
   versionId,
   userId,
@@ -868,39 +1021,41 @@ export async function saveEvent(event, session = {}) {
 }
 
 async function dispatchRunnerJob(job) {
-  if (await isJobCanceled(job.id)) return;
-  await updateJobStatus(job.id, { status: 'dispatching' });
+  if (await isJobCanceled(job.id)) return readJob(job.id);
   const runner = await getRunnerById(job.runnerId);
   if (!runner) throw new Error('Runner not found');
 
-  const response = await fetch(runner.endpointUrl, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(runner.sharedSecret ? { authorization: `Bearer ${runner.sharedSecret}` } : {}),
-    },
-    body: JSON.stringify({
-      jobId: job.id,
-      profile: job.payload.profileId,
-      preset: job.payload.presetId,
-      thresholds: job.payload.thresholds,
-      pack: job.payload.pack,
+  const response = await runFetchWithTimeout(
+    () => fetch(runner.endpointUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(runner.sharedSecret ? { authorization: `Bearer ${runner.sharedSecret}` } : {}),
+      },
+      body: JSON.stringify({
+        jobId: job.id,
+        profile: job.payload.profileId,
+        preset: job.payload.presetId,
+        thresholds: job.payload.thresholds,
+        pack: job.payload.pack,
+      }),
     }),
-  });
+    job.timeoutMs,
+    `Runner job ${job.id} timed out after ${job.timeoutMs}ms`,
+  );
 
   if (!response.ok) {
     throw new Error(`Runner returned HTTP ${response.status}`);
   }
 
   const payload = await response.json();
-  if (await isJobCanceled(job.id)) return;
+  if (await isJobCanceled(job.id)) return readJob(job.id);
   const observations = Array.isArray(payload) ? payload : payload.observations;
   if (!Array.isArray(observations)) {
     throw new Error('Runner response must be an observation array or { observations }.');
   }
 
-  if (await isJobCanceled(job.id)) return;
-  await updateJobStatus(job.id, { status: 'running' });
+  if (await isJobCanceled(job.id)) return readJob(job.id);
   const analysis = analyzeBundle(job.payload.pack, observations, {
     intensity: job.payload.pack?.mutationPolicy?.intensity ?? 2,
   });
@@ -917,7 +1072,7 @@ async function dispatchRunnerJob(job) {
     sourceBundle: job.payload.pack,
   });
 
-  if (await isJobCanceled(job.id)) return;
+  if (await isJobCanceled(job.id)) return readJob(job.id);
   const saved = await persistReport({
     snapshot,
     projectId: job.projectId,
@@ -925,7 +1080,7 @@ async function dispatchRunnerJob(job) {
     userId: job.userId,
   });
 
-  if (await isJobCanceled(job.id)) return;
+  if (await isJobCanceled(job.id)) return readJob(job.id);
   await updateJobStatus(job.id, {
     status: 'completed',
     reportId: saved.id,
@@ -934,12 +1089,122 @@ async function dispatchRunnerJob(job) {
       gate: snapshot.summary.verdict,
       overallScore: snapshot.summary.overallScore,
     },
+    error: null,
+    claimedBy: null,
+    lockedAt: null,
+    nextRunAt: null,
+    finishedAt: new Date().toISOString(),
   });
+  return readJob(job.id);
 }
 
 async function isJobCanceled(jobId) {
   const current = await readJob(jobId);
   return current?.status === 'canceled';
+}
+
+async function markRunnerJobFailure(jobId, error) {
+  const current = await readJob(jobId);
+  if (!current || current.status === 'canceled') return current;
+  const message = error instanceof Error ? error.message : String(error);
+  const canRetry = current.attempts < current.maxAttempts;
+  return updateJobStatus(jobId, {
+    status: canRetry ? 'retrying' : 'failed',
+    error: message,
+    claimedBy: null,
+    lockedAt: null,
+    nextRunAt: canRetry ? retryReadyAt(current.retryBackoffMs) : null,
+    finishedAt: canRetry ? null : new Date().toISOString(),
+  });
+}
+
+async function claimJobForWorker(job, workerId) {
+  const normalizedWorkerId = normalizeOptionalText(workerId) ?? 'api-worker';
+  if (!useMemory()) {
+    await ensureSchema();
+    const updated = await query(
+      `update runner_jobs
+       set status = 'running',
+           attempts = attempts + 1,
+           error = null,
+           history = coalesce(history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+             'status', 'running',
+             'message', 'Worker claimed job.',
+             'attempts', attempts + 1,
+             'claimedBy', $2,
+             'createdAt', $3
+           )),
+           claimed_by = $2,
+           locked_at = $3,
+           next_run_at = null,
+           started_at = coalesce(started_at, $3),
+           finished_at = null,
+           updated_at = $3
+       where id = $1
+         and status in ('queued', 'retrying')
+         and attempts < max_attempts
+         and (next_run_at is null or next_run_at <= $3)
+       returning *`,
+      [job.id, normalizedWorkerId, new Date().toISOString()],
+    );
+    if (updated.rows[0]) return normalizeJobRow(updated.rows[0]);
+
+    const fresh = await readJob(job.id);
+    if (fresh && RUNNER_JOB_CLAIMABLE_STATUSES.has(fresh.status) && fresh.attempts >= fresh.maxAttempts) {
+      return updateJobStatus(fresh.id, {
+        status: 'failed',
+        error: fresh.error ?? 'Runner job exhausted all attempts.',
+        finishedAt: new Date().toISOString(),
+      });
+    }
+    return null;
+  }
+
+  if (!RUNNER_JOB_CLAIMABLE_STATUSES.has(job.status)) return null;
+  if (!isJobDue(job)) return null;
+  if (job.attempts >= job.maxAttempts) {
+    return updateJobStatus(job.id, {
+      status: 'failed',
+      error: job.error ?? 'Runner job exhausted all attempts.',
+      finishedAt: new Date().toISOString(),
+    });
+  }
+  return updateJobStatus(job.id, {
+    status: 'running',
+    attempts: job.attempts + 1,
+    error: null,
+    claimedBy: normalizedWorkerId,
+    lockedAt: new Date().toISOString(),
+    nextRunAt: null,
+    startedAt: job.startedAt ?? new Date().toISOString(),
+    finishedAt: null,
+  });
+}
+
+function isJobDue(job) {
+  if (!job.nextRunAt) return true;
+  return new Date(job.nextRunAt).getTime() <= Date.now();
+}
+
+function retryReadyAt(retryBackoffMs) {
+  const delay = normalizeNonNegativeInteger(retryBackoffMs, 0);
+  return new Date(Date.now() + delay).toISOString();
+}
+
+async function runFetchWithTimeout(fn, timeoutMs, message) {
+  const limit = normalizeNonNegativeInteger(timeoutMs, 0);
+  if (limit <= 0) return fn();
+  let timeout;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), limit);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function persistReport({ snapshot, projectId, workspaceId, userId }) {
@@ -976,7 +1241,20 @@ async function persistReport({ snapshot, projectId, workspaceId, userId }) {
   return { id: report.id, storage: 'postgres' };
 }
 
-async function persistJob({ id, projectId, runnerId, userId, status, payload, workspaceId }) {
+async function persistJob({
+  id,
+  projectId,
+  runnerId,
+  userId,
+  workspaceId,
+  status,
+  idempotencyKey,
+  payload,
+  attempts,
+  maxAttempts,
+  timeoutMs,
+  retryBackoffMs,
+}) {
   const job = {
     id,
     projectId,
@@ -984,10 +1262,21 @@ async function persistJob({ id, projectId, runnerId, userId, status, payload, wo
     userId,
     workspaceId,
     status,
+    idempotencyKey,
     payload,
     result: null,
     reportId: null,
     error: null,
+    history: [jobHistoryEntry({ status, message: 'Job queued for worker execution.' })],
+    attempts,
+    maxAttempts,
+    timeoutMs,
+    retryBackoffMs,
+    claimedBy: null,
+    lockedAt: null,
+    nextRunAt: null,
+    startedAt: null,
+    finishedAt: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -999,10 +1288,11 @@ async function persistJob({ id, projectId, runnerId, userId, status, payload, wo
 
   await ensureSchema();
   const result = await query(
-    `insert into runner_jobs (id, project_id, runner_id, created_by, status, payload)
-     values ($1, $2, $3, $4, $5, $6)
+    `insert into runner_jobs
+       (id, project_id, workspace_id, runner_id, created_by, status, idempotency_key, payload, result, error, history, attempts, max_attempts, timeout_ms, retry_backoff_ms)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, null, null, $9, $10, $11, $12, $13)
      returning *`,
-    [id, projectId, runnerId, userId, status, payload],
+    [id, projectId, workspaceId, runnerId, userId, status, idempotencyKey, payload, job.history, attempts, maxAttempts, timeoutMs, retryBackoffMs],
   );
   return normalizeJobRow(result.rows[0]);
 }
@@ -1014,6 +1304,7 @@ async function updateJobStatus(jobId, patch) {
     const next = {
       ...existing,
       ...patch,
+      history: appendJobHistory(existing, patch),
       updatedAt: new Date().toISOString(),
     };
     memory.jobs.set(jobId, next);
@@ -1028,6 +1319,7 @@ async function updateJobStatus(jobId, patch) {
   const next = {
     ...row,
     ...patch,
+    history: appendJobHistory(row, patch),
     updatedAt: new Date().toISOString(),
   };
 
@@ -1037,10 +1329,37 @@ async function updateJobStatus(jobId, patch) {
          report_id = $3,
          result = $4,
          error = $5,
-         updated_at = $6
+         history = $6,
+         attempts = $7,
+         max_attempts = $8,
+         timeout_ms = $9,
+         retry_backoff_ms = $10,
+         claimed_by = $11,
+         locked_at = $12,
+         next_run_at = $13,
+         started_at = $14,
+         finished_at = $15,
+         updated_at = $16
      where id = $1
      returning *`,
-    [jobId, next.status, next.reportId ?? null, next.result ?? null, next.error ?? null, next.updatedAt],
+    [
+      jobId,
+      next.status,
+      next.reportId ?? null,
+      next.result ?? null,
+      next.error ?? null,
+      next.history,
+      next.attempts,
+      next.maxAttempts,
+      next.timeoutMs,
+      next.retryBackoffMs,
+      next.claimedBy ?? null,
+      next.lockedAt ?? null,
+      next.nextRunAt ?? null,
+      next.startedAt ?? null,
+      next.finishedAt ?? null,
+      next.updatedAt,
+    ],
   );
   return normalizeJobRow(updated.rows[0]);
 }
@@ -1052,6 +1371,26 @@ async function readJob(jobId) {
 
   await ensureSchema();
   const result = await query('select * from runner_jobs where id = $1 limit 1', [jobId]);
+  return result.rows[0] ? normalizeJobRow(result.rows[0]) : null;
+}
+
+async function findRunnerJobByIdempotencyKey({ projectId, runnerId, idempotencyKey }) {
+  if (!idempotencyKey) return null;
+  if (useMemory()) {
+    return Array.from(memory.jobs.values()).find((job) => (
+      job.projectId === projectId
+      && job.runnerId === runnerId
+      && job.idempotencyKey === idempotencyKey
+    )) ?? null;
+  }
+
+  await ensureSchema();
+  const result = await query(
+    `select * from runner_jobs
+     where project_id = $1 and runner_id = $2 and idempotency_key = $3
+     limit 1`,
+    [projectId, runnerId, idempotencyKey],
+  );
   return result.rows[0] ? normalizeJobRow(result.rows[0]) : null;
 }
 
@@ -1104,6 +1443,9 @@ async function buildBenchmarkDetail(benchmark) {
     const reviews = Array.from(memory.benchmarkReviews.values())
       .filter((review) => review.benchmarkId === benchmark.id)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const reviewAssignments = Array.from(memory.benchmarkReviewAssignments.values())
+      .filter((assignment) => assignment.benchmarkId === benchmark.id)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     const promotionCandidates = Array.from(memory.promotionCandidates.values())
       .filter((candidate) => candidate.benchmarkId === benchmark.id)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -1114,15 +1456,17 @@ async function buildBenchmarkDetail(benchmark) {
       benchmark: benchmarkPackSummary(benchmark),
       versions: summarizeBenchmarkVersions(versions),
       reviews,
+      reviewAssignments,
       promotionCandidates,
       goldenCases,
     };
   }
 
   await ensureSchema();
-  const [versions, reviews, promotionCandidates, goldenCases] = await Promise.all([
+  const [versions, reviews, reviewAssignments, promotionCandidates, goldenCases] = await Promise.all([
     query('select * from benchmark_versions where benchmark_pack_id = $1 order by version_number desc', [benchmark.id]),
     query('select * from benchmark_reviews where benchmark_pack_id = $1 order by created_at desc', [benchmark.id]),
+    query('select * from benchmark_review_assignments where benchmark_pack_id = $1 order by created_at desc', [benchmark.id]),
     query('select * from promotion_candidates where benchmark_pack_id = $1 order by created_at desc', [benchmark.id]),
     query('select * from golden_cases where benchmark_pack_id = $1 order by created_at desc', [benchmark.id]),
   ]);
@@ -1130,6 +1474,7 @@ async function buildBenchmarkDetail(benchmark) {
     benchmark: benchmarkPackSummary(benchmark),
     versions: summarizeBenchmarkVersions(versions.rows.map(normalizeBenchmarkVersionRow)),
     reviews: reviews.rows.map(normalizeBenchmarkReviewRow),
+    reviewAssignments: reviewAssignments.rows.map(normalizeBenchmarkReviewAssignmentRow),
     promotionCandidates: promotionCandidates.rows.map(normalizePromotionCandidateRow),
     goldenCases: goldenCases.rows.map(normalizeGoldenCaseRow),
   };
@@ -1184,6 +1529,83 @@ function projectRoleFor(projectId, userId) {
 
 function canMutateProject(role) {
   return role === 'owner' || role === 'maintainer';
+}
+
+function normalizeOptionalText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized) || normalized < 1) return fallback;
+  return Math.floor(normalized);
+}
+
+function normalizeNonNegativeInteger(value, fallback) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized) || normalized < 0) return fallback;
+  return Math.floor(normalized);
+}
+
+function normalizeStatusFilter(statuses) {
+  if (Array.isArray(statuses)) {
+    return statuses.map(String).map((item) => item.trim()).filter(Boolean);
+  }
+  if (typeof statuses === 'string') {
+    return statuses.split(',').map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function appendJobHistory(job, patch) {
+  const history = Array.isArray(job.history) ? job.history : [];
+  if (!shouldRecordJobHistory(job, patch)) return history;
+  return [
+    ...history,
+    jobHistoryEntry({
+      status: patch.status ?? job.status,
+      message: jobHistoryMessage(job, patch),
+      attempts: patch.attempts ?? job.attempts,
+      claimedBy: patch.claimedBy ?? job.claimedBy ?? null,
+      reportId: patch.reportId ?? job.reportId ?? null,
+      error: patch.error ?? null,
+      nextRunAt: patch.nextRunAt ?? null,
+    }),
+  ];
+}
+
+function jobHistoryEntry({ status, message, attempts = 0, claimedBy = null, reportId = null, error = null, nextRunAt = null }) {
+  return {
+    status,
+    message,
+    attempts,
+    claimedBy,
+    reportId,
+    error,
+    nextRunAt,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function shouldRecordJobHistory(job, patch) {
+  return Boolean(
+    patch.status && patch.status !== job.status
+    || patch.error
+    || patch.reportId
+    || patch.claimedBy
+    || patch.nextRunAt
+  );
+}
+
+function jobHistoryMessage(job, patch) {
+  if (patch.status === 'running') return 'Worker claimed job.';
+  if (patch.status === 'retrying') return 'Attempt failed; job scheduled for retry.';
+  if (patch.status === 'failed') return 'Job failed after exhausting attempts.';
+  if (patch.status === 'completed') return 'Job completed and linked a report.';
+  if (patch.status === 'canceled') return 'Job canceled before completion.';
+  if (patch.status === 'queued' && job.status === 'failed') return 'Job queued for retry.';
+  if (patch.error) return 'Job recorded an error.';
+  return 'Job updated.';
 }
 
 function useMemory() {
@@ -1336,13 +1758,25 @@ function normalizeJobRow(row) {
   return {
     id: row.id,
     projectId: row.project_id,
+    workspaceId: row.workspace_id,
     runnerId: row.runner_id,
     userId: row.created_by,
     reportId: row.report_id,
     status: row.status,
+    idempotencyKey: row.idempotency_key ?? null,
     payload: row.payload,
     result: row.result,
     error: row.error,
+    history: Array.isArray(row.history) ? row.history : [],
+    attempts: Number(row.attempts ?? 0),
+    maxAttempts: Number(row.max_attempts ?? 1),
+    timeoutMs: Number(row.timeout_ms ?? 0),
+    retryBackoffMs: Number(row.retry_backoff_ms ?? 0),
+    claimedBy: row.claimed_by ?? null,
+    lockedAt: row.locked_at ? String(row.locked_at) : null,
+    nextRunAt: row.next_run_at ? String(row.next_run_at) : null,
+    startedAt: row.started_at ? String(row.started_at) : null,
+    finishedAt: row.finished_at ? String(row.finished_at) : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -1396,6 +1830,22 @@ function normalizeBenchmarkReviewRow(row) {
     comments: row.comments ?? '',
     readinessSnapshot: row.readiness_snapshot,
     createdAt: String(row.created_at),
+  };
+}
+
+function normalizeBenchmarkReviewAssignmentRow(row) {
+  return {
+    id: row.id,
+    versionId: row.benchmark_version_id,
+    benchmarkId: row.benchmark_pack_id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    reviewer: row.reviewer,
+    status: row.status,
+    notes: row.notes ?? '',
+    assignedBy: row.assigned_by,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
   };
 }
 

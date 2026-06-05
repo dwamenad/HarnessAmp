@@ -830,6 +830,10 @@ section[id] {
   align-content: start;
 }
 
+.workspace-panel--runners {
+  grid-column: span 2;
+}
+
 .workspace-panel--benchmarks {
   grid-column: 1 / -1;
 }
@@ -846,6 +850,7 @@ section[id] {
 .workspace-panel > .session-empty,
 .workspace-panel > .session-muted,
 .workspace-panel > .runner-state,
+.workspace-panel > .job-observability,
 .workspace-panel > .project-report-list,
 .workspace-panel > .inline-actions {
   grid-column: 1 / -1;
@@ -881,6 +886,7 @@ section[id] {
 .session-empty,
 .session-muted,
 .runner-state,
+.job-observability,
 .project-report-list,
 .inline-actions {
   background: rgba(17, 18, 17, 0.94);
@@ -891,6 +897,136 @@ section[id] {
 .session-muted,
 .runner-state {
   padding: 20px;
+}
+
+.job-observability {
+  display: grid;
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.job-observability > .session-muted {
+  margin: 0;
+  background: rgba(17, 18, 17, 0.94);
+}
+
+.job-observability__header,
+.job-metrics,
+.job-actions,
+.job-history {
+  background: rgba(8, 9, 8, 0.96);
+  padding: 16px;
+}
+
+.job-observability__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.job-observability__header span,
+.job-metrics span,
+.job-history span {
+  display: block;
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.job-observability__header strong,
+.job-metrics strong {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.job-status {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  color: var(--accent-2);
+  text-align: center;
+}
+
+.job-status--completed {
+  color: var(--success);
+}
+
+.job-status--failed,
+.job-status--canceled {
+  color: var(--danger);
+}
+
+.job-status--retrying {
+  color: var(--warning);
+}
+
+.job-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  padding: 0;
+}
+
+.job-metrics div {
+  min-height: 76px;
+  background: rgba(17, 18, 17, 0.94);
+  padding: 14px;
+}
+
+.job-report-link {
+  color: var(--accent-2);
+}
+
+.job-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.job-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.job-history {
+  display: grid;
+  gap: 10px;
+}
+
+.job-history h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.job-history ol,
+.job-history ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--line-soft);
+}
+
+.job-history li {
+  display: grid;
+  grid-template-columns: 92px 96px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  background: rgba(17, 18, 17, 0.94);
+  padding: 10px;
+}
+
+.job-history li strong,
+.job-history li small {
+  overflow-wrap: anywhere;
 }
 
 .session-card strong,
@@ -972,13 +1108,18 @@ section[id] {
 }
 
 .benchmark-edit-grid label,
-.benchmark-diff-panel {
+.benchmark-diff-panel,
+.benchmark-review-panel {
   display: grid;
   align-content: start;
   gap: 10px;
   min-height: 190px;
   background: rgba(8, 9, 8, 0.96);
   padding: 18px;
+}
+
+.benchmark-editor-wide {
+  grid-column: span 2;
 }
 
 .benchmark-edit-grid textarea {
@@ -992,6 +1133,28 @@ section[id] {
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
   line-height: 1.55;
+}
+
+.benchmark-editor-wide textarea {
+  min-height: 230px;
+}
+
+.benchmark-review-panel {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(160px, 0.45fr) minmax(180px, 0.55fr) minmax(240px, 1fr) auto auto;
+  align-items: stretch;
+  min-height: auto;
+  border: 1px solid var(--line-soft);
+}
+
+.benchmark-review-panel textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.benchmark-review-panel .button {
+  align-self: end;
+  min-height: 48px;
 }
 
 .benchmark-diff-panel > strong {
@@ -1010,7 +1173,7 @@ section[id] {
 
 .benchmark-diff-summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1px;
   background: var(--line-soft);
 }
@@ -2112,6 +2275,7 @@ section[id] {
   .artifact-grid,
   .workspace-grid,
   .benchmark-edit-grid,
+  .benchmark-review-panel,
   .benchmark-truth-list,
   .case-results {
     grid-template-columns: repeat(2, 1fr);
@@ -2176,12 +2340,20 @@ section[id] {
   .report-insights,
   .insight-grid,
   .comparison-grid,
+  .job-metrics,
+  .job-actions,
+  .job-history li,
   .benchmark-truth-summary,
   .benchmark-edit-grid,
+  .benchmark-review-panel,
   .benchmark-diff-summary,
   .benchmark-truth-list,
   .docs-meta {
     grid-template-columns: 1fr;
+  }
+
+  .benchmark-editor-wide {
+    grid-column: auto;
   }
 
   .workflow article,

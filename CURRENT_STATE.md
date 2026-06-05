@@ -1,6 +1,6 @@
 # Current State of HarnessAmp
 
-Last updated: May 31, 2026
+Last updated: June 3, 2026
 
 ## Short Definition
 
@@ -25,8 +25,9 @@ HarnessAmp is not positioned as a new agent framework or a generic eval dashboar
 - Main app routes: `/`, `/app`, `/docs`
 - CLI entrypoint: `scripts/harnessamp.mjs`
 - Git branch observed locally: `codex/harnessamp-v2-contracts`
-- Latest observed commit: `6ba51ec Refresh production README`
-- Local worktree note: `PRD.md` and `outputs/` are currently untracked in this checkout.
+- Latest observed commit: `9cd9e4e Add benchmark lifecycle controls`
+- Local branch state: tracking `origin/codex/harnessamp-v2-contracts`
+- Local worktree note: this checkout currently has uncommitted benchmark lifecycle, API, console, docs, style, and test changes. Untracked items include `.Rhistory`, `PRD.md`, `outputs/`, `src/core/benchmark-cli.js`, and `tests/benchmark-cli.test.js`.
 
 ## What Is Working Now
 
@@ -44,7 +45,11 @@ Implemented surfaces include:
 - Markdown and JSON report output
 - report snapshotting and report comparison
 - benchmark pack validation and readiness scoring
-- API-backed benchmark draft, review, approval, promotion-candidate, and golden-case lifecycle
+- API-backed benchmark draft, expanded editing, reviewer assignment, review/audit, approval, promotion-candidate, and golden-case lifecycle
+- local benchmark lifecycle CLI for import, edit, review, diff, validation, summary, and export flows
+- durable runner job records with idempotency keys, attempts, retry/backoff metadata, worker claim/run actions, cancellation, and report linkage
+- local `harnessamp worker` command for polling the dev API and executing queued/retrying jobs without external queue infrastructure
+- worker observability UI for active job attempts, worker claims, retry schedule, error history, timeline, cancellation state, and linked reports
 - deterministic mutation registry and generated mutation suites
 - failure classification, failure corpus generation, and report artifacts
 - custom HTTP runner support for real external agent endpoints
@@ -121,6 +126,29 @@ The v2 implementation includes:
 - Markdown and JSON reporters
 - gate exit codes based on `--fail-on`
 
+## Benchmark Truth Layer
+
+Benchmark lifecycle is now one of the strongest product areas in the checkout.
+
+Implemented:
+
+- authenticated `/api/benchmarks` routes for listing, detail fetch, draft creation, editing, reviewer assignment, review decisions, promotion candidates, and golden-case promotion
+- in-memory and Postgres-backed persistence paths for benchmark packs, versions, reviews, review assignments, promotion candidates, and golden cases
+- immutable edited benchmark versions from text/JSON edit payloads
+- diff summaries for changed fields, cases, tools, and evidence
+- version statuses: `draft`, `reviewed`, `approved`, `rejected`, and `archived`
+- review decisions: `reviewed`, `request_changes`, `approve`, `reject`, and `archive`
+- visible and holdout golden-case promotion
+- console controls for creating drafts, editing pack fields, assigning reviewers, recording review decisions, proposing holdout cases, promoting candidates, and inspecting recent benchmark truth activity
+- CLI lifecycle document format: `harnessamp.benchmark.lifecycle.v1`
+
+Current limitations:
+
+- the editor is still a pragmatic text/JSON workflow rather than a row-level authoring surface
+- reviewer assignment records exist, but required approver policies and reviewer status management are not complete
+- promotion can originate from report, trace, or manual evidence, but richer trace/report picking is still unfinished
+- the lifecycle is usable for local/operator workflows, but enterprise governance still needs stronger policy, audit, and permissions hardening
+
 ## CLI State
 
 The CLI is the strongest operator surface right now.
@@ -134,11 +162,18 @@ node scripts/harnessamp.mjs diagnose examples/demo-bundle.json
 node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --json
 node scripts/harnessamp.mjs report examples/demo-bundle.json
 node scripts/harnessamp.mjs registry
+node scripts/harnessamp.mjs benchmark validate examples/benchmarks/support-mvp/benchmark-pack.json
+node scripts/harnessamp.mjs benchmark import examples/benchmarks/support-mvp/benchmark-pack.json --out benchmark.lifecycle.json
+node scripts/harnessamp.mjs benchmark edit benchmark.lifecycle.json --edits benchmark-edits.json --out benchmark.lifecycle.json
+node scripts/harnessamp.mjs benchmark diff benchmark.lifecycle.json next-benchmark.lifecycle.json
+node scripts/harnessamp.mjs benchmark review benchmark.lifecycle.json --decision approve --out benchmark.lifecycle.json
+node scripts/harnessamp.mjs benchmark summary benchmark.lifecycle.json
+node scripts/harnessamp.mjs benchmark export benchmark.lifecycle.json --version approved --out benchmark-pack.json
 node scripts/harnessamp.mjs run examples/financeguard-basic --pack financeguard-core --fail-on high
 node scripts/harnessamp.mjs run examples/healthguard-basic --pack healthguard-core --fail-on high
 ```
 
-The `diagnose` command returns a release verdict and exits non-zero for `warn` or `block`. The `run` command handles v2 scenario files, v2 scenario directories, generated v2 suites, and v1 bundle execution.
+The `diagnose` command returns a release verdict and exits non-zero for `warn` or `block`. The `run` command handles v2 scenario files, v2 scenario directories, generated v2 suites, and v1 bundle execution. The `benchmark` command supports local lifecycle validate, import, edit, review, diff, summary, and export operations using the same edit, diff, and validation helpers as the API.
 
 ## Runner And Adapter State
 
@@ -149,6 +184,10 @@ Implemented:
 - `MockRunner` for deterministic local tests
 - `CustomHTTPRunner` for production agent endpoints
 - runner job queue utilities with concurrency, retry, timeout, cancellation checks, and per-job status transitions
+- workspace runner-job persistence with `queued`, `running`, `retrying`, `completed`, `failed`, and `canceled` states
+- idempotent job enqueue plus explicit worker `claim`, `run`, `retry`, and `cancel` API actions
+- local API worker loop via `node scripts/harnessamp.mjs worker --project-id <project-id>`
+- active job observability panel in the console with persisted job history and report links
 - Replit demo runner
 
 Placeholder or incomplete:
@@ -175,7 +214,7 @@ The browser console is a polished local/product workbench. It supports:
 - HTTP runner endpoint configuration
 - local and workspace-backed report saves
 - report comparison against saved runs
-- signed-in benchmark lifecycle controls for creating draft versions, field-level editing, version diff review, approving versions, proposing holdout goldens, and promoting golden cases
+- signed-in benchmark lifecycle controls for creating draft versions, editing benchmark metadata/tags/thresholds/cases/tools/evidence, version diff review, reviewer assignment, review decisions/comments, approving versions, proposing holdout goldens, and promoting golden cases
 - copy/download actions for reports, JSON, mutation packs, CI YAML, and share links
 - optimized proof and workflow views
 
@@ -190,14 +229,14 @@ The API layer includes routes for:
 - projects
 - reports
 - runner jobs
-- benchmark packs, versions, reviews, promotion candidates, and golden cases
+- benchmark packs, versions, reviews, review assignments, promotion candidates, and golden cases
 - events
 
 Persistence can use an in-memory store for local development or Postgres when `DATABASE_URL` is configured. The app has schema setup helpers and dev-session seeding.
 
-Current limitation: runner jobs are still effectively local/API-process coordinated. The queue utilities model retries and job states, but the production PRD correctly identifies durable external worker infrastructure as an unfinished pillar.
+Runner jobs now persist durable queue metadata instead of dispatching inside the enqueue request. The API supports idempotent enqueue, explicit worker claim/run actions, retry/backoff state, cancellation, and report linkage. A local `harnessamp worker` command can poll the dev API for queued/retrying jobs and run them without external infrastructure. Current limitation: production hosting still needs a separately deployed worker process or managed queue integration; the local console can also kick the worker endpoint directly for demo use.
 
-Benchmark truth-layer persistence now has an API and console MVP. It supports creating draft benchmark versions, editing mission/required/forbidden fields into immutable new draft versions, reviewing field/case/tool diffs, recording review decisions, approving versions as the release-gate source of truth, proposing golden cases from report/trace/manual evidence, and promoting those cases into visible or holdout `golden_cases`.
+Benchmark truth-layer persistence now has an API, console, and local CLI MVP. It supports creating draft benchmark versions, editing project metadata, tags, mission, required/forbidden rules, success signals, benchmark thresholds, cases, tools, and evidence into immutable new draft versions, reviewing field/case/tool/evidence diffs, assigning reviewers, recording review decisions and comments, approving versions as the release-gate source of truth, proposing golden cases from report/trace/manual evidence, and promoting those cases into visible or holdout `golden_cases`.
 
 ## MCP State
 
@@ -272,6 +311,8 @@ Core implementation:
 - `src/v2/suite-runner.js`
 - `src/v2/contract-checkers.js`
 - `src/main.js`
+- `src/core/benchmark-lifecycle.js`
+- `src/core/benchmark-cli.js`
 
 Operator and product docs:
 
@@ -303,16 +344,17 @@ Examples:
 
 The main unfinished pillars are:
 
-1. Durable external worker and queue infrastructure.
+1. Externally deployed worker process or managed queue infrastructure.
 2. Real non-HTTP runner adapters.
 3. Live MCP server execution.
-4. Full benchmark editor and review-diff UX on top of the new lifecycle API and console controls.
+4. Production-grade benchmark governance and authoring UX beyond the current JSON/text editor.
 
 Other important gaps:
 
+- durable job records and a local API worker exist, but a separately deployed worker process or managed queue backend is still needed for production
 - framework runner adapters are mostly placeholders
-- benchmark approval workflow is API-backed and available in the console, but still needs broad case/tool/evidence/threshold editing, reviewer assignment, and CLI commands
-- human-reviewed golden promotion exists from the active console report, but still needs richer source trace/report selection and review metadata
+- benchmark approval workflow is API-backed and available in the console/CLI, but still needs row-level editor ergonomics, reviewer status management, inline comments, and required approver rules
+- human-reviewed golden promotion exists from active console/report/manual evidence, but still needs richer source trace/report selection and reviewer assignment metadata
 - live MCP execution needs a security model before production use
 - enterprise isolation and organization administration need hardening
 - generated benchmark creation from folders/docs/traces is still a foundation rather than a finished UX
@@ -322,11 +364,11 @@ Other important gaps:
 
 Recommended next steps:
 
-1. Make runner jobs durable outside the API process.
+1. Package/deploy the runner-job worker outside the app request path, or bind it to a managed queue backend.
 2. Implement one real first-class runner adapter, likely OpenAI Agents SDK, Vercel AI SDK, or LangGraph.
 3. Add live MCP tool discovery and allowlisted execution.
-4. Build the benchmark editor MVP for intent, contracts, cases, assertions, forbidden actions, thresholds, tools, and evidence.
-5. Add benchmark versioning, review metadata, and golden promotion from passing reports/traces.
+4. Add required-approver policy, reviewer status management, and inline comments for benchmark lifecycle operations.
+5. Replace the JSON/text benchmark editor with row-level controls for adding, deleting, reordering, and validating cases/tools/evidence.
 6. Keep expanding failure-corpus-driven mutation selection and severity scoring.
 7. Wire v2 packs to real runner adapters so FinanceGuard and HealthGuard can test actual customer agents, not only demo agents.
 

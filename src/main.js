@@ -238,6 +238,7 @@ const defaultState = {
   selectedPromotionCandidateId: '',
   activeJobId: '',
   activeJobStatus: '',
+  activeJobDetail: null,
   loadedServerReport: null,
   inputError: '',
   feedback: '',
@@ -605,7 +606,7 @@ function renderWorkspaceSection(isAuthed) {
           `}
           <label class="check-control"><input id="analytics-toggle" type="checkbox" ${state.analyticsEnabled ? 'checked' : ''} /><span>Allow product analytics</span></label>
         </div>
-        <div class="workspace-panel">
+        <div class="workspace-panel workspace-panel--runners">
           <h3>Connected runners</h3>
           ${isAuthed ? `
             <label><span>Runner name</span><input id="runner-registration-name" type="text" value="${escapeHtml(state.runnerRegistrationName)}" /></label>
@@ -617,6 +618,7 @@ function renderWorkspaceSection(isAuthed) {
             </div>
             <label><span>Active runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>
             <p class="runner-state" id="job-state">${escapeHtml(state.activeJobStatus || 'No run started')}</p>
+            <div id="job-observability" class="job-observability">${renderJobObservability()}</div>
           ` : `
             <p class="session-muted">Sign in to add runners and start saved runs.</p>
           `}
@@ -959,6 +961,7 @@ function bindBenchmarkLifecycleEvents() {
   bindIfPresent('#benchmark-version-select', 'change', (event) => {
     state.selectedBenchmarkVersionId = event.target.value;
     persistState();
+    renderProjectResources();
   });
   bindIfPresent('#promotion-candidate-select', 'change', (event) => {
     state.selectedPromotionCandidateId = event.target.value;
@@ -967,6 +970,8 @@ function bindBenchmarkLifecycleEvents() {
   bindIfPresent('#create-benchmark-draft', 'click', createBenchmarkDraftFromActivePack);
   bindIfPresent('#save-benchmark-edits', 'click', saveBenchmarkEditsAsDraft);
   bindIfPresent('#approve-benchmark-version', 'click', approveSelectedBenchmarkVersion);
+  bindIfPresent('#assign-benchmark-reviewer', 'click', assignBenchmarkReviewerFromConsole);
+  bindIfPresent('#record-benchmark-review', 'click', recordBenchmarkReviewDecision);
   bindIfPresent('#propose-golden-case', 'click', proposeGoldenCaseFromActiveReport);
   bindIfPresent('#promote-golden-case', 'click', promoteSelectedGoldenCandidate);
 }
@@ -1814,6 +1819,8 @@ function renderProjectResources() {
   const runnerSelect = document.querySelector('#runner-select');
   if (runnerSelect) runnerSelect.innerHTML = renderRunnerOptions();
 
+  renderJobObservabilityPanel();
+
   const projectRole = document.querySelector('#project-role-display');
   if (projectRole) projectRole.value = activeProjectRole();
 
@@ -1849,6 +1856,85 @@ function renderRunnerOptions() {
   `).join('');
 }
 
+function renderJobObservabilityPanel() {
+  const panel = document.querySelector('#job-observability');
+  if (panel) {
+    panel.innerHTML = renderJobObservability();
+    bindIfPresent('#cancel-active-job', 'click', cancelActiveJob);
+  }
+}
+
+function renderJobObservability() {
+  const job = state.activeJobDetail;
+  if (!job) {
+    return '<p class="session-muted">Queued runs, worker claims, retries, errors, and linked reports appear here.</p>';
+  }
+  const terminal = ['completed', 'failed', 'canceled'].includes(job.status);
+  const history = Array.isArray(job.history) ? job.history : [];
+  const errors = history.filter((item) => item.error);
+  const reportLink = job.reportId
+    ? `<a class="job-report-link" href="${escapeHtml(reportPathFor(state.selectedProjectId, job.reportId))}">Open linked report</a>`
+    : '<span>Report pending</span>';
+  return `
+    <div class="job-observability__header">
+      <div>
+        <span>Active job</span>
+        <strong>${escapeHtml(job.id)}</strong>
+      </div>
+      <span class="job-status job-status--${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
+    </div>
+    <div class="job-metrics">
+      <div><span>Attempts</span><strong>${escapeHtml(job.attempts ?? 0)} / ${escapeHtml(job.maxAttempts ?? 1)}</strong></div>
+      <div><span>Worker</span><strong>${escapeHtml(job.claimedBy ?? 'unclaimed')}</strong></div>
+      <div><span>Retry schedule</span><strong>${escapeHtml(formatJobDate(job.nextRunAt) ?? 'not scheduled')}</strong></div>
+      <div><span>Report</span><strong>${reportLink}</strong></div>
+    </div>
+    <div class="job-metrics">
+      <div><span>Queued</span><strong>${escapeHtml(formatJobDate(job.createdAt) ?? '--')}</strong></div>
+      <div><span>Started</span><strong>${escapeHtml(formatJobDate(job.startedAt) ?? '--')}</strong></div>
+      <div><span>Updated</span><strong>${escapeHtml(formatJobDate(job.updatedAt) ?? '--')}</strong></div>
+      <div><span>Finished</span><strong>${escapeHtml(formatJobDate(job.finishedAt) ?? '--')}</strong></div>
+    </div>
+    <div class="job-actions">
+      <button class="button button--secondary" id="cancel-active-job" type="button" ${terminal ? 'disabled' : ''}>Cancel job</button>
+      ${job.error ? `<span class="job-error">${escapeHtml(job.error)}</span>` : '<span class="session-muted">No current error</span>'}
+    </div>
+    <div class="job-history">
+      <h4>Timeline</h4>
+      <ol id="job-timeline">${renderJobTimeline(history, job)}</ol>
+    </div>
+    <div class="job-history">
+      <h4>Error history</h4>
+      ${errors.length ? `
+        <ul>${errors.map((item) => `<li><span>${escapeHtml(formatJobDate(item.createdAt) ?? '--')}</span><strong>${escapeHtml(item.error)}</strong></li>`).join('')}</ul>
+      ` : '<p class="session-muted">No recorded errors.</p>'}
+    </div>
+  `;
+}
+
+function renderJobTimeline(history, job) {
+  const entries = history.length ? history : [{
+    status: job.status,
+    message: 'Job state loaded.',
+    attempts: job.attempts,
+    createdAt: job.updatedAt,
+  }];
+  return entries.map((item) => `
+    <li>
+      <span>${escapeHtml(formatJobDate(item.createdAt) ?? '--')}</span>
+      <strong>${escapeHtml(item.status ?? 'updated')}</strong>
+      <small>${escapeHtml(item.message ?? 'Job updated.')}${item.attempts ? ` · attempt ${escapeHtml(item.attempts)}` : ''}</small>
+    </li>
+  `).join('');
+}
+
+function formatJobDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 function renderProjectReportList() {
   if (!state.projectReports.length) {
     return '<p class="session-muted">No saved project reports yet.</p>';
@@ -1878,7 +1964,6 @@ function renderBenchmarkLifecycleControls() {
   const proposedCandidates = detail?.promotionCandidates?.filter((candidate) => candidate.status === 'proposed') ?? [];
   const promotedCases = detail?.goldenCases ?? [];
   const editablePack = latestVersion?.pack ?? {};
-  const globalRules = editablePack.contract?.global ?? {};
 
   return `
     <p class="session-muted">Create reviewed source-of-truth versions from the active pack, then promote report evidence into visible or holdout goldens.</p>
@@ -1894,15 +1979,17 @@ function renderBenchmarkLifecycleControls() {
       <button class="button button--secondary" id="create-benchmark-draft" type="button">Create draft</button>
       <button class="button button--secondary" id="approve-benchmark-version" type="button">Approve version</button>
     </div>
-    <div class="benchmark-edit-grid">
-      <label><span>Mission</span><textarea id="benchmark-edit-mission" ${latestVersion ? '' : 'disabled'}>${escapeHtml(editablePack.intent?.mission ?? '')}</textarea></label>
-      <label><span>Required behavior</span><textarea id="benchmark-edit-must" ${latestVersion ? '' : 'disabled'}>${escapeHtml(listToEditorText(globalRules.must))}</textarea></label>
-      <label><span>Forbidden behavior</span><textarea id="benchmark-edit-must-not" ${latestVersion ? '' : 'disabled'}>${escapeHtml(listToEditorText(globalRules.mustNot))}</textarea></label>
-      <div class="benchmark-diff-panel" id="benchmark-version-diff">${renderBenchmarkVersionDiff(latestVersion)}</div>
-    </div>
+    ${renderBenchmarkEditFields(editablePack, latestVersion)}
     <div class="inline-actions benchmark-actions">
       <button class="button button--secondary" id="save-benchmark-edits" type="button">Save edited draft</button>
       <span class="session-muted">Edits create a new draft version and preserve the previous version.</span>
+    </div>
+    <div class="benchmark-review-panel">
+      <label><span>Review decision</span><select id="benchmark-review-decision">${renderReviewDecisionOptions()}</select></label>
+      <label><span>Reviewer</span><input id="benchmark-reviewer-id" type="text" ${latestVersion ? '' : 'disabled'} value="" placeholder="email or user id"></label>
+      <label><span>Review comments</span><textarea id="benchmark-review-comments" ${latestVersion ? '' : 'disabled'}>Reviewed from the product console.</textarea></label>
+      <button class="button button--secondary" id="assign-benchmark-reviewer" type="button">Assign reviewer</button>
+      <button class="button button--secondary" id="record-benchmark-review" type="button">Record review</button>
     </div>
     <div class="inline-actions benchmark-actions">
       <button class="button button--secondary" id="propose-golden-case" type="button">Propose holdout</button>
@@ -1910,6 +1997,31 @@ function renderBenchmarkLifecycleControls() {
     </div>
     <label><span>Promotion candidate</span><select id="promotion-candidate-select">${renderPromotionCandidateOptions(proposedCandidates)}</select></label>
     <div class="benchmark-truth-list" id="benchmark-truth-list">${renderBenchmarkTruthList(detail)}</div>
+  `;
+}
+
+function renderBenchmarkEditFields(pack, latestVersion) {
+  const disabled = latestVersion ? '' : 'disabled';
+  const globalRules = pack.contract?.global ?? {};
+  const summary = pack.benchmark?.summary ?? {};
+  const evidence = pack.evidence ?? {};
+  return `
+    <div class="benchmark-edit-grid">
+      <label><span>Project</span><textarea id="benchmark-edit-project" ${disabled}>${escapeHtml(pack.project ?? '')}</textarea></label>
+      <label><span>Description</span><textarea id="benchmark-edit-description" ${disabled}>${escapeHtml(pack.description ?? '')}</textarea></label>
+      <label><span>Mission</span><textarea id="benchmark-edit-mission" ${disabled}>${escapeHtml(pack.intent?.mission ?? '')}</textarea></label>
+      <div class="benchmark-diff-panel" id="benchmark-version-diff">${renderBenchmarkVersionDiff(latestVersion)}</div>
+      <label><span>Required behavior</span><textarea id="benchmark-edit-must" ${disabled}>${escapeHtml(listToEditorText(globalRules.must))}</textarea></label>
+      <label><span>Forbidden behavior</span><textarea id="benchmark-edit-must-not" ${disabled}>${escapeHtml(listToEditorText(globalRules.mustNot))}</textarea></label>
+      <label><span>Success signals</span><textarea id="benchmark-edit-success-signals" ${disabled}>${escapeHtml(listToEditorText(pack.intent?.successSignals))}</textarea></label>
+      <label><span>Thresholds</span><textarea id="benchmark-edit-thresholds" ${disabled}>${escapeHtml(thresholdsToEditorText(summary))}</textarea></label>
+      <label><span>Tags</span><textarea id="benchmark-edit-tags" ${disabled}>${escapeHtml(listToEditorText(pack.tags))}</textarea></label>
+      <label><span>Metadata JSON</span><textarea id="benchmark-edit-metadata" ${disabled}>${escapeHtml(editorJson(pack.metadata ?? {}))}</textarea></label>
+      <label class="benchmark-editor-wide"><span>Cases JSON</span><textarea id="benchmark-edit-cases" ${disabled}>${escapeHtml(editorJson(pack.benchmark?.cases ?? []))}</textarea></label>
+      <label class="benchmark-editor-wide"><span>Tools JSON</span><textarea id="benchmark-edit-tools" ${disabled}>${escapeHtml(editorJson(pack.wrapper?.tools ?? []))}</textarea></label>
+      <label class="benchmark-editor-wide"><span>Evidence sources JSON</span><textarea id="benchmark-edit-evidence-sources" ${disabled}>${escapeHtml(editorJson(evidence.sources ?? []))}</textarea></label>
+      <label class="benchmark-editor-wide"><span>Evidence links JSON</span><textarea id="benchmark-edit-evidence-links" ${disabled}>${escapeHtml(editorJson(evidence.links ?? []))}</textarea></label>
+    </div>
   `;
 }
 
@@ -1928,6 +2040,7 @@ function renderBenchmarkVersionDiff(version) {
     ['Fields', diff.summary.fieldChangeCount],
     ['Cases', diff.summary.caseChangeCount],
     ['Tools', diff.summary.toolChangeCount],
+    ['Evidence', diff.summary.evidenceChangeCount ?? 0],
   ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
   return `
     <strong>Version diff</strong>
@@ -1963,6 +2076,16 @@ function renderPromotionCandidateOptions(candidates) {
   `).join('');
 }
 
+function renderReviewDecisionOptions() {
+  return [
+    ['reviewed', 'Reviewed'],
+    ['request_changes', 'Request changes'],
+    ['approve', 'Approve'],
+    ['reject', 'Reject'],
+    ['archive', 'Archive'],
+  ].map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('');
+}
+
 function renderBenchmarkTruthList(detail) {
   if (!detail?.versions?.length) {
     return '<p class="session-muted">No benchmark source of truth has been saved for this project yet.</p>';
@@ -1981,7 +2104,21 @@ function renderBenchmarkTruthList(detail) {
       <small>${escapeHtml(item.createdAt)}</small>
     </article>
   `).join('');
-  return `${versions}${goldens}`;
+  const reviews = (detail.reviews ?? []).slice(0, 3).map((review) => `
+    <article>
+      <strong>review · ${escapeHtml(review.decision)}</strong>
+      <span>${escapeHtml(review.comments || 'No comments recorded.')}</span>
+      <small>${escapeHtml(review.createdAt)}</small>
+    </article>
+  `).join('');
+  const assignments = (detail.reviewAssignments ?? []).slice(0, 3).map((assignment) => `
+    <article>
+      <strong>assigned reviewer</strong>
+      <span>${escapeHtml(assignment.reviewer)}</span>
+      <small>${escapeHtml(assignment.notes || assignment.createdAt)}</small>
+    </article>
+  `).join('');
+  return `${versions}${goldens}${assignments}${reviews}`;
 }
 
 function activeProjectRole() {
@@ -2183,9 +2320,49 @@ async function dispatchProjectJob() {
     });
     state.activeJobId = payload.jobId;
     state.activeJobStatus = `Job ${payload.jobId} queued`;
+    state.activeJobDetail = {
+      id: payload.jobId,
+      status: payload.status,
+      attempts: payload.attempts,
+      maxAttempts: payload.maxAttempts,
+      idempotencyKey: payload.idempotencyKey,
+      history: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
     setText('job-state', state.activeJobStatus);
+    renderJobObservabilityPanel();
     persistState();
+    void fetchJson(`/api/jobs/${encodeURIComponent(payload.jobId)}?action=run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workerId: 'console-worker' }),
+    }).catch((error) => {
+      showFeedback(error.message);
+    });
     await pollJob(payload.jobId);
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function cancelActiveJob() {
+  if (!state.activeJobId) {
+    showFeedback('No active job to cancel');
+    return;
+  }
+  try {
+    const job = await fetchJson(`/api/jobs/${encodeURIComponent(state.activeJobId)}?action=cancel`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    state.activeJobDetail = job;
+    state.activeJobStatus = `Job ${job.id} ${job.status}`;
+    setText('job-state', state.activeJobStatus);
+    renderJobObservabilityPanel();
+    persistState();
+    showFeedback(`Runner job ${job.status}`);
   } catch (error) {
     showFeedback(error.message);
   }
@@ -2227,6 +2404,46 @@ async function createBenchmarkDraftFromActivePack() {
 }
 
 async function approveSelectedBenchmarkVersion() {
+  await reviewSelectedBenchmarkVersion('approve', 'Approved from the product console.');
+}
+
+async function recordBenchmarkReviewDecision() {
+  const decision = document.querySelector('#benchmark-review-decision')?.value ?? 'reviewed';
+  const comments = document.querySelector('#benchmark-review-comments')?.value ?? '';
+  await reviewSelectedBenchmarkVersion(decision, comments);
+}
+
+async function assignBenchmarkReviewerFromConsole() {
+  const versionId = state.selectedBenchmarkVersionId || state.benchmarkDetail?.versions?.[0]?.id;
+  const reviewer = document.querySelector('#benchmark-reviewer-id')?.value ?? '';
+  const notes = document.querySelector('#benchmark-review-comments')?.value ?? '';
+  if (!versionId) {
+    showFeedback('Create a benchmark draft first');
+    return;
+  }
+  if (!reviewer.trim()) {
+    showFeedback('Reviewer is required');
+    return;
+  }
+
+  try {
+    const payload = await fetchJson(`/api/benchmarks?action=assign-reviewer&versionId=${encodeURIComponent(versionId)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        reviewer,
+        notes,
+      }),
+    });
+    await refreshBenchmarkDetail();
+    renderProjectResources();
+    showFeedback(`Assigned ${payload.assignment.reviewer}`);
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function reviewSelectedBenchmarkVersion(decision, comments) {
   const versionId = state.selectedBenchmarkVersionId || state.benchmarkDetail?.versions?.[0]?.id;
   if (!versionId) {
     showFeedback('Create a benchmark draft first');
@@ -2238,15 +2455,18 @@ async function approveSelectedBenchmarkVersion() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        decision: 'approve',
-        comments: 'Approved from the product console.',
+        decision,
+        comments,
       }),
     });
     state.selectedBenchmarkId = payload.benchmark.id;
     state.selectedBenchmarkVersionId = payload.version.id;
     await refreshProjectResources();
     renderProjectResources();
-    showFeedback(`Approved benchmark v${payload.version.versionNumber}`);
+    const decisionLabel = payload.review.decision === 'approve'
+      ? 'Approved'
+      : humanizeDocSegment(payload.review.decision);
+    showFeedback(`${decisionLabel} benchmark v${payload.version.versionNumber}`);
   } catch (error) {
     showFeedback(error.message);
   }
@@ -2259,20 +2479,28 @@ async function saveBenchmarkEditsAsDraft() {
     return;
   }
 
-  const mission = document.querySelector('#benchmark-edit-mission')?.value ?? '';
-  const mustText = document.querySelector('#benchmark-edit-must')?.value ?? '';
-  const mustNotText = document.querySelector('#benchmark-edit-must-not')?.value ?? '';
+  const edits = {
+    project: document.querySelector('#benchmark-edit-project')?.value ?? '',
+    description: document.querySelector('#benchmark-edit-description')?.value ?? '',
+    intentMission: document.querySelector('#benchmark-edit-mission')?.value ?? '',
+    mustText: document.querySelector('#benchmark-edit-must')?.value ?? '',
+    mustNotText: document.querySelector('#benchmark-edit-must-not')?.value ?? '',
+    successSignalsText: document.querySelector('#benchmark-edit-success-signals')?.value ?? '',
+    thresholdsText: document.querySelector('#benchmark-edit-thresholds')?.value ?? '',
+    tagsText: document.querySelector('#benchmark-edit-tags')?.value ?? '',
+    metadataJson: document.querySelector('#benchmark-edit-metadata')?.value ?? '{}',
+    casesJson: document.querySelector('#benchmark-edit-cases')?.value ?? '[]',
+    toolsJson: document.querySelector('#benchmark-edit-tools')?.value ?? '[]',
+    evidenceSourcesJson: document.querySelector('#benchmark-edit-evidence-sources')?.value ?? '[]',
+    evidenceLinksJson: document.querySelector('#benchmark-edit-evidence-links')?.value ?? '[]',
+  };
 
   try {
     const payload = await fetchJson(`/api/benchmarks?action=edit&versionId=${encodeURIComponent(versionId)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        edits: {
-          intentMission: mission,
-          mustText,
-          mustNotText,
-        },
+        edits,
       }),
     });
     state.selectedBenchmarkId = payload.benchmark.id;
@@ -2365,8 +2593,10 @@ async function pollJob(jobId) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     state.activeJobId = job.id;
+    state.activeJobDetail = job;
     state.activeJobStatus = `Job ${job.id} ${job.status}`;
     setText('job-state', state.activeJobStatus);
+    renderJobObservabilityPanel();
     if (job.status === 'completed') {
       state.reportId = job.reportId;
       state.reportPath = reportPathFor(state.selectedProjectId, job.reportId);
@@ -2632,6 +2862,7 @@ function loadState() {
       loadedServerReport: null,
       sessionStatus: 'loading',
       runnerStatus: '',
+      activeJobDetail: null,
       analysis: null,
       inputError: '',
       feedback: '',
@@ -2654,8 +2885,9 @@ function persistState() {
     projectBenchmarks,
     benchmarkDetail,
     loadedServerReport,
-    activeJobStatus,
-    runnerStatus,
+      activeJobStatus,
+      activeJobDetail,
+      runnerStatus,
     ...persistable
   } = state;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
@@ -3012,6 +3244,17 @@ function renderGateRow(label, value) {
 
 function listToEditorText(items) {
   return Array.isArray(items) ? items.join('\n') : '';
+}
+
+function thresholdsToEditorText(value) {
+  if (!isObject(value)) return '';
+  return Object.entries(value)
+    .map(([key, item]) => `${key}: ${String(item)}`)
+    .join('\n');
+}
+
+function editorJson(value) {
+  return JSON.stringify(value ?? null, null, 2);
 }
 
 function diffValuePreview(value) {

@@ -78,14 +78,25 @@ export function applyBenchmarkPackEdits(pack, edits = {}) {
   next.contract ??= {};
   next.contract.global ??= {};
   next.benchmark ??= {};
+  next.benchmark.summary ??= {};
   next.benchmark.cases ??= [];
+  next.wrapper ??= {};
+  next.wrapper.tools ??= [];
+  next.evidence ??= {};
 
   if (hasStringEdit(edits.project)) next.project = edits.project.trim();
-  if (hasStringEdit(edits.description)) next.description = edits.description.trim();
+  if (edits.description != null) next.description = String(edits.description).trim();
   if (hasStringEdit(edits.intentMission)) next.intent.mission = edits.intentMission.trim();
   if (edits.successSignalsText != null) next.intent.successSignals = parseEditableList(edits.successSignalsText);
   if (edits.mustText != null) next.contract.global.must = parseEditableList(edits.mustText);
   if (edits.mustNotText != null) next.contract.global.mustNot = parseEditableList(edits.mustNotText);
+  if (edits.tagsText != null) next.tags = parseEditableList(edits.tagsText);
+  if (edits.metadataJson != null) next.metadata = parseObjectEdit(edits.metadataJson, 'metadata');
+  if (edits.thresholdsText != null) next.benchmark.summary = parseThresholdsEdit(edits.thresholdsText);
+  if (edits.casesJson != null) next.benchmark.cases = parseArrayEdit(edits.casesJson, 'benchmark.cases');
+  if (edits.toolsJson != null) next.wrapper.tools = parseArrayEdit(edits.toolsJson, 'wrapper.tools');
+  if (edits.evidenceSourcesJson != null) next.evidence.sources = parseArrayEdit(edits.evidenceSourcesJson, 'evidence.sources');
+  if (edits.evidenceLinksJson != null) next.evidence.links = parseArrayEdit(edits.evidenceLinksJson, 'evidence.links');
 
   if (isObject(edits.casePatch)) {
     const caseId = stringValue(edits.casePatch.id);
@@ -96,6 +107,19 @@ export function applyBenchmarkPackEdits(pack, edits = {}) {
       next.benchmark.cases[index] = {
         ...next.benchmark.cases[index],
         ...normalizeCasePatch(edits.casePatch),
+      };
+    }
+  }
+
+  if (isObject(edits.toolPatch)) {
+    const toolName = stringValue(edits.toolPatch.name);
+    const index = toolName
+      ? next.wrapper.tools.findIndex((item) => item.name === toolName)
+      : 0;
+    if (index >= 0) {
+      next.wrapper.tools[index] = {
+        ...next.wrapper.tools[index],
+        ...normalizeToolPatch(edits.toolPatch),
       };
     }
   }
@@ -111,6 +135,9 @@ export function diffBenchmarkPacks(before, after) {
     fieldChange('intent.successSignals', before?.intent?.successSignals, after?.intent?.successSignals),
     fieldChange('contract.global.must', before?.contract?.global?.must, after?.contract?.global?.must),
     fieldChange('contract.global.mustNot', before?.contract?.global?.mustNot, after?.contract?.global?.mustNot),
+    fieldChange('benchmark.summary', before?.benchmark?.summary, after?.benchmark?.summary),
+    fieldChange('metadata', before?.metadata, after?.metadata),
+    fieldChange('tags', before?.tags, after?.tags),
     fieldChange('wrapper.agentName', before?.wrapper?.agentName, after?.wrapper?.agentName),
     fieldChange('mutationPolicy.visibleFamilies', before?.mutationPolicy?.visibleFamilies, after?.mutationPolicy?.visibleFamilies),
     fieldChange('mutationPolicy.holdoutFamilies', before?.mutationPolicy?.holdoutFamilies, after?.mutationPolicy?.holdoutFamilies),
@@ -118,23 +145,35 @@ export function diffBenchmarkPacks(before, after) {
 
   const caseChanges = diffObjectList(before?.benchmark?.cases, after?.benchmark?.cases);
   const toolChanges = diffObjectList(before?.wrapper?.tools, after?.wrapper?.tools, 'name');
+  const evidenceSourceChanges = diffObjectList(before?.evidence?.sources, after?.evidence?.sources);
+  const evidenceLinkChanges = diffObjectList(before?.evidence?.links, after?.evidence?.links, 'url');
+  const evidenceChangeCount = evidenceSourceChanges.added.length
+    + evidenceSourceChanges.removed.length
+    + evidenceSourceChanges.changed.length
+    + evidenceLinkChanges.added.length
+    + evidenceLinkChanges.removed.length
+    + evidenceLinkChanges.changed.length;
   const changeCount = changedFields.length
     + caseChanges.added.length
     + caseChanges.removed.length
     + caseChanges.changed.length
     + toolChanges.added.length
     + toolChanges.removed.length
-    + toolChanges.changed.length;
+    + toolChanges.changed.length
+    + evidenceChangeCount;
 
   return {
     changedFields,
     caseChanges,
     toolChanges,
+    evidenceSourceChanges,
+    evidenceLinkChanges,
     summary: {
       changeCount,
       fieldChangeCount: changedFields.length,
       caseChangeCount: caseChanges.added.length + caseChanges.removed.length + caseChanges.changed.length,
       toolChangeCount: toolChanges.added.length + toolChanges.removed.length + toolChanges.changed.length,
+      evidenceChangeCount,
     },
   };
 }
@@ -187,14 +226,84 @@ function parseEditableList(value) {
     .filter(Boolean);
 }
 
+function parseArrayEdit(value, label) {
+  if (Array.isArray(value)) return cloneJson(value);
+  const parsed = parseJsonEdit(value, label);
+  if (!Array.isArray(parsed)) throw invalidEdit(`${label} must be a JSON array.`);
+  return parsed;
+}
+
+function parseObjectEdit(value, label) {
+  if (isObject(value)) return cloneJson(value);
+  const parsed = parseJsonEdit(value, label);
+  if (!isObject(parsed)) throw invalidEdit(`${label} must be a JSON object.`);
+  return parsed;
+}
+
+function parseThresholdsEdit(value) {
+  if (isObject(value)) return cloneJson(value);
+  const text = String(value ?? '').trim();
+  if (!text) return {};
+  if (text.startsWith('{')) return parseObjectEdit(text, 'benchmark.summary');
+
+  return Object.fromEntries(
+    text.split(EDITABLE_ARRAY_SEPARATOR)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const match = line.match(/^([^:=]+)\s*[:=]\s*(.+)$/u);
+        if (!match) throw invalidEdit(`Threshold line must use key: value format: ${line}`);
+        return [match[1].trim(), parseScalar(match[2].trim())];
+      }),
+  );
+}
+
+function parseJsonEdit(value, label) {
+  try {
+    return JSON.parse(String(value ?? '').trim() || 'null');
+  } catch (error) {
+    throw invalidEdit(`${label} is not valid JSON: ${error.message}`);
+  }
+}
+
+function parseScalar(value) {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value === 'null') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && value !== '' ? number : value;
+}
+
 function normalizeCasePatch(patch) {
   const next = {};
-  ['id', 'title', 'input'].forEach((key) => {
+  ['id', 'title', 'input', 'tier'].forEach((key) => {
     if (hasStringEdit(patch[key])) next[key] = patch[key].trim();
   });
+  if (patch.allowedAgentsText != null) next.allowedAgents = parseEditableList(patch.allowedAgentsText);
+  if (patch.expectedMilestonesText != null) next.expectedMilestones = parseEditableList(patch.expectedMilestonesText);
   if (patch.assertionsText != null) next.assertions = parseEditableList(patch.assertionsText);
   if (patch.forbiddenActionsText != null) next.forbiddenActions = parseEditableList(patch.forbiddenActionsText);
+  if (patch.passRulesText != null) next.passRules = parseEditableList(patch.passRulesText);
+  if (patch.rubricFieldsText != null) next.rubricFields = parseEditableList(patch.rubricFieldsText);
+  if (patch.metadataJson != null) next.metadata = parseObjectEdit(patch.metadataJson, 'case.metadata');
+  if (patch.seed != null) {
+    const seed = Number(patch.seed);
+    if (Number.isFinite(seed)) next.seed = seed;
+  }
   return next;
+}
+
+function normalizeToolPatch(patch) {
+  const next = {};
+  ['name', 'description'].forEach((key) => {
+    if (hasStringEdit(patch[key])) next[key] = patch[key].trim();
+  });
+  if (patch.schemaJson != null) next.schema = parseObjectEdit(patch.schemaJson, 'tool.schema');
+  return next;
+}
+
+function invalidEdit(message) {
+  return new Error(`Invalid benchmark edits: ${message}`);
 }
 
 function fieldChange(field, before, after) {
