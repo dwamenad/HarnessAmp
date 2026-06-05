@@ -45,6 +45,14 @@ test('supports report export actions and local snapshot save', async ({ page }) 
   await expect(page.locator('#action-feedback')).toContainText('Saved to this browser');
 });
 
+test('shows the signed-in project command center', async ({ page }) => {
+  await page.locator('#workspace').scrollIntoViewIfNeeded();
+  await expect(page.locator('#project-command-center')).toContainText('Project command center');
+  await expect(page.locator('#project-command-center')).toContainText('Latest gate');
+  await expect(page.locator('#project-command-center')).toContainText('Runner jobs');
+  await expect(page.locator('#project-command-center')).toContainText('Operational focus');
+});
+
 test('creates and promotes a benchmark golden from the console', async ({ page }) => {
   await page.locator('#bundle-preset-select').selectOption('support-mvp-benchmark');
   await page.locator('#workspace').scrollIntoViewIfNeeded();
@@ -57,7 +65,8 @@ test('creates and promotes a benchmark golden from the console', async ({ page }
   await page.locator('#benchmark-edit-mission').fill('Resolve customer-support requests with edited release-review guardrails.');
   await page.locator('#benchmark-edit-thresholds').fill('baselinePassGate: 91\nvisibleMutatedPassGate: 82\nhiddenHoldoutPassGate: 77\nmaxRobustnessGap: 12');
   await page.locator('#benchmark-edit-tags').fill('support\nrelease-gate');
-  await page.getByRole('button', { name: 'Save edited draft' }).click();
+  await page.locator('#save-benchmark-edits').scrollIntoViewIfNeeded();
+  await page.locator('#save-benchmark-edits').click();
   await expect(page.locator('#action-feedback')).toContainText('Saved edited draft');
   await expect(page.locator('#benchmark-version-select')).toContainText('v2');
   await expect(page.locator('#benchmark-version-diff')).toContainText('intent.mission');

@@ -826,6 +826,132 @@ section[id] {
   gap: 18px;
 }
 
+.project-command-center {
+  display: grid;
+  gap: 1px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  background: var(--line-soft);
+}
+
+.project-command-center__header,
+.command-stream {
+  background: rgba(17, 18, 17, 0.94);
+}
+
+.project-command-center__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.32fr);
+  gap: 1px;
+  padding: 0;
+}
+
+.project-command-center__header > div,
+.command-next-action {
+  min-height: 112px;
+  background: rgba(8, 9, 8, 0.96);
+  padding: 20px;
+}
+
+.project-command-center span,
+.command-metric span,
+.command-stream span,
+.command-focus-list span {
+  display: block;
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.project-command-center strong,
+.command-metric strong,
+.command-focus-list strong {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+.project-command-center small,
+.command-metric small,
+.command-stream small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.command-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+}
+
+.command-metric {
+  min-height: 118px;
+  background: rgba(8, 9, 8, 0.96);
+  padding: 18px;
+}
+
+.command-metric strong {
+  font-size: 22px;
+}
+
+.command-metric--gate-pass strong {
+  color: var(--success);
+}
+
+.command-metric--gate-warn strong {
+  color: var(--warning);
+}
+
+.command-metric--gate-block strong,
+.command-metric--gate-failed strong {
+  color: var(--danger);
+}
+
+.command-stream {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  gap: 1px;
+}
+
+.command-stream > div {
+  background: rgba(8, 9, 8, 0.96);
+  padding: 18px;
+}
+
+.command-stream h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.command-stream__list,
+.command-focus-list {
+  display: grid;
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.command-stream article,
+.command-focus-list article {
+  display: grid;
+  gap: 4px;
+  min-height: 74px;
+  background: rgba(17, 18, 17, 0.94);
+  padding: 12px;
+}
+
+.command-stream article strong,
+.command-focus-list article strong {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+}
+
 .workspace-panel--auth {
   align-content: start;
 }
@@ -1097,6 +1223,10 @@ section[id] {
 
 .benchmark-actions .button {
   border-color: var(--line);
+}
+
+.benchmark-actions .session-muted {
+  pointer-events: none;
 }
 
 .benchmark-edit-grid {
@@ -2326,6 +2456,9 @@ section[id] {
   .pack-grid,
   .integration-grid,
   .artifact-grid,
+  .project-command-center__header,
+  .command-metrics,
+  .command-stream,
   .docs-grid,
   .contract-grid,
   .benchmark-contract-panel,
