@@ -50,6 +50,7 @@ Implemented surfaces include:
 - durable runner job records with idempotency keys, attempts, retry/backoff metadata, worker claim/run actions, cancellation, and report linkage
 - local `harnessamp worker` command for polling the dev API and executing queued/retrying jobs without external queue infrastructure
 - worker observability UI for active job attempts, worker claims, retry schedule, error history, timeline, cancellation state, and linked reports
+- signed-in project command center summarizing latest gate, robustness gap, benchmark source, runner count, job queue, review queue, recent activity, and operational focus
 - deterministic mutation registry and generated mutation suites
 - failure classification, failure corpus generation, and report artifacts
 - custom HTTP runner support for real external agent endpoints
@@ -188,6 +189,7 @@ Implemented:
 - idempotent job enqueue plus explicit worker `claim`, `run`, `retry`, and `cancel` API actions
 - local API worker loop via `node scripts/harnessamp.mjs worker --project-id <project-id>`
 - active job observability panel in the console with persisted job history and report links
+- signed-in command center at the top of the workspace area for project-level release and operations status
 - Replit demo runner
 
 Placeholder or incomplete:

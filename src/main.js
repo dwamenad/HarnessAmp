@@ -231,6 +231,7 @@ const defaultState = {
   workspaceProjects: [],
   projectReports: [],
   projectRunners: [],
+  projectJobs: [],
   projectBenchmarks: [],
   benchmarkDetail: null,
   selectedBenchmarkId: '',
@@ -578,6 +579,7 @@ function renderWorkspaceSection(isAuthed) {
   return `
     <section id="workspace" class="section workspace-section reveal">
       <div class="section__intro"><p class="eyebrow">Team access</p><h2>Manage saved reports and connected runners.</h2><p>You can explore the app without signing in. Sign in when you want shared reports, team projects, and connected runner setup.</p></div>
+      ${isAuthed ? renderProjectCommandCenter() : ''}
       <div class="workspace-grid">
         <div class="workspace-panel workspace-panel--auth">
           <h3>Account</h3>
@@ -1813,6 +1815,8 @@ function renderComparisonMetric(label, metric) {
 }
 
 function renderProjectResources() {
+  renderProjectCommandCenterPanel();
+
   const projectList = document.querySelector('#project-report-list');
   if (projectList) projectList.innerHTML = renderProjectReportList();
 
@@ -1832,6 +1836,173 @@ function renderProjectResources() {
     benchmarkPanel.innerHTML = `<h3>Benchmark truth</h3>${renderBenchmarkLifecycleControls()}`;
     bindBenchmarkLifecycleEvents();
   }
+}
+
+function renderProjectCommandCenterPanel() {
+  const commandCenter = document.querySelector('#project-command-center');
+  if (commandCenter) commandCenter.innerHTML = renderProjectCommandCenterContent();
+}
+
+function renderProjectCommandCenter() {
+  return `
+    <div id="project-command-center" class="project-command-center">
+      ${renderProjectCommandCenterContent()}
+    </div>
+  `;
+}
+
+function renderProjectCommandCenterContent() {
+  const project = currentProject();
+  const workspace = currentWorkspace();
+  const latestReport = state.projectReports[0] ?? null;
+  const latestGate = latestReport?.gate ?? 'none';
+  const robustnessDrop = latestReport?.summary?.robustnessDrop ?? latestReport?.summary?.gap ?? null;
+  const activeJobs = state.projectJobs.filter((job) => ['queued', 'running', 'retrying'].includes(job.status));
+  const failedJobs = state.projectJobs.filter((job) => job.status === 'failed');
+  const activeRunners = state.projectRunners.filter((runner) => runner.status === 'active');
+  const benchmarkSummary = commandCenterBenchmarkSummary();
+  const reviewSummary = commandCenterReviewSummary();
+  const nextAction = commandCenterNextAction({ latestReport, activeJobs, activeRunners, benchmarkSummary, failedJobs });
+  const recentItems = commandCenterRecentItems();
+
+  return `
+    <div class="project-command-center__header">
+      <div>
+        <span>Project command center</span>
+        <strong>${escapeHtml(project?.name ?? state.projectName)}</strong>
+        <small>${escapeHtml(workspace?.name ?? state.workspaceName)} · ${escapeHtml(activeProjectRole())}</small>
+      </div>
+      <div class="command-next-action">
+        <span>Next action</span>
+        <strong>${escapeHtml(nextAction)}</strong>
+      </div>
+    </div>
+    <div class="command-metrics">
+      ${renderCommandMetric('Latest gate', latestGate.toUpperCase(), latestReport ? formatJobDate(latestReport.createdAt) : 'No saved reports', `gate-${latestGate}`)}
+      ${renderCommandMetric('Robustness gap', robustnessDrop == null ? '--' : `${Math.round(robustnessDrop)}%`, latestReport?.summary?.robustnessBand?.label ?? 'Waiting for a report')}
+      ${renderCommandMetric('Benchmark', benchmarkSummary.label, benchmarkSummary.meta)}
+      ${renderCommandMetric('Runner jobs', String(activeJobs.length), `${state.projectJobs.length} total · ${failedJobs.length} failed`)}
+      ${renderCommandMetric('Runners', String(activeRunners.length), `${state.projectRunners.length} registered`)}
+      ${renderCommandMetric('Review queue', String(reviewSummary.count), reviewSummary.meta)}
+    </div>
+    <div class="command-stream">
+      <div>
+        <h4>Recent project activity</h4>
+        <div class="command-stream__list">${recentItems}</div>
+      </div>
+      <div>
+        <h4>Operational focus</h4>
+        <div class="command-focus-list">
+          ${renderCommandFocus('Release signal', latestReport ? `${latestGate.toUpperCase()} from ${latestReport.project ?? 'latest report'}` : 'No saved release gate yet')}
+          ${renderCommandFocus('Worker queue', activeJobs.length ? `${activeJobs.length} job${activeJobs.length === 1 ? '' : 's'} need attention` : 'No queued or running jobs')}
+          ${renderCommandFocus('Benchmark source', benchmarkSummary.detail)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCommandMetric(label, value, meta, tone = '') {
+  return `
+    <div class="command-metric ${tone ? `command-metric--${escapeHtml(tone)}` : ''}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(meta ?? '')}</small>
+    </div>
+  `;
+}
+
+function renderCommandFocus(label, value) {
+  return `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`;
+}
+
+function commandCenterBenchmarkSummary() {
+  const selectedBenchmark = state.projectBenchmarks.find((benchmark) => benchmark.id === state.selectedBenchmarkId)
+    ?? state.projectBenchmarks[0]
+    ?? null;
+  const approvedId = state.benchmarkDetail?.benchmark?.approvedVersionId ?? selectedBenchmark?.approvedVersionId ?? null;
+  const latestVersion = state.benchmarkDetail?.versions?.[0] ?? selectedBenchmark?.latestVersion ?? null;
+  const approvedVersion = state.benchmarkDetail?.versions?.find((version) => version.id === approvedId)
+    ?? selectedBenchmark?.approvedVersion
+    ?? null;
+  if (approvedVersion) {
+    return {
+      label: `v${approvedVersion.versionNumber} approved`,
+      meta: `${approvedVersion.readiness?.readinessScore ?? '--'}% readiness`,
+      detail: `${approvedVersion.readiness?.project ?? selectedBenchmark?.name ?? 'Approved benchmark'} is the release-gate source.`,
+    };
+  }
+  if (latestVersion) {
+    return {
+      label: `v${latestVersion.versionNumber} ${latestVersion.status}`,
+      meta: `${latestVersion.readiness?.readinessScore ?? '--'}% readiness`,
+      detail: 'Latest benchmark still needs approval before it becomes the release-gate source.',
+    };
+  }
+  return {
+    label: 'Not set',
+    meta: 'Create or import a benchmark',
+    detail: 'No benchmark source of truth has been saved for this project.',
+  };
+}
+
+function commandCenterReviewSummary() {
+  const assignments = state.benchmarkDetail?.reviewAssignments ?? [];
+  const pendingAssignments = assignments.filter((assignment) => assignment.status !== 'completed' && assignment.status !== 'dismissed');
+  const draftVersions = (state.benchmarkDetail?.versions ?? []).filter((version) => ['draft', 'reviewed'].includes(version.status));
+  return {
+    count: pendingAssignments.length + draftVersions.length,
+    meta: `${pendingAssignments.length} assigned · ${draftVersions.length} draft/reviewed`,
+  };
+}
+
+function commandCenterNextAction({ latestReport, activeJobs, activeRunners, benchmarkSummary, failedJobs }) {
+  if (!activeRunners.length) return 'Register a runner';
+  if (activeJobs.length) return 'Watch active jobs';
+  if (failedJobs.length) return 'Review failed jobs';
+  if (!latestReport) return 'Run first release gate';
+  if (benchmarkSummary.label === 'Not set' || !benchmarkSummary.label.includes('approved')) return 'Approve benchmark source';
+  if (latestReport.gate === 'block') return 'Triage blocked gate';
+  if (latestReport.gate === 'warn') return 'Review warning gate';
+  return 'Compare latest report';
+}
+
+function commandCenterRecentItems() {
+  const reports = state.projectReports.slice(0, 2).map((report) => ({
+    type: `report · ${report.gate}`,
+    title: report.project ?? report.id,
+    meta: formatJobDate(report.createdAt) ?? report.createdAt,
+  }));
+  const jobs = state.projectJobs.slice(0, 2).map((job) => ({
+    type: `job · ${job.status}`,
+    title: job.id,
+    meta: job.error ?? formatJobDate(job.updatedAt) ?? job.updatedAt,
+  }));
+  const versions = (state.benchmarkDetail?.versions ?? []).slice(0, 2).map((version) => ({
+    type: `benchmark · ${version.status}`,
+    title: `v${version.versionNumber} ${version.readiness?.project ?? 'Benchmark'}`,
+    meta: `${version.readiness?.readinessScore ?? '--'}% readiness`,
+  }));
+  const items = [...reports, ...jobs, ...versions].slice(0, 6);
+  if (!items.length) {
+    return '<p class="session-muted">Run a gate, save a benchmark, or register a runner to populate project activity.</p>';
+  }
+  return items.map((item) => `
+    <article>
+      <span>${escapeHtml(item.type)}</span>
+      <strong>${escapeHtml(item.title)}</strong>
+      <small>${escapeHtml(item.meta ?? '')}</small>
+    </article>
+  `).join('');
+}
+
+function upsertProjectJob(job) {
+  if (!job?.id) return;
+  const next = [
+    job,
+    ...state.projectJobs.filter((item) => item.id !== job.id),
+  ];
+  state.projectJobs = next.sort((left, right) => String(right.updatedAt ?? right.createdAt ?? '').localeCompare(String(left.updatedAt ?? left.createdAt ?? '')));
 }
 
 function renderWorkspaceOptions() {
@@ -2153,6 +2324,7 @@ async function refreshSession() {
     state.workspaceProjects = [];
     state.projectReports = [];
     state.projectRunners = [];
+    state.projectJobs = [];
     state.projectBenchmarks = [];
     state.benchmarkDetail = null;
     state.selectedWorkspaceId = '';
@@ -2189,13 +2361,15 @@ async function refreshProjectsForWorkspace(preferredProjectId = null) {
 async function refreshProjectResources() {
   if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId) return;
   try {
-    const [reportsPayload, runnersPayload, benchmarksPayload] = await Promise.all([
+    const [reportsPayload, runnersPayload, jobsPayload, benchmarksPayload] = await Promise.all([
       fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/reports`),
       fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/runners`),
+      fetchJson(`/api/jobs?projectId=${encodeURIComponent(state.selectedProjectId)}`),
       fetchJson(`/api/benchmarks?projectId=${encodeURIComponent(state.selectedProjectId)}`),
     ]);
     state.projectReports = reportsPayload.reports ?? [];
     state.projectRunners = runnersPayload.runners ?? [];
+    state.projectJobs = jobsPayload.jobs ?? [];
     state.projectBenchmarks = benchmarksPayload.benchmarks ?? [];
     if (!state.projectRunners.some((runner) => runner.id === state.selectedRunnerId)) {
       state.selectedRunnerId = state.projectRunners[0]?.id ?? '';
@@ -2207,6 +2381,7 @@ async function refreshProjectResources() {
   } catch {
     state.projectReports = [];
     state.projectRunners = [];
+    state.projectJobs = [];
     state.projectBenchmarks = [];
     state.benchmarkDetail = null;
   }
@@ -2322,6 +2497,7 @@ async function dispatchProjectJob() {
     state.activeJobStatus = `Job ${payload.jobId} queued`;
     state.activeJobDetail = {
       id: payload.jobId,
+      projectId: state.selectedProjectId,
       status: payload.status,
       attempts: payload.attempts,
       maxAttempts: payload.maxAttempts,
@@ -2330,8 +2506,10 @@ async function dispatchProjectJob() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    upsertProjectJob(state.activeJobDetail);
     setText('job-state', state.activeJobStatus);
     renderJobObservabilityPanel();
+    renderProjectCommandCenterPanel();
     persistState();
     void fetchJson(`/api/jobs/${encodeURIComponent(payload.jobId)}?action=run`, {
       method: 'POST',
@@ -2358,9 +2536,11 @@ async function cancelActiveJob() {
       body: JSON.stringify({}),
     });
     state.activeJobDetail = job;
+    upsertProjectJob(job);
     state.activeJobStatus = `Job ${job.id} ${job.status}`;
     setText('job-state', state.activeJobStatus);
     renderJobObservabilityPanel();
+    renderProjectCommandCenterPanel();
     persistState();
     showFeedback(`Runner job ${job.status}`);
   } catch (error) {
@@ -2594,9 +2774,11 @@ async function pollJob(jobId) {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     state.activeJobId = job.id;
     state.activeJobDetail = job;
+    upsertProjectJob(job);
     state.activeJobStatus = `Job ${job.id} ${job.status}`;
     setText('job-state', state.activeJobStatus);
     renderJobObservabilityPanel();
+    renderProjectCommandCenterPanel();
     if (job.status === 'completed') {
       state.reportId = job.reportId;
       state.reportPath = reportPathFor(state.selectedProjectId, job.reportId);
@@ -2857,6 +3039,7 @@ function loadState() {
       workspaceProjects: [],
       projectReports: [],
       projectRunners: [],
+      projectJobs: [],
       projectBenchmarks: [],
       benchmarkDetail: null,
       loadedServerReport: null,
@@ -2882,6 +3065,7 @@ function persistState() {
     workspaceProjects,
     projectReports,
     projectRunners,
+    projectJobs,
     projectBenchmarks,
     benchmarkDetail,
     loadedServerReport,
