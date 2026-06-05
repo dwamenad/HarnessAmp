@@ -47,12 +47,13 @@ An approved version is the source of truth that mutation runs should target for 
 In the app console, signed-in project owners and maintainers can:
 
 - create a draft version from the active benchmark pack or generated report export
-- edit mission, required behavior, and forbidden behavior as a new immutable draft version
-- inspect a field/case/tool diff between adjacent benchmark versions
-- approve the selected benchmark version
+- edit project metadata, mission, required behavior, forbidden behavior, success signals, thresholds, tags, cases, tools, and evidence as a new immutable draft version
+- inspect a field/case/tool/evidence diff between adjacent benchmark versions
+- assign a reviewer to a benchmark version
+- record review decisions and comments, including reviewed, request changes, approve, reject, and archive
 - propose a holdout golden case from the active report
 - promote a proposed case into the project's golden-case set
-- inspect latest version state, approved version, proposed cases, and promoted goldens
+- inspect latest version state, approved version, proposed cases, promoted goldens, and recent review audit entries
 
 ## API Flow
 
@@ -88,6 +89,19 @@ POST /api/benchmarks?action=review&versionId=<version-id>
 }
 ```
 
+Assign a reviewer:
+
+```http
+POST /api/benchmarks?action=assign-reviewer&versionId=<version-id>
+```
+
+```json
+{
+  "reviewer": "qa-reviewer@example.com",
+  "notes": "Review expanded benchmark editor coverage."
+}
+```
+
 Save field-level edits as a new draft version:
 
 ```http
@@ -97,9 +111,19 @@ POST /api/benchmarks?action=edit&versionId=<version-id>
 ```json
 {
   "edits": {
+    "project": "Support MVP Robustness Benchmark",
+    "description": "Release-gate benchmark for support agents.",
     "intentMission": "Updated release-gate mission.",
     "mustText": "Use approved lookup tools.\nAsk for missing evidence.",
-    "mustNotText": "Do not invent facts.\nDo not bypass approval."
+    "mustNotText": "Do not invent facts.\nDo not bypass approval.",
+    "successSignalsText": "Ground facts in tools.\nEscalate safely.",
+    "thresholdsText": "baselinePassGate: 92\nvisibleMutatedPassGate: 82\nhiddenHoldoutPassGate: 76\nmaxRobustnessGap: 12",
+    "tagsText": "support\nrelease-gate",
+    "metadataJson": "{\"owner\":\"qa-platform\"}",
+    "casesJson": "[{\"id\":\"case-1\",\"title\":\"Case 1\"}]",
+    "toolsJson": "[{\"name\":\"lookup_order\",\"description\":\"Lookup order facts\",\"schema\":{\"type\":\"object\"}}]",
+    "evidenceSourcesJson": "[{\"id\":\"policy.refund.v3\",\"type\":\"policy\",\"trust\":\"authoritative\"}]",
+    "evidenceLinksJson": "[{\"label\":\"Benchmark notes\",\"href\":\"../../docs/benchmarks.md\"}]"
   }
 }
 ```
@@ -143,12 +167,12 @@ GET /api/benchmarks?id=<benchmark-id>
 
 ## Remaining Benchmark Work
 
-The API-backed lifecycle and console controls are not the complete editor. Remaining product work includes:
+The API-backed lifecycle and console controls now cover the main benchmark-pack editor surface, but they are not the final production workflow. Remaining product work includes:
 
-- browser UI for editing benchmark fields
-- broader browser UI for editing cases, tools, evidence, thresholds, and mutation policy
-- richer review diffs with reviewer assignment and comments
+- row-level add/remove/reorder controls for cases, tools, evidence, thresholds, and mutation policy
+- required-approver policies and reviewer load/status management
+- richer review diffs with inline comments
 - visible/private holdout management in the console
 - promotion from real report and trace artifacts
-- audit trail filtering and reviewer assignment
-- CLI commands for benchmark lifecycle operations
+- audit trail filtering
+- server/API synchronization for CLI-authored lifecycle files

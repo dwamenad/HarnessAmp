@@ -119,6 +119,20 @@ export async function ensureSchema() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists benchmark_review_assignments (
+      id text primary key,
+      benchmark_version_id text not null references benchmark_versions(id) on delete cascade,
+      benchmark_pack_id text not null references benchmark_packs(id) on delete cascade,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      reviewer text not null,
+      status text not null,
+      notes text,
+      assigned_by text not null references users(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
     create table if not exists promotion_candidates (
       id text primary key,
       benchmark_version_id text not null references benchmark_versions(id) on delete cascade,
@@ -154,16 +168,48 @@ export async function ensureSchema() {
     create table if not exists runner_jobs (
       id text primary key,
       project_id text not null references projects(id) on delete cascade,
+      workspace_id text references workspaces(id) on delete cascade,
       runner_id text not null references runner_registrations(id) on delete cascade,
       created_by text not null references users(id) on delete cascade,
       report_id text references reports(id) on delete set null,
       status text not null,
+      idempotency_key text,
       payload jsonb not null,
       result jsonb,
       error text,
+      history jsonb not null default '[]'::jsonb,
+      attempts integer not null default 0,
+      max_attempts integer not null default 1,
+      timeout_ms integer not null default 0,
+      retry_backoff_ms integer not null default 0,
+      claimed_by text,
+      locked_at timestamptz,
+      next_run_at timestamptz,
+      started_at timestamptz,
+      finished_at timestamptz,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+
+    alter table runner_jobs add column if not exists workspace_id text references workspaces(id) on delete cascade;
+    alter table runner_jobs add column if not exists idempotency_key text;
+    alter table runner_jobs add column if not exists history jsonb not null default '[]'::jsonb;
+    alter table runner_jobs add column if not exists attempts integer not null default 0;
+    alter table runner_jobs add column if not exists max_attempts integer not null default 1;
+    alter table runner_jobs add column if not exists timeout_ms integer not null default 0;
+    alter table runner_jobs add column if not exists retry_backoff_ms integer not null default 0;
+    alter table runner_jobs add column if not exists claimed_by text;
+    alter table runner_jobs add column if not exists locked_at timestamptz;
+    alter table runner_jobs add column if not exists next_run_at timestamptz;
+    alter table runner_jobs add column if not exists started_at timestamptz;
+    alter table runner_jobs add column if not exists finished_at timestamptz;
+    update runner_jobs r
+      set workspace_id = p.workspace_id
+      from projects p
+      where r.project_id = p.id and r.workspace_id is null;
+    create unique index if not exists runner_jobs_project_runner_idempotency_idx
+      on runner_jobs (project_id, runner_id, idempotency_key)
+      where idempotency_key is not null;
 
     create table if not exists events (
       id text primary key,

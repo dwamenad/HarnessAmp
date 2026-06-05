@@ -123,5 +123,5 @@ test('custom HTTP runner normalizes external runner responses', async () => {
 test('CLI manifest exposes the expected harness workflow commands', () => {
   const commandNames = listCliCommands().map((command) => command.name);
 
-  assert.deepEqual(commandNames, ['validate', 'mutate', 'run', 'diagnose', 'report']);
+  assert.deepEqual(commandNames, ['validate', 'mutate', 'run', 'diagnose', 'report', 'worker', 'benchmark']);
 });
