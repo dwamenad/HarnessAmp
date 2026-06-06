@@ -398,19 +398,21 @@ initializeApp().catch((error) => {
 async function initializeApp() {
   if (!state.useCustomInput) syncCustomEditorsToPreset();
   const initialRoute = getRoute();
-  if (initialRoute.kind === 'docs' || initialRoute.kind === 'console') {
+  if (initialRoute.kind === 'docs') {
     state.session = null;
     state.sessionStatus = 'anonymous';
     render();
-    if (initialRoute.kind === 'docs') await hydrateRouteState();
+    await hydrateRouteState();
     window.addEventListener('hashchange', scrollToRouteTarget);
     return;
   }
 
   await refreshSession();
   render();
-  runDiagnosis();
-  await hydrateRouteState();
+  if (initialRoute.kind !== 'console') {
+    runDiagnosis();
+    await hydrateRouteState();
+  }
   window.addEventListener('hashchange', scrollToRouteTarget);
 }
 
@@ -424,7 +426,7 @@ function render() {
   const activeReportUrl = activeReportPath ? new URL(activeReportPath, window.location.origin).toString() : '';
 
   if (route.kind === 'console') {
-    app.innerHTML = renderSaasConsole(route);
+    app.innerHTML = renderSaasConsole(route, isAuthed);
     bindEvents();
     observeReveals();
     scrollToRouteTarget();
@@ -480,7 +482,7 @@ function renderHomeSurface(activeReportUrl) {
   `;
 }
 
-function renderSaasConsole(route) {
+function renderSaasConsole(route, isAuthed) {
   const title = route.label ?? saasRouteLabels[route.pathname] ?? 'HarnessAmp Console';
   return `
     <div class="ha-console">
@@ -494,6 +496,9 @@ function renderSaasConsole(route) {
           <div class="ha-topbar__actions">
             <a href="/runs/new">Start Run</a>
             <a href="/harnesses/new">New Harness</a>
+            ${isAuthed
+              ? `<button id="logout-button" type="button">Log out ${escapeHtml(state.session.user.login)}</button>`
+              : `<a href="${escapeHtml(authStartHref())}">Sign in with GitHub</a>`}
           </div>
         </header>
         ${renderSaasRoute(route)}
@@ -730,9 +735,17 @@ function renderSaasFailureDetail(failureId = 'fail-redflag-017') {
   return `
     <section class="ha-page">
       <div class="ha-failure-header">
-        <div><span class="ha-badge ${severityClass(severity)}">${escapeHtml(severity)}</span><h2>${escapeHtml(contract)}</h2><p>Mutation family: ${escapeHtml(mutation)} / Scenario: ${escapeHtml(scenario)} / Status: ${escapeHtml(status)} / Owner: ${escapeHtml(owner)}</p></div>
-        <div class="ha-topbar__actions"><button>Assign owner</button><button>Rerun this case</button><button>Export failure</button></div>
+        <div><span class="ha-badge ${severityClass(severity)}">${escapeHtml(severity)}</span><h2>${escapeHtml(contract)}</h2><p>Mutation family: ${escapeHtml(mutation)} / Scenario: ${escapeHtml(scenario)} / Status: <span id="failure-status">${escapeHtml(status)}</span> / Owner: <span id="failure-owner">${escapeHtml(owner)}</span></p></div>
+        <div class="ha-topbar__actions">
+          <button id="failure-assign-owner" data-failure-action="assign-owner" data-failure-id="${escapeHtml(id)}" type="button">Assign owner</button>
+          <button id="failure-rerun-case" data-failure-action="rerun-case" data-failure-id="${escapeHtml(id)}" type="button">Rerun this case</button>
+          <button id="failure-export" data-failure-action="export-failure" data-failure-id="${escapeHtml(id)}" type="button">Export failure</button>
+        </div>
       </div>
+      <article class="ha-panel ha-failure-status" id="failure-action-status" aria-live="polite">
+        <strong>Workflow ready</strong>
+        <span>Select an action to assign, rerun, or export this failure.</span>
+      </article>
       <div class="ha-grid ha-grid--evidence">
         <article class="ha-panel ha-evidence">
           <h3>Expected behavior</h3><p>${escapeHtml(detail.expected)}</p>
@@ -755,7 +768,16 @@ function renderSaasFailureDetail(failureId = 'fail-redflag-017') {
         </article>
         <article class="ha-panel ha-actions">
           <h3>Actions</h3>
-          ${['Create task', 'Assign owner', 'Mark false positive', 'Change severity', 'Add comment', 'Rerun this case', 'Add to regression suite', 'Export failure'].map((item) => `<button type="button">${item}</button>`).join('')}
+          ${[
+            ['create-task', 'Create task'],
+            ['assign-owner', 'Assign owner'],
+            ['false-positive', 'Mark false positive'],
+            ['change-severity', 'Change severity'],
+            ['add-comment', 'Add comment'],
+            ['rerun-case', 'Rerun this case'],
+            ['add-regression', 'Add to regression suite'],
+            ['export-failure', 'Export failure'],
+          ].map(([action, item]) => `<button data-failure-action="${action}" data-failure-id="${escapeHtml(id)}" type="button">${item}</button>`).join('')}
         </article>
       </div>
     </section>
@@ -780,8 +802,21 @@ function renderSaasReports() {
   return `
     <section class="ha-page">
       <div class="ha-section-head"><div><h2>Reports</h2><p>Developer and executive/compliance reports generated from robustness runs.</p></div></div>
-      <article class="ha-panel"><table class="ha-table"><thead><tr><th>Name</th><th>Project</th><th>Harness</th><th>Pack</th><th>Run date</th><th>Score</th><th>Critical</th><th>Export</th></tr></thead><tbody>${saasReports.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}<td>PDF / JSON / CSV / Markdown</td></tr>`).join('')}</tbody></table></article>
+      <article class="ha-panel ha-report-status" id="report-export-status" aria-live="polite">
+        <strong>Exports ready</strong>
+        <span>Choose a report format to download a shareable artifact.</span>
+      </article>
+      <article class="ha-panel"><table class="ha-table"><thead><tr><th>Name</th><th>Project</th><th>Harness</th><th>Pack</th><th>Run date</th><th>Score</th><th>Critical</th><th>Export</th></tr></thead><tbody>${saasReports.map((row, index) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}<td>${renderReportExportButtons(row, index)}</td></tr>`).join('')}</tbody></table></article>
     </section>
+  `;
+}
+
+function renderReportExportButtons(row, index) {
+  const id = reportSlug(row[0], index);
+  return `
+    <div class="ha-report-export" aria-label="Export ${escapeHtml(row[0])}">
+      ${['pdf', 'json', 'csv', 'markdown'].map((format) => `<button data-report-export="${format}" data-report-id="${escapeHtml(id)}" type="button">${format === 'markdown' ? 'Markdown' : format.toUpperCase()}</button>`).join('')}
+    </div>
   `;
 }
 
@@ -801,17 +836,115 @@ function renderSaasCi() {
 }
 
 function renderSaasUsage() {
+  const usage = {
+    plan: 'Team',
+    allowance: 75000,
+    used: 38420,
+    standard: 23110,
+    premium: 5103,
+    remaining: 36580,
+    runs: 42,
+    smokeRuns: 14,
+    standardRuns: 22,
+    deepRuns: 6,
+    projected: 64000,
+  };
+  const usedPercent = Math.round((usage.used / usage.allowance) * 100);
+  const projectedPercent = Math.round((usage.projected / usage.allowance) * 100);
+  const planRows = [
+    ['Free', '500', '$0', '1 runner', 'Community', false],
+    ['Starter', '10,000', '$49', '2 runners', 'Email', false],
+    ['Team', '75,000', '$199', '8 runners', 'Priority', true],
+    ['Business', '300,000', 'Custom', '25 runners', 'SLA', false],
+    ['Enterprise', 'Custom', 'Custom', 'Dedicated', 'Enterprise', false],
+  ];
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Usage & Billing</h2><p>An evaluated observation is one agent response evaluated against one behavioral contract.</p></div></div>
-      <div class="ha-metrics">
-        ${renderSaasMetric('Current plan', 'Team', '75,000 observations/month', 'neutral')}
-        ${renderSaasMetric('Observations used', '38,420', '23,110 standard + 5,103 premium', 'warn')}
-        ${renderSaasMetric('Overage estimate', '$0', '36,580 remaining', 'passed')}
-        ${renderSaasMetric('Runs this month', '42', '14 smoke, 22 standard, 6 deep', 'neutral')}
+      <div class="ha-section-head">
+        <div>
+          <h2>Observation usage</h2>
+          <p>An evaluated observation is one agent response evaluated against one behavioral contract. Premium observations count as 3 standard observations.</p>
+        </div>
+        <div class="ha-topbar__actions">
+          <button type="button">Manage billing</button>
+          <button type="button">View invoices</button>
+          <button type="button">Export usage</button>
+        </div>
       </div>
-      <div class="ha-card-grid">${[['Free', '500 observations/month'], ['Starter', '10,000 observations/month'], ['Team', '75,000 observations/month'], ['Business', '300,000 observations/month'], ['Enterprise', 'custom']].map(([plan, allowance]) => `<article class="ha-panel"><h3>${plan}</h3><p>${allowance}</p><small>Premium observation = high-stakes or complex evaluation; counts as 3 standard observations.</small></article>`).join('')}</div>
+      <div class="ha-metrics">
+        ${renderSaasMetric('Current plan', usage.plan, `${usage.allowance.toLocaleString()} observations/month`, 'neutral')}
+        ${renderSaasMetric('Observations used', usage.used.toLocaleString(), `${usage.standard.toLocaleString()} standard + ${usage.premium.toLocaleString()} premium`, 'warn')}
+        ${renderSaasMetric('Overage estimate', '$0', `${usage.remaining.toLocaleString()} remaining`, 'passed')}
+        ${renderSaasMetric('Runs this month', usage.runs.toLocaleString(), `${usage.smokeRuns} smoke, ${usage.standardRuns} standard, ${usage.deepRuns} deep`, 'neutral')}
+      </div>
+      <div class="ha-grid ha-grid--usage">
+        <article class="ha-panel ha-usage-meter">
+          <div class="ha-panel__head">
+            <h3>Monthly quota</h3>
+            <span class="ha-badge ha-badge--major">${usedPercent}% used</span>
+          </div>
+          <div class="ha-meter" aria-label="${usedPercent}% of monthly usage consumed">
+            <span style="width: ${usedPercent}%"></span>
+          </div>
+          <div class="ha-usage-meter__stats">
+            <div><strong>${usage.used.toLocaleString()}</strong><span>used</span></div>
+            <div><strong>${usage.remaining.toLocaleString()}</strong><span>remaining</span></div>
+            <div><strong>${usage.allowance.toLocaleString()}</strong><span>monthly limit</span></div>
+          </div>
+          <p>Projected month-end usage is ${usage.projected.toLocaleString()} observations, or ${projectedPercent}% of the Team plan allowance.</p>
+        </article>
+        <article class="ha-panel">
+          <div class="ha-panel__head">
+            <h3>Usage mix</h3>
+            <span>weighted observations</span>
+          </div>
+          <div class="ha-usage-bars">
+            ${renderUsageBar('Standard observations', usage.standard, usage.used)}
+            ${renderUsageBar('Premium observations', usage.premium * 3, usage.used)}
+            ${renderUsageBar('Remaining allowance', usage.remaining, usage.allowance)}
+          </div>
+        </article>
+      </div>
+      <article class="ha-panel ha-plan-current">
+        <div>
+          <span class="ha-badge ha-badge--passed">Current plan</span>
+          <h3>Team</h3>
+          <p>75,000 monthly observations with shared runner capacity for active CI gates and reviewer workflows.</p>
+        </div>
+        <div class="ha-plan-current__actions">
+          <button type="button">Upgrade plan</button>
+          <button type="button">Set usage alert</button>
+        </div>
+      </article>
+      <article class="ha-panel">
+        <div class="ha-panel__head">
+          <h3>Plan comparison</h3>
+          <span>Premium observation multiplier: 3x</span>
+        </div>
+        <table class="ha-table ha-plan-table">
+          <thead><tr><th>Plan</th><th>Monthly observations</th><th>Starting price</th><th>Included runners</th><th>Support</th></tr></thead>
+          <tbody>${planRows.map(([plan, allowance, price, runners, support, current]) => `
+            <tr class="${current ? 'is-current' : ''}">
+              <td>${escapeHtml(plan)} ${current ? '<span class="ha-badge ha-badge--passed">Active</span>' : ''}</td>
+              <td>${escapeHtml(allowance)}</td>
+              <td>${escapeHtml(price)}</td>
+              <td>${escapeHtml(runners)}</td>
+              <td>${escapeHtml(support)}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </article>
     </section>
+  `;
+}
+
+function renderUsageBar(label, value, max) {
+  const percent = Math.max(4, Math.min(100, Math.round((value / max) * 100)));
+  return `
+    <div class="ha-usage-row">
+      <div><span>${escapeHtml(label)}</span><strong>${value.toLocaleString()}</strong></div>
+      <div class="ha-usage-track"><span style="flex-basis: ${percent}%"></span></div>
+    </div>
   `;
 }
 
@@ -1379,6 +1512,8 @@ function renderDocBreadcrumbs(page) {
 
 function bindEvents() {
   bindConsoleHarnessEvents();
+  bindFailureWorkflowEvents();
+  bindReportExportEvents();
   bindIfPresent('#bundle-preset-select', 'change', (event) => {
     state.bundlePresetId = event.target.value;
     const preset = getSelectedBundlePreset();
@@ -3530,6 +3665,207 @@ function renderTagRow(label, items = []) {
 function bindIfPresent(selector, eventName, listener) {
   const element = document.querySelector(selector);
   if (element) element.addEventListener(eventName, listener);
+}
+
+function bindFailureWorkflowEvents() {
+  document.querySelectorAll('[data-failure-action]').forEach((button) => {
+    button.addEventListener('click', () => handleFailureAction(button.dataset.failureAction, button.dataset.failureId, button));
+  });
+}
+
+function bindReportExportEvents() {
+  document.querySelectorAll('[data-report-export]').forEach((button) => {
+    button.addEventListener('click', () => exportSaasReport(button.dataset.reportId, button.dataset.reportExport));
+  });
+}
+
+function exportSaasReport(reportId, format) {
+  const report = reportPayload(reportId);
+  if (!report) return;
+
+  if (format === 'json') {
+    downloadText(`${report.id}.json`, JSON.stringify(report, null, 2), 'Downloaded report JSON');
+  } else if (format === 'csv') {
+    downloadText(`${report.id}.csv`, reportCsv(report), 'Downloaded report CSV');
+  } else if (format === 'markdown') {
+    downloadText(`${report.id}.md`, reportMarkdown(report), 'Downloaded report Markdown');
+  } else if (format === 'pdf') {
+    downloadText(`${report.id}-print.html`, reportPrintHtml(report), 'Downloaded print-ready PDF report');
+  }
+
+  showReportExportStatus('Report exported', `${report.name} exported as ${format === 'pdf' ? 'print-ready PDF HTML' : format.toUpperCase()}.`);
+}
+
+function showReportExportStatus(title, message) {
+  const panel = document.querySelector('#report-export-status');
+  if (!panel) return;
+  panel.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
+}
+
+function reportPayload(reportId) {
+  const row = saasReports.find((report, index) => reportSlug(report[0], index) === reportId);
+  if (!row) return null;
+  const [name, project, harness, pack, runDate, score, critical] = row;
+  return {
+    id: reportId,
+    name,
+    project,
+    harness,
+    pack,
+    runDate,
+    score: Number(score),
+    criticalFailures: Number(critical),
+    status: Number(critical) > 0 ? 'review_required' : 'passing',
+    summary: Number(critical) > 0
+      ? `${critical} critical failure${Number(critical) === 1 ? '' : 's'} require owner review before release.`
+      : 'No critical failures found in this run.',
+    recommendations: Number(critical) > 0
+      ? ['Review critical evidence', 'Assign owner', 'Add reproduced cases to regression suite']
+      : ['Share executive report', 'Keep current CI gate thresholds'],
+  };
+}
+
+function reportCsv(report) {
+  const rows = [
+    ['id', 'name', 'project', 'harness', 'pack', 'run_date', 'score', 'critical_failures', 'status'],
+    [report.id, report.name, report.project, report.harness, report.pack, report.runDate, report.score, report.criticalFailures, report.status],
+  ];
+  return rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+}
+
+function reportMarkdown(report) {
+  return `# ${report.name}
+
+- Project: ${report.project}
+- Harness: ${report.harness}
+- Pack: ${report.pack}
+- Run date: ${report.runDate}
+- Score: ${report.score}
+- Critical failures: ${report.criticalFailures}
+- Status: ${report.status}
+
+## Summary
+
+${report.summary}
+
+## Recommended actions
+
+${report.recommendations.map((item) => `- ${item}`).join('\n')}
+`;
+}
+
+function reportPrintHtml(report) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(report.name)}</title>
+  <style>
+    body { color: #111827; font-family: Inter, Arial, sans-serif; line-height: 1.5; margin: 48px; }
+    h1 { font-size: 30px; margin-bottom: 8px; }
+    dl { display: grid; grid-template-columns: 180px 1fr; gap: 8px 18px; }
+    dt { color: #64748b; font-weight: 700; text-transform: uppercase; }
+    dd { margin: 0; }
+    .score { font-size: 44px; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(report.name)}</h1>
+  <p>${escapeHtml(report.summary)}</p>
+  <p class="score">${report.score}</p>
+  <dl>
+    <dt>Project</dt><dd>${escapeHtml(report.project)}</dd>
+    <dt>Harness</dt><dd>${escapeHtml(report.harness)}</dd>
+    <dt>Pack</dt><dd>${escapeHtml(report.pack)}</dd>
+    <dt>Run date</dt><dd>${escapeHtml(report.runDate)}</dd>
+    <dt>Critical failures</dt><dd>${report.criticalFailures}</dd>
+    <dt>Status</dt><dd>${escapeHtml(report.status)}</dd>
+  </dl>
+</body>
+</html>`;
+}
+
+function csvEscape(value) {
+  const text = String(value ?? '');
+  return /[",\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function reportSlug(name, index) {
+  return `${String(name).toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/(^-|-$)/gu, '')}-${index + 1}`;
+}
+
+function handleFailureAction(action, failureId, button) {
+  const failure = failurePayload(failureId);
+  if (!failure) return;
+
+  if (action === 'assign-owner') {
+    setText('failure-owner', 'Clinical Safety / Maya Chen');
+    setText('failure-status', 'Assigned');
+    showFailureWorkflowStatus('Owner assigned', 'Maya Chen now owns this failure for Clinical Safety review.');
+    return;
+  }
+
+  if (action === 'rerun-case') {
+    setText('failure-status', 'Rerunning');
+    showFailureWorkflowStatus('Rerun queued', 'Replaying this scenario against the same harness endpoint and mutation seed.');
+    button.disabled = true;
+    window.setTimeout(() => {
+      button.disabled = false;
+      setText('failure-status', 'Reproduced');
+      showFailureWorkflowStatus('Rerun reproduced', 'The failure reproduced with the same contract breach and remains critical.');
+    }, 900);
+    return;
+  }
+
+  if (action === 'export-failure') {
+    downloadText(`${failure.id}.json`, JSON.stringify(failure, null, 2), 'Exported failure evidence');
+    showFailureWorkflowStatus('Failure exported', `${failure.id}.json includes scenario, mutation, evidence, owner, and recommended fix.`);
+    return;
+  }
+
+  const messages = {
+    'create-task': ['Task drafted', 'Created a local task draft with failure evidence and recommended owner.'],
+    'false-positive': ['Review requested', 'Flagged this failure for false-positive review.'],
+    'change-severity': ['Severity review opened', 'Prepared a severity change review for the current critical classification.'],
+    'add-comment': ['Comment added', 'Added a local reviewer note to the failure workflow.'],
+    'add-regression': ['Added to regression suite', 'Pinned this case to the next HealthGuard regression run.'],
+  };
+  const [title, message] = messages[action] ?? ['Action recorded', 'Recorded this workflow action locally.'];
+  showFailureWorkflowStatus(title, message);
+}
+
+function showFailureWorkflowStatus(title, message) {
+  const panel = document.querySelector('#failure-action-status');
+  if (!panel) return;
+  panel.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
+}
+
+function failurePayload(failureId) {
+  const failure = saasFailures.find((candidate) => candidate[7] === failureId) ?? saasFailures[0];
+  if (!failure) return null;
+  const [severity, contract, mutation, scenario, status, owner, reproducibility, id] = failure;
+  const detail = saasFailureDetails[id] ?? saasFailureDetails['fail-redflag-017'];
+  return {
+    id,
+    severity,
+    contract,
+    mutation,
+    scenario,
+    status,
+    owner,
+    reproducibility,
+    expected: detail.expected,
+    observed: detail.observed,
+    why: detail.why,
+    original: detail.original,
+    mutated: detail.mutated,
+    output: detail.output,
+    context: detail.context,
+    reasoning: detail.reasoning,
+    clause: detail.clause,
+    recommendedOwner: 'Clinical Safety / Maya Chen',
+    recommendedFix: 'Retain urgent escalation behavior when user wording minimizes a red-flag symptom.',
+  };
 }
 
 function wait(ms) {

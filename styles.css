@@ -2717,6 +2717,10 @@ section[id] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.ha-grid--usage {
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+}
+
 .ha-panel--wide {
   grid-column: span 2;
 }
@@ -2949,6 +2953,69 @@ section[id] {
   padding: 18px;
 }
 
+.ha-failure-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-color: rgba(37, 99, 235, 0.24);
+  background: #eff6ff;
+  box-shadow: none;
+}
+
+.ha-failure-status strong {
+  color: var(--ha-blue);
+  font-size: 13px;
+}
+
+.ha-failure-status span {
+  color: #334155;
+  font-size: 13px;
+}
+
+.ha-report-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+.ha-report-status strong {
+  color: var(--ha-text);
+  font-size: 13px;
+}
+
+.ha-report-status span {
+  color: var(--ha-muted);
+  font-size: 13px;
+}
+
+.ha-report-export {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 190px;
+}
+
+.ha-report-export button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ha-line);
+  border-radius: 6px;
+  background: var(--ha-surface);
+  color: var(--ha-blue);
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ha-report-export button:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: #eff6ff;
+}
+
 .ha-failure-header h2 {
   margin: 8px 0;
   color: var(--ha-text);
@@ -2991,6 +3058,162 @@ section[id] {
   font-size: 20px;
 }
 
+.ha-usage-meter {
+  display: grid;
+  gap: 16px;
+}
+
+.ha-usage-bars {
+  display: grid;
+  gap: 14px;
+}
+
+.ha-meter {
+  overflow: hidden;
+  height: 14px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.ha-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ha-blue), var(--ha-green));
+}
+
+.ha-meter--small {
+  height: 9px;
+}
+
+.ha-usage-meter__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ha-usage-meter__stats div,
+.ha-usage-row {
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.ha-usage-meter__stats strong,
+.ha-usage-row strong {
+  display: block;
+  color: var(--ha-text);
+  font-size: 20px;
+}
+
+.ha-usage-meter__stats span,
+.ha-usage-row span,
+.ha-plan-table .ha-badge,
+.ha-panel__head span {
+  color: var(--ha-muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.ha-usage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+.ha-usage-track {
+  display: flex;
+  overflow: hidden;
+  width: 100%;
+  height: 9px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.ha-usage-track span {
+  display: block;
+  min-width: 4%;
+  border-radius: inherit;
+  background: var(--ha-blue);
+}
+
+.ha-usage-row .ha-usage-track span {
+  background: var(--ha-blue);
+}
+
+.ha-usage-row:nth-child(2) .ha-usage-track span {
+  background: var(--ha-orange);
+}
+
+.ha-usage-row:nth-child(3) .ha-usage-track span {
+  background: var(--ha-green);
+}
+
+.ha-usage-row div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ha-plan-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-color: rgba(37, 99, 235, 0.35);
+  background: linear-gradient(135deg, #ffffff, #eff6ff);
+}
+
+.ha-plan-current h3 {
+  margin-top: 10px;
+  font-size: 28px;
+}
+
+.ha-plan-current__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ha-plan-current__actions button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ha-line);
+  border-radius: 6px;
+  background: var(--ha-surface);
+  color: var(--ha-text);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ha-plan-current__actions button:first-child {
+  border-color: var(--ha-blue);
+  background: var(--ha-blue);
+  color: #ffffff;
+}
+
+.ha-plan-table tr.is-current td {
+  background: #eff6ff;
+}
+
+.ha-plan-table td:first-child {
+  color: var(--ha-text);
+  font-weight: 800;
+}
+
+.ha-plan-table .ha-badge {
+  margin-left: 8px;
+  color: var(--ha-green);
+  vertical-align: middle;
+}
+
 @media (max-width: 1180px) {
   .ha-console {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -3003,6 +3226,7 @@ section[id] {
 
   .ha-grid--dashboard,
   .ha-grid--split,
+  .ha-grid--usage,
   .ha-grid--evidence {
     grid-template-columns: 1fr;
   }
@@ -3028,13 +3252,15 @@ section[id] {
 
   .ha-topbar,
   .ha-section-head,
-  .ha-failure-header {
+  .ha-failure-header,
+  .ha-plan-current {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .ha-metrics,
   .ha-card-grid,
+  .ha-usage-meter__stats,
   .ha-contract__body {
     grid-template-columns: 1fr;
   }

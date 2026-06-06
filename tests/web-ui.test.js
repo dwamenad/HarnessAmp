@@ -128,6 +128,10 @@ test('web demo persists workspace and report snapshots locally', () => {
 test('saas console persists harnesses and exposes smoke-test controls', () => {
   [
     'harnessamp.consoleState',
+    'renderSaasConsole',
+    'Sign in with GitHub',
+    'authStartHref()',
+    'logout-button',
     'console-harness-form',
     'console-harness-name',
     'console-harness-project',
@@ -138,5 +142,34 @@ test('saas console persists harnesses and exposes smoke-test controls', () => {
     'validateHarnessObservationResponse',
     'runConsoleHarnessSmokeTest',
     'persistConsoleState',
+  ].forEach((text) => assert.match(source, new RegExp(text)));
+});
+
+test('saas failure page exposes actionable workflow controls', () => {
+  [
+    'failure-assign-owner',
+    'failure-rerun-case',
+    'failure-export',
+    'failure-action-status',
+    'data-failure-action',
+    'bindFailureWorkflowEvents',
+    'handleFailureAction',
+    'failurePayload',
+    'Exported failure evidence',
+  ].forEach((text) => assert.match(source, new RegExp(text)));
+});
+
+test('saas reports page exposes working export controls', () => {
+  [
+    'data-report-export',
+    'report-export-status',
+    'bindReportExportEvents',
+    'exportSaasReport',
+    'reportPayload',
+    'reportCsv',
+    'reportMarkdown',
+    'reportPrintHtml',
+    'Downloaded report CSV',
+    'Downloaded print-ready PDF report',
   ].forEach((text) => assert.match(source, new RegExp(text)));
 });
