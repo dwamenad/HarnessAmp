@@ -257,6 +257,121 @@ test('runner jobs enqueue durably, dedupe by idempotency key, and run through wo
   }
 });
 
+test('worker service token can list and run project jobs without a browser session', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  process.env.WORKER_SERVICE_TOKEN = 'worker-service-secret';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+  const originalFetch = globalThis.fetch;
+  let runnerCalls = 0;
+
+  try {
+    const runnerResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'runners' },
+      body: {
+        name: 'Service Worker Runner',
+        endpointUrl: 'https://runner.example.test/service-worker',
+      },
+    }, runnerResponse);
+
+    assert.equal(runnerResponse.statusCode, 200);
+    const runnerId = runnerResponse.body.runner.id;
+
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        runnerId,
+        pack: bundle,
+        idempotencyKey: 'service-worker-job-key-001',
+      },
+    }, createResponse);
+
+    assert.equal(createResponse.statusCode, 200);
+
+    delete process.env.HARNESSAMP_DEV_AUTH;
+
+    const unauthorizedList = createMockResponse();
+    await jobsHandler({
+      method: 'GET',
+      headers: {},
+      query: { projectId: session.defaultProjectId, status: 'queued' },
+    }, unauthorizedList);
+    assert.equal(unauthorizedList.statusCode, 401);
+
+    const listResponse = createMockResponse();
+    await jobsHandler({
+      method: 'GET',
+      headers: { authorization: 'Bearer worker-service-secret' },
+      query: { projectId: session.defaultProjectId, status: 'queued,retrying' },
+    }, listResponse);
+
+    assert.equal(listResponse.statusCode, 200);
+    assert.ok(listResponse.body.jobs.some((job) => job.id === createResponse.body.jobId));
+
+    const wrongProjectRun = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: { authorization: 'Bearer worker-service-secret' },
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: {
+        projectId: 'project_wrong',
+        workerId: 'service-worker',
+      },
+    }, wrongProjectRun);
+
+    assert.equal(wrongProjectRun.statusCode, 409);
+
+    globalThis.fetch = async (url, init) => {
+      runnerCalls += 1;
+      const body = JSON.parse(init.body);
+      assert.equal(url, 'https://runner.example.test/service-worker');
+      assert.equal(body.jobId, createResponse.body.jobId);
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { observations: [] };
+        },
+      };
+    };
+
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: { authorization: 'Bearer worker-service-secret' },
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: {
+        projectId: session.defaultProjectId,
+        workerId: 'service-worker',
+      },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'completed');
+    assert.equal(runResponse.body.attempts, 1);
+    assert.equal(runnerCalls, 1);
+
+    const retryResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: { authorization: 'Bearer worker-service-secret' },
+      query: { id: createResponse.body.jobId, action: 'retry' },
+      body: {},
+    }, retryResponse);
+    assert.equal(retryResponse.statusCode, 401);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.WORKER_SERVICE_TOKEN;
+    process.env.HARNESSAMP_DEV_AUTH = '1';
+  }
+});
+
 test('runner jobs retry failed attempts and can be canceled before execution', async () => {
   process.env.HARNESSAMP_DEV_AUTH = '1';
   const session = await seedDevSession();

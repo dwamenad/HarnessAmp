@@ -267,6 +267,8 @@ See [docs/replit.md](docs/replit.md) and [examples/replit](examples/replit).
 | Task | Command |
 | --- | --- |
 | Start product console | `npm run dev` |
+| Start local API only | `npm run dev:api` |
+| Run local worker | `node scripts/harnessamp.mjs worker --project-id <project-id> --api-url http://127.0.0.1:3000` |
 | Build production app | `npm run build` |
 | Preview production build | `npm run preview` |
 | Analyze bundle | `npm run analyze -- examples/demo-bundle.json` |
@@ -284,11 +286,12 @@ See [docs/replit.md](docs/replit.md) and [examples/replit](examples/replit).
 
 ## Production Configuration
 
-Durable shared reports require KV environment variables:
+Durable API-backed users, workspaces, reports, runner jobs, and benchmark versions require Postgres:
 
 ```text
-KV_REST_API_URL
-KV_REST_API_TOKEN
+DATABASE_URL
+# or
+POSTGRES_URL
 ```
 
 Optional runner environment:
@@ -297,6 +300,12 @@ Optional runner environment:
 HARNESSAMP_RUNNER_ENDPOINT
 HARNESSAMP_RUNNER_TOKEN
 HARNESSAMP_RUNNER_TIMEOUT_MS
+```
+
+Production worker service authentication:
+
+```text
+WORKER_SERVICE_TOKEN
 ```
 
 For local seeded auth:
@@ -309,6 +318,7 @@ HARNESSAMP_DEV_AUTH=1
 
 - Built-in docs route: `/docs`
 - [Installation](docs/installation.md)
+- [API and worker deployment](docs/deployment.md)
 - [Usage](docs/usage.md)
 - [CLI](docs/cli.md)
 - [Mutation engine](docs/mutation-engine.md)

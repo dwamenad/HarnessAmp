@@ -35,6 +35,8 @@ npm run dev
 
 If you prefer split terminals, use `npm run dev:api` and `npm run dev:web`.
 
+For local API details, worker commands, required environment variables, and production worker deployment guidance, see [API and Worker Deployment](deployment.md).
+
 For a production build:
 
 ```bash

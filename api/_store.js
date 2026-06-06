@@ -426,6 +426,14 @@ export async function getRunnerJob({ jobId, userId }) {
 export async function listRunnerJobs({ projectId, userId, statuses = [] }) {
   const membership = await getProjectMembership(userId, projectId);
   if (!membership) throw new Error('Project membership not found');
+  return listRunnerJobsForProject({ projectId, statuses });
+}
+
+export async function listRunnerJobsForWorker({ projectId, statuses = [] }) {
+  return listRunnerJobsForProject({ projectId, statuses });
+}
+
+async function listRunnerJobsForProject({ projectId, statuses = [] }) {
   const normalizedStatuses = normalizeStatusFilter(statuses);
 
   if (useMemory()) {
@@ -505,6 +513,31 @@ export async function claimRunnerJob({ jobId, userId, workerId = 'api-worker' })
 
 export async function runRunnerJobWorker({ jobId, userId, workerId = 'api-worker' }) {
   const claimed = await claimRunnerJob({ jobId, userId, workerId });
+  if (!claimed) return null;
+
+  try {
+    return await dispatchRunnerJob(claimed);
+  } catch (error) {
+    return markRunnerJobFailure(claimed.id, error);
+  }
+}
+
+export async function getRunnerJobForWorker({ jobId, projectId = null }) {
+  if (!projectId) return null;
+  const job = await readJob(jobId);
+  if (!job) return null;
+  if (job.projectId !== projectId) return null;
+  return job;
+}
+
+export async function claimRunnerJobForWorker({ jobId, projectId, workerId = 'api-worker' }) {
+  const job = await getRunnerJobForWorker({ jobId, projectId });
+  if (!job) return null;
+  return claimJobForWorker(job, workerId);
+}
+
+export async function runRunnerJobForWorkerService({ jobId, projectId, workerId = 'api-worker' }) {
+  const claimed = await claimRunnerJobForWorker({ jobId, projectId, workerId });
   if (!claimed) return null;
 
   try {
