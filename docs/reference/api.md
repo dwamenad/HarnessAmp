@@ -162,6 +162,8 @@ Returns the current job document, including `status`, `attempts`, `maxAttempts`,
 
 Lists project runner jobs, optionally filtered by comma-separated status values. The local `harnessamp worker` command uses this endpoint to find queued or retryable jobs from the dev API process.
 
+Worker services may call this endpoint with `Authorization: Bearer <WORKER_SERVICE_TOKEN>`.
+
 ### `POST /api/jobs/<job-id>?action=claim`
 
 Claims a `queued` or due `retrying` job for a worker. Claiming sets the job to `running`, increments `attempts`, records `claimedBy`, and stamps `startedAt` if it was empty.
@@ -169,10 +171,13 @@ Claims a `queued` or due `retrying` job for a worker. Claiming sets the job to `
 Body:
 
 - `workerId` - optional worker/process label
+- `projectId` - required when using `WORKER_SERVICE_TOKEN`; it must match the job project
 
 ### `POST /api/jobs/<job-id>?action=run`
 
 Claims and executes a job through the registered runner. On success it writes a report and marks the job `completed`. On failure it marks the job `retrying` until attempts are exhausted, then `failed`.
+
+Worker services may call this action with `Authorization: Bearer <WORKER_SERVICE_TOKEN>` and a matching `projectId` in the JSON body.
 
 ### `POST /api/jobs/<job-id>?action=retry`
 

@@ -36,6 +36,7 @@ Worker flags:
 - `--project-id <id>` selects the project whose queued/retrying runner jobs should be claimed.
 - `--api-url <url>` points at the local HarnessAmp API, defaulting to `http://127.0.0.1:3000`.
 - `--worker-id <id>` records the worker label on claimed jobs.
+- `--worker-token <token>` sends a worker service bearer token. Prefer `WORKER_SERVICE_TOKEN` in production.
 - `--once` polls once and exits.
 - `--interval-ms <n>` controls polling delay for long-running workers.
 - `--max-jobs <n>` exits after processing that many jobs.

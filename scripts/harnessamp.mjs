@@ -180,6 +180,7 @@ async function runWorkerCommand(parsedOptions) {
       apiUrl: parsedOptions.apiUrl,
       projectId: parsedOptions.projectId,
       workerId: parsedOptions.workerId,
+      workerToken: parsedOptions.workerToken,
       once: parsedOptions.once,
       intervalMs: parsedOptions.intervalMs,
       maxJobs: parsedOptions.maxJobs,
@@ -309,6 +310,7 @@ function parseArgs(args) {
     apiUrl: 'http://127.0.0.1:3000',
     projectId: null,
     workerId: `harnessamp-worker-${process.pid}`,
+    workerToken: process.env.WORKER_SERVICE_TOKEN,
     once: false,
     intervalMs: 2000,
     maxJobs: Infinity,
@@ -482,6 +484,11 @@ function parseArgs(args) {
     }
     if (arg === '--worker-id') {
       parsed.workerId = args[index + 1] ?? parsed.workerId;
+      index += 1;
+      continue;
+    }
+    if (arg === '--worker-token') {
+      parsed.workerToken = args[index + 1] ?? parsed.workerToken;
       index += 1;
       continue;
     }
