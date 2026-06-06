@@ -124,3 +124,19 @@ test('web demo persists workspace and report snapshots locally', () => {
   assert.match(source, /localStorage\.setItem\(STORAGE_KEY/);
   assert.match(source, /localStorage\.setItem\(REPORT_STORAGE_KEY/);
 });
+
+test('saas console persists harnesses and exposes smoke-test controls', () => {
+  [
+    'harnessamp.consoleState',
+    'console-harness-form',
+    'console-harness-name',
+    'console-harness-project',
+    'console-harness-endpoint',
+    'console-save-harness',
+    'console-run-smoke',
+    'console-smoke-panel',
+    'validateHarnessObservationResponse',
+    'runConsoleHarnessSmokeTest',
+    'persistConsoleState',
+  ].forEach((text) => assert.match(source, new RegExp(text)));
+});

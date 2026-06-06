@@ -2362,6 +2362,694 @@ section[id] {
   transform: translateY(0);
 }
 
+.ha-console {
+  --ha-bg: #f5f7fb;
+  --ha-surface: #ffffff;
+  --ha-surface-2: #f9fafc;
+  --ha-text: #111827;
+  --ha-muted: #64748b;
+  --ha-line: #dbe3ee;
+  --ha-blue: #2563eb;
+  --ha-red: #dc2626;
+  --ha-orange: #ea580c;
+  --ha-yellow: #ca8a04;
+  --ha-green: #15803d;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--ha-bg);
+  color: var(--ha-text);
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.ha-console * {
+  letter-spacing: 0;
+}
+
+.ha-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  border-right: 1px solid var(--ha-line);
+  background: #0f172a;
+  padding: 20px 14px;
+  color: #e5e7eb;
+}
+
+.ha-logo,
+.ha-nav a,
+.ha-sidebar__footer,
+.ha-topbar__actions,
+.ha-section-head,
+.ha-panel__head,
+.ha-failure-header,
+.ha-checklist div,
+.ha-failure-mini {
+  display: flex;
+  align-items: center;
+}
+
+.ha-logo {
+  gap: 12px;
+  padding: 6px 8px 20px;
+  text-decoration: none;
+}
+
+.ha-logo > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(147, 197, 253, 0.38);
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ha-logo strong {
+  display: block;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 19px;
+}
+
+.ha-logo small,
+.ha-sidebar__footer small {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.ha-nav {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.ha-nav a {
+  gap: 10px;
+  border-radius: 6px;
+  color: #cbd5e1;
+  padding: 10px 11px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ha-nav a:hover,
+.ha-nav a.is-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.ha-nav a span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 5px;
+  color: #93c5fd;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+}
+
+.ha-sidebar__footer {
+  gap: 10px;
+  margin-top: auto;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.ha-status-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ha-green);
+}
+
+.ha-status-dot--warn {
+  background: var(--ha-orange);
+}
+
+.ha-main {
+  min-width: 0;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.03), transparent 260px),
+    var(--ha-bg);
+}
+
+.ha-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 82px;
+  border-bottom: 1px solid var(--ha-line);
+  background: rgba(245, 247, 251, 0.9);
+  padding: 18px clamp(18px, 3vw, 36px);
+  backdrop-filter: blur(14px);
+}
+
+.ha-topbar p,
+.ha-intro p,
+.ha-section-head p,
+.ha-panel p,
+.ha-panel small,
+.ha-metric small,
+.ha-metric span,
+.ha-table td,
+.ha-pack dd,
+.ha-pack dt,
+.ha-failure-mini small {
+  color: var(--ha-muted);
+}
+
+.ha-topbar p {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.ha-topbar h1 {
+  margin: 0;
+  color: var(--ha-text);
+  font-size: clamp(28px, 3.2vw, 42px);
+  line-height: 1;
+}
+
+.ha-topbar__actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ha-topbar__actions a,
+.ha-topbar__actions button,
+.ha-primary,
+.ha-secondary,
+.ha-actions button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ha-line);
+  border-radius: 6px;
+  background: var(--ha-surface);
+  color: var(--ha-text);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ha-topbar__actions a:first-child,
+.ha-primary {
+  border-color: var(--ha-blue);
+  background: var(--ha-blue);
+  color: #ffffff;
+}
+
+.ha-secondary {
+  background: var(--ha-surface);
+  color: var(--ha-text);
+}
+
+.ha-page {
+  display: grid;
+  gap: 18px;
+  padding: 24px clamp(18px, 3vw, 36px) 48px;
+}
+
+.ha-intro,
+.ha-section-head {
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.ha-intro {
+  max-width: 900px;
+}
+
+.ha-intro h2,
+.ha-section-head h2 {
+  margin-bottom: 8px;
+  color: var(--ha-text);
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1.05;
+}
+
+.ha-intro p,
+.ha-section-head p {
+  max-width: 760px;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.ha-metrics,
+.ha-card-grid,
+.ha-grid,
+.ha-stack,
+.ha-form,
+.ha-checklist,
+.ha-bars,
+.ha-contract__body {
+  display: grid;
+  gap: 14px;
+}
+
+.ha-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ha-metric,
+.ha-panel {
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.ha-metric {
+  padding: 16px;
+}
+
+.ha-metric span,
+.ha-metric small,
+.ha-pack dt {
+  display: block;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.ha-metric strong {
+  display: block;
+  margin: 10px 0 4px;
+  color: var(--ha-text);
+  font-size: 32px;
+}
+
+.ha-metric--critical {
+  border-left: 4px solid var(--ha-red);
+}
+
+.ha-metric--major {
+  border-left: 4px solid var(--ha-orange);
+}
+
+.ha-metric--warn {
+  border-left: 4px solid var(--ha-yellow);
+}
+
+.ha-metric--passed {
+  border-left: 4px solid var(--ha-green);
+}
+
+.ha-panel {
+  min-width: 0;
+  padding: 18px;
+}
+
+.ha-panel h3 {
+  margin: 0 0 12px;
+  color: var(--ha-text);
+  font-size: 18px;
+}
+
+.ha-panel h4 {
+  margin: 0 0 4px;
+  color: var(--ha-text);
+  font-size: 13px;
+}
+
+.ha-panel__head {
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.ha-panel__head h3 {
+  margin: 0;
+}
+
+.ha-panel__head a,
+.ha-table a,
+.ha-ci-card a {
+  color: var(--ha-blue);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ha-grid--dashboard {
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+}
+
+.ha-grid--split,
+.ha-grid--evidence {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ha-panel--wide {
+  grid-column: span 2;
+}
+
+.ha-card-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ha-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ha-table th,
+.ha-table td {
+  border-bottom: 1px solid var(--ha-line);
+  padding: 11px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ha-table th {
+  color: #475569;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.ha-table code {
+  color: #334155;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+
+.ha-badge {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.ha-badge--critical {
+  background: #fee2e2;
+  color: var(--ha-red);
+}
+
+.ha-badge--major {
+  background: #ffedd5;
+  color: var(--ha-orange);
+}
+
+.ha-badge--minor {
+  background: #fef9c3;
+  color: var(--ha-yellow);
+}
+
+.ha-badge--passed {
+  background: #dcfce7;
+  color: var(--ha-green);
+}
+
+.ha-badge--neutral {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.ha-bars div {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--ha-surface-2);
+  padding: 11px;
+}
+
+.ha-bars i {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--ha-blue);
+}
+
+.ha-failure-mini {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--ha-line);
+  border-radius: 7px;
+  background: var(--ha-surface-2);
+  padding: 12px;
+  text-decoration: none;
+}
+
+.ha-failure-mini strong {
+  color: var(--ha-text);
+}
+
+.ha-ci-card {
+  border: 1px solid var(--ha-line);
+  border-radius: 7px;
+  background: var(--ha-surface-2);
+  padding: 14px;
+}
+
+.ha-form label,
+.ha-form fieldset {
+  display: grid;
+  gap: 7px;
+}
+
+.ha-form label span,
+.ha-form legend {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ha-form input,
+.ha-form select,
+.ha-form textarea {
+  width: 100%;
+  border: 1px solid var(--ha-line);
+  border-radius: 6px;
+  background: var(--ha-surface);
+  color: var(--ha-text);
+  padding: 10px 11px;
+  font: inherit;
+  font-size: 14px;
+}
+
+.ha-form fieldset {
+  border: 1px solid var(--ha-line);
+  border-radius: 7px;
+  padding: 12px;
+}
+
+.ha-form fieldset label {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  color: var(--ha-muted);
+  font-size: 13px;
+}
+
+.ha-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ha-form-feedback,
+.ha-smoke-message {
+  margin: 0;
+  color: var(--ha-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ha-form-feedback:empty {
+  display: none;
+}
+
+.ha-checklist div {
+  gap: 9px;
+  border-bottom: 1px solid var(--ha-line);
+  padding-bottom: 10px;
+  color: var(--ha-muted);
+  font-size: 14px;
+}
+
+.ha-code,
+.ha-evidence pre {
+  overflow: auto;
+  border: 1px solid var(--ha-line);
+  border-radius: 7px;
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 14px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ha-pack p {
+  min-height: 96px;
+  line-height: 1.55;
+}
+
+.ha-pack dl {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.ha-pack dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.ha-contract summary {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 130px 110px 120px;
+  gap: 12px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.ha-contract__body {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 16px;
+  border-top: 1px solid var(--ha-line);
+  padding-top: 16px;
+}
+
+.ha-estimate .ha-metric {
+  box-shadow: none;
+}
+
+.ha-failure-header {
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface);
+  padding: 18px;
+}
+
+.ha-failure-header h2 {
+  margin: 8px 0;
+  color: var(--ha-text);
+  font-size: 34px;
+}
+
+.ha-evidence {
+  display: grid;
+  gap: 8px;
+}
+
+.ha-evidence h3 {
+  margin-top: 6px;
+}
+
+.ha-evidence p {
+  line-height: 1.55;
+}
+
+.ha-actions {
+  align-content: start;
+  display: grid;
+  gap: 8px;
+}
+
+.ha-actions button {
+  width: 100%;
+}
+
+.ha-delta {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  border-bottom: 1px solid var(--ha-line);
+  padding: 11px 0;
+}
+
+.ha-delta strong {
+  color: var(--ha-red);
+  font-size: 20px;
+}
+
+@media (max-width: 1180px) {
+  .ha-console {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .ha-metrics,
+  .ha-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ha-grid--dashboard,
+  .ha-grid--split,
+  .ha-grid--evidence {
+    grid-template-columns: 1fr;
+  }
+
+  .ha-panel--wide {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .ha-console {
+    grid-template-columns: 1fr;
+  }
+
+  .ha-sidebar {
+    position: static;
+    height: auto;
+  }
+
+  .ha-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ha-topbar,
+  .ha-section-head,
+  .ha-failure-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ha-metrics,
+  .ha-card-grid,
+  .ha-contract__body {
+    grid-template-columns: 1fr;
+  }
+
+  .ha-contract summary {
+    grid-template-columns: 1fr;
+  }
+
+  .ha-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}
+
 @media (max-width: 1060px) {
   .topbar__nav {
     display: none;
