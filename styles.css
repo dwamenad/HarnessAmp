@@ -3063,6 +3063,84 @@ section[id] {
   width: 100%;
 }
 
+.ha-run-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.ha-run-links a {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  border: 1px solid var(--ha-line);
+  border-radius: 6px;
+  background: var(--ha-surface-2);
+  color: var(--ha-blue);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.ha-run-timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.ha-run-timeline ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ha-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ha-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(150px, 0.35fr));
+  gap: 12px;
+}
+
+.ha-filter-bar label,
+.ha-triage-controls label {
+  display: grid;
+  gap: 7px;
+}
+
+.ha-filter-bar label span,
+.ha-triage-controls label span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ha-filter-bar input,
+.ha-filter-bar select,
+.ha-triage-controls select,
+.ha-triage-controls textarea {
+  width: 100%;
+  border: 1px solid var(--ha-line);
+  border-radius: 6px;
+  background: var(--ha-surface);
+  color: var(--ha-text);
+  padding: 10px 11px;
+  font: inherit;
+  font-size: 14px;
+}
+
+.ha-triage-controls {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ha-line);
+  border-radius: 7px;
+  background: var(--ha-surface-2);
+  padding: 12px;
+}
+
 .ha-delta {
   display: grid;
   grid-template-columns: 120px 1fr;
@@ -3245,7 +3323,8 @@ section[id] {
   .ha-grid--dashboard,
   .ha-grid--split,
   .ha-grid--usage,
-  .ha-grid--evidence {
+  .ha-grid--evidence,
+  .ha-filter-bar {
     grid-template-columns: 1fr;
   }
 

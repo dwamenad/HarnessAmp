@@ -162,6 +162,7 @@ const saasRouteLabels = {
   '/runs/new': 'New Run',
   '/runs/run-healthguard-2419': 'Run Progress',
   '/runs/run-healthguard-2419/summary': 'Run Summary',
+  '/failures': 'Failures',
   '/failures/fail-redflag-017': 'Failure Evidence',
   '/compare': 'Compare Runs',
   '/reports': 'Reports',
@@ -176,7 +177,7 @@ const saasNav = [
   ['/packs', 'Mutation Packs', 'MP'],
   ['/contracts', 'Contracts', 'BC'],
   ['/runs/new', 'New Run', 'NR'],
-  ['/failures/fail-redflag-017', 'Failures', 'FE'],
+  ['/failures', 'Failures', 'FE'],
   ['/compare', 'Compare', 'CR'],
   ['/reports', 'Reports', 'RP'],
   ['/ci', 'CI / Runners', 'CI'],
@@ -510,7 +511,9 @@ function renderSaasSidebar(route) {
       </a>
       <nav class="ha-nav" aria-label="Console">
         ${saasNav.map(([href, label, icon]) => {
-          const active = route.pathname === href || (href === '/harnesses' && route.pathname.startsWith('/harnesses/'));
+          const active = route.pathname === href
+            || (href === '/harnesses' && route.pathname.startsWith('/harnesses/'))
+            || (href === '/failures' && route.pathname.startsWith('/failures/'));
           return `<a class="${active ? 'is-active' : ''}" href="${href}"><span>${icon}</span>${label}</a>`;
         }).join('')}
       </nav>
@@ -531,6 +534,7 @@ function renderSaasRoute(route) {
   if (route.pathname === '/runs/new') return renderSaasNewRun();
   if (route.routeType === 'run-summary') return renderSaasRunSummary(route.runId);
   if (route.routeType === 'run-progress') return renderSaasRunProgress(route.runId);
+  if (route.pathname === '/failures') return renderSaasFailuresList();
   if (route.routeType === 'failure') return renderSaasFailureDetail(route.failureId);
   if (route.pathname === '/compare') return renderSaasCompare();
   if (route.pathname === '/reports') return renderSaasReports();
@@ -651,26 +655,41 @@ function renderSaasContracts() {
 }
 
 function renderSaasNewRun() {
+  const draft = consoleState.runDraft;
+  const harnesses = getConsoleHarnesses();
+  const packOptions = runnablePackOptions();
+  const selectedPack = packOptions.find((pack) => pack.id === draft.packId) ?? packOptions[0];
+  const selectedTier = runTierOptions().find((tier) => tier.id === draft.tier) ?? runTierOptions()[0];
+  const estimated = estimateRunSelection(selectedPack, selectedTier);
+  const selectedHarness = harnesses.find((harness) => harness.id === draft.harnessId) ?? harnesses[0];
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Configure Run</h2><p>Select a harness, pack, and gate condition.</p></div></div>
+      <div class="ha-section-head"><div><h2>Configure Run</h2><p>Select a harness, pack, tier, and gate condition.</p></div></div>
       <div class="ha-grid ha-grid--split">
-        <form class="ha-panel ha-form">
-          ${renderSelect('Harness', saasHarnesses.map(([name]) => name))}
-          ${renderSelect('Mutation Pack', saasPacks.map(([name]) => name))}
-          ${renderSelect('Mode', ['Smoke', 'Standard', 'Deep'])}
-          ${renderSelect('Fail condition', ['never block', 'block on critical failures', 'block on score below threshold'])}
-          ${renderField('Max observations', '2000')}
+        <form class="ha-panel ha-form" id="run-config-form">
+          ${renderSelectFromObjects('Harness', harnesses.map((harness) => ({ value: harness.id, label: `${harness.name} / ${harness.environment}` })), selectedHarness?.id, 'run-harness-select')}
+          ${renderSelectFromObjects('Mutation Pack', packOptions.map((pack) => ({ value: pack.id, label: pack.name })), selectedPack?.id, 'run-pack-select')}
+          ${renderSelectFromObjects('Tier', runTierOptions().map((tier) => ({ value: tier.id, label: tier.label })), selectedTier.id, 'run-tier-select')}
+          ${renderSelect('Fail condition', ['block on critical failures', 'block on high severity', 'block on score below threshold', 'never block'], draft.failCondition, 'run-fail-condition')}
+          ${renderField('Max observations', String(draft.maxObservations), 'run-max-observations', 'number')}
           <fieldset><legend>Contracts to include</legend>${saasContracts.slice(0, 5).map(([name]) => `<label><input type="checkbox" checked /> ${escapeHtml(name)}</label>`).join('')}</fieldset>
           <fieldset><legend>Mutation families</legend>${['prompt pressure', 'context omission', 'schema drift', 'tool timeout', 'role confusion', 'workflow interruption'].map((item) => `<label><input type="checkbox" checked /> ${item}</label>`).join('')}</fieldset>
-          <a class="ha-primary" href="/runs/run-healthguard-2419">Start Run</a>
+          <div class="ha-form-actions">
+            <button class="ha-primary" id="start-configured-run" type="button">Start Run</button>
+            <a class="ha-secondary" href="/runs/${escapeHtml(consoleState.activeRunId || 'run-healthguard-2419')}">View active run</a>
+          </div>
+          <p class="ha-form-feedback" id="run-config-feedback">${escapeHtml(consoleState.runFeedback)}</p>
         </form>
         <article class="ha-panel ha-estimate">
           <h3>Usage Estimate</h3>
-          ${renderSaasMetric('Estimated scenarios', '96', 'HealthGuard Standard', 'neutral')}
-          ${renderSaasMetric('Estimated evaluated observations', '1,842', 'response x contract checks', 'neutral')}
-          ${renderSaasMetric('Premium observations', '314', 'counts as 942 standard', 'major')}
+          ${renderSaasMetric('Estimated scenarios', estimated.scenarios, `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
+          ${renderSaasMetric('Estimated evaluated observations', estimated.observations, 'response x contract checks', 'neutral')}
+          ${renderSaasMetric('Queued job path', state.sessionStatus === 'authenticated' ? 'API-backed' : 'Local preview', state.sessionStatus === 'authenticated' ? 'uses project runner queue' : 'persists in this browser', state.sessionStatus === 'authenticated' ? 'passed' : 'major')}
           ${renderSaasMetric('Remaining monthly allowance', '36,580', 'Team plan', 'passed')}
+          <div class="ha-run-links">
+            <a href="/failures">Open failure queue</a>
+            <a href="/reports">Open reports</a>
+          </div>
         </article>
       </div>
     </section>
@@ -678,58 +697,90 @@ function renderSaasNewRun() {
 }
 
 function renderSaasRunProgress(runId = 'run-healthguard-2419') {
-  const [id, name, harness, pack, status, score, critical, observations, started] = saasRuns.find(([candidateId]) => candidateId === runId) ?? saasRuns[0];
-  const progress = status === 'queued' ? '0%' : status === 'failed' ? '41%' : '100%';
+  const run = runRecord(runId);
+  const id = run.id;
+  const status = run.status;
+  const progress = run.progress ?? (status === 'queued' ? 8 : status === 'running' ? 58 : status === 'failed' ? 41 : 100);
   const statusText = status === 'queued' ? 'queued' : status === 'failed' ? 'failed during endpoint validation' : 'completed';
+  const jobMeta = run.jobId ? ` / Job ${run.jobId}` : '';
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>${escapeHtml(name)}</h2><p>${escapeHtml(harness)} / ${escapeHtml(pack)} / Started ${escapeHtml(started)}. Run status: ${escapeHtml(statusText)}.</p></div><a class="ha-primary" href="/runs/${escapeHtml(id)}/summary">View Summary</a></div>
+      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)}</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(run.pack)} / ${escapeHtml(run.tierLabel)} / Started ${escapeHtml(run.started)}${escapeHtml(jobMeta)}. Run status: ${escapeHtml(statusText)}.</p></div><a class="ha-primary" href="/runs/${escapeHtml(id)}/summary">View Summary</a></div>
       <div class="ha-metrics">
         ${renderSaasMetric('Run status', status, 'current state', status === 'completed' ? 'passed' : status === 'failed' ? 'critical' : 'warn')}
-        ${renderSaasMetric('Progress', progress, `${escapeHtml(observations)} observations evaluated`, status === 'completed' ? 'passed' : 'warn')}
-        ${renderSaasMetric('Critical failures', critical, 'review required when nonzero', Number(critical) > 0 ? 'critical' : 'passed')}
+        ${renderSaasMetric('Progress', `${progress}%`, `${escapeHtml(run.observations)} observations evaluated`, status === 'completed' ? 'passed' : 'warn')}
+        ${renderSaasMetric('Critical failures', run.critical, 'review required when nonzero', Number(run.critical) > 0 ? 'critical' : 'passed')}
         ${renderSaasMetric('Average latency', '1.84s', 'p95 3.1s', 'neutral')}
       </div>
+      <article class="ha-panel ha-run-timeline" id="run-live-status" aria-live="polite">
+        <div class="ha-meter"><span style="width: ${progress}%"></span></div>
+        <ol>${run.timeline.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ol>
+      </article>
       <div class="ha-grid ha-grid--split">
         ${renderBreakdownPanel('Failures by mutation family', [['prompt pressure', 8], ['context omission', 6], ['role confusion', 4], ['schema drift', 2]])}
         ${renderBreakdownPanel('Failures by contract', [['Escalate red flags', 4], ['Avoid diagnosis', 3], ['Preserve facts', 2], ['Minimize sensitive data', 1]])}
-        <article class="ha-panel"><h3>Warnings</h3><p>Two retries and one slow response.</p></article>
-        <article class="ha-panel"><h3>Endpoint errors</h3><p>No hard failures.</p></article>
+        <article class="ha-panel"><h3>Next link</h3><p>Summary, report, and failure queue become available as the run completes.</p><div class="ha-run-links"><a href="/runs/${escapeHtml(id)}/summary">Run summary</a><a href="/failures">Failure queue</a><a href="/reports">Reports</a></div></article>
+        <article class="ha-panel"><h3>Endpoint errors</h3><p>${status === 'failed' ? 'Endpoint validation failed.' : 'No hard failures.'}</p></article>
       </div>
     </section>
   `;
 }
 
 function renderSaasRunSummary(runId = 'run-healthguard-2419') {
-  const [id, name, harness, pack, status, score, critical, observations] = saasRuns.find(([candidateId]) => candidateId === runId) ?? saasRuns[0];
-  const majorFailures = Number(critical) > 0 ? '7' : status === 'failed' ? '3' : '2';
-  const passRate = score === '--' ? '--' : `${Math.max(0, Math.min(100, Number(score) + 6))}%`;
-  const scoreTone = Number(critical) > 0 ? 'major' : 'passed';
+  const run = runRecord(runId);
+  const majorFailures = Number(run.critical) > 0 ? '7' : run.status === 'failed' ? '3' : '2';
+  const passRate = run.score === '--' ? '--' : `${Math.max(0, Math.min(100, Number(run.score) + 6))}%`;
+  const scoreTone = Number(run.critical) > 0 ? 'major' : 'passed';
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>${escapeHtml(name)} Summary</h2><p>${escapeHtml(harness)} / ${escapeHtml(pack)}</p></div><a class="ha-primary" href="/failures/fail-redflag-017">View Top Failure</a></div>
+      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)} Summary</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(run.pack)} / ${escapeHtml(run.tierLabel)}</p></div><div class="ha-topbar__actions"><a class="ha-primary" href="/failures/fail-redflag-017">View Top Failure</a><a href="/reports">Open Report Center</a></div></div>
       <div class="ha-metrics">
-        ${renderSaasMetric('Robustness Score', score, 'baseline 86', scoreTone)}
-        ${renderSaasMetric('Critical Failures', critical, 'review required when nonzero', Number(critical) > 0 ? 'critical' : 'passed')}
+        ${renderSaasMetric('Robustness Score', run.score, 'baseline 86', scoreTone)}
+        ${renderSaasMetric('Critical Failures', run.critical, 'review required when nonzero', Number(run.critical) > 0 ? 'critical' : 'passed')}
         ${renderSaasMetric('Major Failures', majorFailures, 'owners assigned', Number(majorFailures) > 3 ? 'major' : 'neutral')}
         ${renderSaasMetric('Pass Rate', passRate, 'versus previous baseline', scoreTone)}
       </div>
       <div class="ha-grid ha-grid--dashboard">
         ${renderBreakdownPanel('Failures by Contract', [['Escalate red flags', 4], ['Avoid diagnosis', 3], ['Preserve facts', 2], ['Sensitive data', 1]])}
         ${renderBreakdownPanel('Failures by Mutation Family', [['Prompt pressure', 8], ['Context omission', 6], ['Role confusion', 4], ['Tool timeout', 1]])}
-        <article class="ha-panel ha-panel--wide"><div class="ha-panel__head"><h3>Critical Failure List</h3><span>${escapeHtml(observations)} observations</span></div>${renderFailuresTable()}</article>
+        <article class="ha-panel"><h3>Run artifacts</h3><div class="ha-run-links"><a href="/reports">Executive report</a><a href="/failures">Failure queue</a><a href="/compare">Compare run</a></div></article>
+        <article class="ha-panel ha-panel--wide"><div class="ha-panel__head"><h3>Critical Failure List</h3><span>${escapeHtml(run.observations)} observations</span></div>${renderFailuresTable()}</article>
       </div>
+    </section>
+  `;
+}
+
+function renderSaasFailuresList() {
+  const filters = consoleState.failureFilters;
+  const failures = filteredFailures();
+  return `
+    <section class="ha-page">
+      <div class="ha-section-head"><div><h2>Failure Queue</h2><p>Filter failures, assign owners, resolve false positives, and pin regression cases.</p></div><a class="ha-primary" href="/failures/fail-redflag-017">Open top failure</a></div>
+      <article class="ha-panel ha-filter-bar">
+        <label><span>Search</span><input id="failure-search" type="search" value="${escapeHtml(filters.search)}" placeholder="contract, mutation, scenario, owner" /></label>
+        ${renderSelect('Severity', ['All', 'Critical', 'Major', 'Minor'], filters.severity, 'failure-filter-severity')}
+        ${renderSelect('Status', ['All', 'New', 'Assigned', 'In Progress', 'False positive', 'Regression pinned', 'Resolved'], filters.status, 'failure-filter-status')}
+        ${renderSelect('Owner', ['All', 'Safety Review', 'Clinical Safety', 'Knowledge Review', 'Privacy Review', 'Compliance Review'], filters.owner, 'failure-filter-owner')}
+      </article>
+      <article class="ha-panel">
+        <div class="ha-panel__head"><h3>Open failures</h3><span>${failures.length} shown</span></div>
+        ${renderFailuresTable(failures)}
+      </article>
     </section>
   `;
 }
 
 function renderSaasFailureDetail(failureId = 'fail-redflag-017') {
   const [severity, contract, mutation, scenario, status, owner, reproducibility, id] = saasFailures.find((failure) => failure[7] === failureId) ?? saasFailures[0];
+  const savedWorkflow = readLocalFailureWorkflow(id);
+  const currentSeverity = savedWorkflow?.severity ?? severity;
+  const currentStatus = savedWorkflow?.status ?? status;
+  const currentOwner = savedWorkflow?.owner ?? owner;
   const detail = saasFailureDetails[id] ?? saasFailureDetails['fail-redflag-017'];
   return `
     <section class="ha-page">
       <div class="ha-failure-header">
-        <div><span id="failure-severity" class="ha-badge ${severityClass(severity)}">${escapeHtml(severity)}</span><h2>${escapeHtml(contract)}</h2><p>Mutation family: ${escapeHtml(mutation)} / Scenario: ${escapeHtml(scenario)} / Status: <span id="failure-status">${escapeHtml(status)}</span> / Owner: <span id="failure-owner">${escapeHtml(owner)}</span></p></div>
+        <div><span id="failure-severity" class="ha-badge ${severityClass(currentSeverity)}">${escapeHtml(currentSeverity)}</span><h2>${escapeHtml(contract)}</h2><p>Mutation family: ${escapeHtml(mutation)} / Scenario: ${escapeHtml(scenario)} / Status: <span id="failure-status">${escapeHtml(currentStatus)}</span> / Owner: <span id="failure-owner">${escapeHtml(currentOwner)}</span></p></div>
         <div class="ha-topbar__actions">
           <button id="failure-assign-owner" data-failure-action="assign-owner" data-failure-id="${escapeHtml(id)}" type="button">Assign owner</button>
           <button id="failure-rerun-case" data-failure-action="rerun-case" data-failure-id="${escapeHtml(id)}" type="button">Rerun this case</button>
@@ -767,6 +818,11 @@ function renderSaasFailureDetail(failureId = 'fail-redflag-017') {
         </article>
         <article class="ha-panel ha-actions">
           <h3>Actions</h3>
+          <div class="ha-triage-controls">
+            ${renderSelect('Assignee', ['Safety Review', 'Clinical Safety', 'Knowledge Review', 'Privacy Review', 'Compliance Review'], currentOwner, 'failure-owner-select')}
+            ${renderSelect('Severity', ['Critical', 'Major', 'Minor'], currentSeverity, 'failure-severity-select')}
+            <label><span>Comment</span><textarea id="failure-comment" rows="3" placeholder="Add reviewer note"></textarea></label>
+          </div>
           ${[
             ['create-task', 'Create task'],
             ['assign-owner', 'Assign owner'],
@@ -962,15 +1018,18 @@ function renderSaasMetric(label, value, meta, tone = 'neutral') {
 }
 
 function renderSaasRunsTable() {
-  return `<table class="ha-table"><thead><tr><th>Run</th><th>Harness</th><th>Pack</th><th>Status</th><th>Score</th><th>Critical</th><th>Observations</th><th>Started</th></tr></thead><tbody>${saasRuns.map(([id, name, harness, pack, status, score, critical, observations, started]) => `<tr><td><a href="/runs/${id}">${escapeHtml(name)}</a></td><td>${escapeHtml(harness)}</td><td>${escapeHtml(pack)}</td><td><span class="ha-badge ${statusClass(status)}">${escapeHtml(status)}</span></td><td>${score}</td><td>${critical}</td><td>${observations}</td><td>${escapeHtml(started)}</td></tr>`).join('')}</tbody></table>`;
+  return `<table class="ha-table"><thead><tr><th>Run</th><th>Harness</th><th>Pack</th><th>Status</th><th>Score</th><th>Critical</th><th>Observations</th><th>Started</th></tr></thead><tbody>${allRunRecords().map((run) => `<tr><td><a href="/runs/${escapeHtml(run.id)}">${escapeHtml(run.name)}</a></td><td>${escapeHtml(run.harness)}</td><td>${escapeHtml(run.pack)}</td><td><span class="ha-badge ${statusClass(run.status)}">${escapeHtml(run.status)}</span></td><td>${escapeHtml(run.score)}</td><td>${escapeHtml(run.critical)}</td><td>${escapeHtml(run.observations)}</td><td>${escapeHtml(run.started)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function renderHarnessTable() {
   return `<table class="ha-table"><thead><tr><th>Name</th><th>Project</th><th>Environment</th><th>Endpoint</th><th>Status</th><th>Last Smoke Test</th><th>Last Run</th><th>Actions</th></tr></thead><tbody>${getConsoleHarnesses().map((harness) => `<tr><td>${escapeHtml(harness.name)}</td><td>${escapeHtml(harness.project)}</td><td>${escapeHtml(harness.environment)}</td><td><code>${escapeHtml(harness.endpoint)}</code></td><td><span class="ha-badge ${statusClass(harness.status)}">${escapeHtml(harness.status)}</span></td><td>${escapeHtml(harness.lastSmokeTest)}</td><td>${escapeHtml(harness.lastRun)}</td><td><a href="/runs/new">Configure Run</a></td></tr>`).join('')}</tbody></table>`;
 }
 
-function renderFailuresTable() {
-  return `<table class="ha-table"><thead><tr><th>Severity</th><th>Contract</th><th>Mutation</th><th>Scenario</th><th>Status</th><th>Owner</th><th>Reproducibility</th><th>Action</th></tr></thead><tbody>${saasFailures.map(([severity, contract, mutation, scenario, status, owner, repro, id]) => `<tr><td><span class="ha-badge ${severityClass(severity)}">${severity}</span></td><td>${escapeHtml(contract)}</td><td>${escapeHtml(mutation)}</td><td>${escapeHtml(scenario)}</td><td>${escapeHtml(status)}</td><td>${escapeHtml(owner)}</td><td>${repro}</td><td><a href="/failures/${id}">View Failure</a></td></tr>`).join('')}</tbody></table>`;
+function renderFailuresTable(failures = saasFailures) {
+  return `<table class="ha-table"><thead><tr><th>Severity</th><th>Contract</th><th>Mutation</th><th>Scenario</th><th>Status</th><th>Owner</th><th>Reproducibility</th><th>Action</th></tr></thead><tbody>${failures.map((failure) => {
+    const [severity, contract, mutation, scenario, status, owner, repro, id] = failureRowWithWorkflow(failure);
+    return `<tr><td><span class="ha-badge ${severityClass(severity)}">${escapeHtml(severity)}</span></td><td>${escapeHtml(contract)}</td><td>${escapeHtml(mutation)}</td><td>${escapeHtml(scenario)}</td><td>${escapeHtml(status)}</td><td>${escapeHtml(owner)}</td><td>${escapeHtml(repro)}</td><td><a href="/failures/${escapeHtml(id)}">View Failure</a></td></tr>`;
+  }).join('')}</tbody></table>`;
 }
 
 function renderBreakdownPanel(title, rows) {
@@ -988,6 +1047,236 @@ function renderField(label, value, id = '', type = 'text') {
 
 function renderSelect(label, options, selectedValue = options[0], id = '') {
   return `<label><span>${escapeHtml(label)}</span><select ${id ? `id="${escapeHtml(id)}"` : ''}>${options.map((option) => `<option value="${escapeHtml(option)}" ${option === selectedValue ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select></label>`;
+}
+
+function renderSelectFromObjects(label, options, selectedValue = options[0]?.value, id = '') {
+  return `<label><span>${escapeHtml(label)}</span><select ${id ? `id="${escapeHtml(id)}"` : ''}>${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === selectedValue ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></label>`;
+}
+
+function runnablePackOptions() {
+  return [
+    { id: 'healthguard-core', name: 'HealthGuard', scenarios: { smoke: 400, core: 4560, deep: 22800, nightly: 68400 } },
+    { id: 'financeguard-core', name: 'FinanceGuard', scenarios: { smoke: 400, core: 3400, deep: 17000, nightly: 51000 } },
+    { id: 'customercareguard-core', name: 'CustomerCareGuard', scenarios: { smoke: 400, core: 3600, deep: 18000, nightly: 54000 } },
+    { id: 'legalguard-core', name: 'LegalGuard', scenarios: { smoke: 400, core: 4200, deep: 21000, nightly: 63000 } },
+  ];
+}
+
+function runTierOptions() {
+  return [
+    { id: 'smoke', label: 'Smoke' },
+    { id: 'core', label: 'Core' },
+    { id: 'deep', label: 'Deep' },
+    { id: 'nightly', label: 'Nightly' },
+  ];
+}
+
+function estimateRunSelection(pack, tier) {
+  const scenarioCount = pack?.scenarios?.[tier?.id] ?? 400;
+  const maxObservations = normalizePositiveIntegerInput(consoleState.runDraft.maxObservations, scenarioCount);
+  const observations = Math.min(scenarioCount, maxObservations);
+  return {
+    scenarios: scenarioCount.toLocaleString(),
+    observations: observations.toLocaleString(),
+  };
+}
+
+function allRunRecords() {
+  return [
+    ...consoleState.runs,
+    ...saasRuns.map(([id, name, harness, pack, status, score, critical, observations, started]) => ({
+      id,
+      name,
+      harness,
+      pack,
+      tier: name.toLowerCase().includes('deep') ? 'deep' : name.toLowerCase().includes('smoke') ? 'smoke' : 'core',
+      tierLabel: name.toLowerCase().includes('deep') ? 'Deep' : name.toLowerCase().includes('smoke') ? 'Smoke' : 'Core',
+      status,
+      score,
+      critical,
+      observations,
+      started,
+      progress: status === 'queued' ? 0 : status === 'failed' ? 41 : 100,
+      timeline: defaultRunTimeline(status),
+    })),
+  ];
+}
+
+function runRecord(runId) {
+  return allRunRecords().find((run) => run.id === runId) ?? allRunRecords()[0];
+}
+
+function defaultRunTimeline(status) {
+  if (status === 'queued') return ['Run queued', 'Waiting for a runner'];
+  if (status === 'running') return ['Run queued', 'Runner claimed job', 'Evaluating mutated observations'];
+  if (status === 'failed') return ['Run queued', 'Runner claimed job', 'Endpoint validation failed'];
+  return ['Run queued', 'Runner claimed job', 'Evaluation completed', 'Report and failure links generated'];
+}
+
+function updateRunDraft(key, value) {
+  consoleState.runDraft = {
+    ...consoleState.runDraft,
+    [key]: key === 'maxObservations' ? normalizePositiveIntegerInput(value, 2000) : value,
+  };
+  persistConsoleState();
+  if (['packId', 'tier', 'maxObservations'].includes(key)) render();
+}
+
+async function startConfiguredRun() {
+  const run = createLocalRunRecord();
+  consoleState.activeRunId = run.id;
+  upsertConsoleRun(run);
+  consoleState.runFeedback = `Queued ${run.name}`;
+  persistConsoleState();
+
+  if (state.sessionStatus === 'authenticated' && state.selectedProjectId && state.selectedRunnerId) {
+    try {
+      const payload = await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runnerId: state.selectedRunnerId,
+          pack: {
+            id: run.packId,
+            tier: run.tier,
+            name: run.pack,
+            maxObservations: consoleState.runDraft.maxObservations,
+          },
+          thresholds: {
+            ...state.thresholds,
+            failCondition: consoleState.runDraft.failCondition,
+          },
+          profileId: run.packId,
+          presetId: run.tier,
+          idempotencyKey: run.id,
+          maxAttempts: 2,
+          timeoutMs: 30000,
+          retryBackoffMs: 1500,
+        }),
+      });
+      run.jobId = payload.jobId;
+      run.status = payload.status ?? 'queued';
+      run.timeline = ['Run queued through project runner API', `Job ${payload.jobId} created`];
+      upsertConsoleRun(run);
+      state.activeJobId = payload.jobId;
+      state.activeJobStatus = `Job ${payload.jobId} queued`;
+      state.activeJobDetail = {
+        id: payload.jobId,
+        projectId: state.selectedProjectId,
+        status: payload.status,
+        attempts: payload.attempts,
+        maxAttempts: payload.maxAttempts,
+        idempotencyKey: payload.idempotencyKey,
+        history: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      upsertProjectJob(state.activeJobDetail);
+      persistState();
+      persistConsoleState();
+    } catch (error) {
+      run.timeline = [...run.timeline, `API queue unavailable: ${error.message}`, 'Continuing as local preview run'];
+      upsertConsoleRun(run);
+      persistConsoleState();
+    }
+  }
+
+  window.location.href = `/runs/${encodeURIComponent(run.id)}`;
+}
+
+function createLocalRunRecord() {
+  const draft = consoleState.runDraft;
+  const harness = getConsoleHarnesses().find((item) => item.id === draft.harnessId) ?? getConsoleHarnesses()[0];
+  const pack = runnablePackOptions().find((item) => item.id === draft.packId) ?? runnablePackOptions()[0];
+  const tier = runTierOptions().find((item) => item.id === draft.tier) ?? runTierOptions()[0];
+  const id = `run-${pack.id.replace(/-core$/u, '')}-${Date.now().toString(36)}`;
+  return {
+    id,
+    name: `${pack.name} ${tier.label}`,
+    harness: `${harness.name} - ${harness.environment}`,
+    pack: pack.name,
+    packId: pack.id,
+    tier: tier.id,
+    tierLabel: tier.label,
+    status: 'queued',
+    score: '--',
+    critical: '--',
+    observations: '0',
+    started: new Date().toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
+    progress: 8,
+    timeline: ['Run queued', 'Preparing runner payload'],
+    jobId: '',
+  };
+}
+
+function scheduleActiveRunProgression() {
+  const route = getRoute();
+  if (route.kind !== 'console' || route.routeType !== 'run-progress') return;
+  const run = consoleState.runs.find((item) => item.id === route.runId);
+  if (!run || run.status === 'completed' || run.status === 'failed') return;
+  window.setTimeout(() => {
+    const current = consoleState.runs.find((item) => item.id === route.runId);
+    if (!current) return;
+    if (current.status === 'queued') {
+      upsertConsoleRun({
+        ...current,
+        status: 'running',
+        progress: 58,
+        observations: String(Math.max(120, Math.round(normalizePositiveIntegerInput(consoleState.runDraft.maxObservations, 2000) * 0.42))),
+        timeline: [...current.timeline, 'Runner claimed job', 'Evaluating generated suite'],
+      });
+      persistConsoleState();
+      render();
+      return;
+    }
+    if (current.status === 'running') {
+      upsertConsoleRun({
+        ...current,
+        status: 'completed',
+        score: current.pack === 'FinanceGuard' ? '86' : '78',
+        critical: current.pack === 'FinanceGuard' ? '0' : '4',
+        observations: String(normalizePositiveIntegerInput(consoleState.runDraft.maxObservations, 2000)),
+        progress: 100,
+        timeline: [...current.timeline, 'Evaluation completed', 'Report and failure links generated'],
+      });
+      persistConsoleState();
+      window.location.href = `/runs/${encodeURIComponent(current.id)}/summary`;
+    }
+  }, 1200);
+}
+
+function upsertConsoleRun(run) {
+  consoleState.runs = [
+    run,
+    ...consoleState.runs.filter((item) => item.id !== run.id),
+  ].slice(0, 12);
+}
+
+function updateFailureFilter(key, value) {
+  consoleState.failureFilters = {
+    ...consoleState.failureFilters,
+    [key]: value,
+  };
+  persistConsoleState();
+  render();
+}
+
+function filteredFailures() {
+  const filters = consoleState.failureFilters;
+  const search = filters.search.trim().toLowerCase();
+  return saasFailures.filter((failure) => {
+    const [severity, contract, mutation, scenario, status, owner] = failureRowWithWorkflow(failure);
+    if (filters.severity !== 'All' && severity !== filters.severity) return false;
+    if (filters.status !== 'All' && status !== filters.status) return false;
+    if (filters.owner !== 'All' && owner !== filters.owner) return false;
+    if (!search) return true;
+    return [severity, contract, mutation, scenario, status, owner].join(' ').toLowerCase().includes(search);
+  });
+}
+
+function normalizePositiveIntegerInput(value, fallback) {
+  const number = Number.parseInt(String(value), 10);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function statusClass(status) {
@@ -1513,6 +1802,8 @@ function bindEvents() {
   bindConsoleHarnessEvents();
   bindFailureWorkflowEvents();
   bindReportExportEvents();
+  bindRunExecutionEvents();
+  bindFailureQueueEvents();
   bindIfPresent('#bundle-preset-select', 'change', (event) => {
     state.bundlePresetId = event.target.value;
     const preset = getSelectedBundlePreset();
@@ -1627,6 +1918,29 @@ function bindEvents() {
   });
   bindIfPresent('#dispatch-job', 'click', dispatchProjectJob);
   bindBenchmarkLifecycleEvents();
+}
+
+function bindRunExecutionEvents() {
+  bindIfPresent('#run-harness-select', 'change', (event) => updateRunDraft('harnessId', event.target.value));
+  bindIfPresent('#run-pack-select', 'change', (event) => updateRunDraft('packId', event.target.value));
+  bindIfPresent('#run-tier-select', 'change', (event) => updateRunDraft('tier', event.target.value));
+  bindIfPresent('#run-fail-condition', 'change', (event) => updateRunDraft('failCondition', event.target.value));
+  bindIfPresent('#run-max-observations', 'input', (event) => updateRunDraft('maxObservations', event.target.value));
+  bindIfPresent('#start-configured-run', 'click', startConfiguredRun);
+  scheduleActiveRunProgression();
+}
+
+function bindFailureQueueEvents() {
+  bindIfPresent('#failure-search', 'input', (event) => updateFailureFilter('search', event.target.value));
+  bindIfPresent('#failure-filter-severity', 'change', (event) => updateFailureFilter('severity', event.target.value));
+  bindIfPresent('#failure-filter-status', 'change', (event) => updateFailureFilter('status', event.target.value));
+  bindIfPresent('#failure-filter-owner', 'change', (event) => updateFailureFilter('owner', event.target.value));
+  bindIfPresent('#failure-owner-select', 'change', (event) => {
+    setText('failure-owner', event.target.value);
+  });
+  bindIfPresent('#failure-severity-select', 'change', (event) => {
+    updateFailureSeverity(event.target.value);
+  });
 }
 
 function bindBenchmarkLifecycleEvents() {
@@ -3804,18 +4118,21 @@ async function handleFailureAction(action, failureId, button) {
   if (!failure) return;
 
   const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const selectedOwner = document.querySelector('#failure-owner-select')?.value || 'Safety Review';
+  const selectedSeverity = document.querySelector('#failure-severity-select')?.value || failure.severity;
+  const comment = document.querySelector('#failure-comment')?.value?.trim() ?? '';
 
   if (action === 'assign-owner') {
-    setText('failure-owner', 'Safety Review');
+    setText('failure-owner', selectedOwner);
     setText('failure-status', 'Assigned');
-    showFailureWorkflowStatus('Owner assigned', 'Assigned to Safety Review.');
-    appendFailureWorkflowLog(`${now} - Owner assigned.`);
+    showFailureWorkflowStatus('Owner assigned', `Assigned to ${selectedOwner}.`);
+    appendFailureWorkflowLog(`${now} - Assigned to ${selectedOwner}.`);
     await persistFailureWorkflowAction(failure, {
       action,
       status: 'Assigned',
-      owner: 'Safety Review',
-      severity: failure.severity,
-      message: 'Assigned to Safety Review.',
+      owner: selectedOwner,
+      severity: selectedSeverity,
+      message: `Assigned to ${selectedOwner}.`,
     });
     return;
   }
@@ -3859,32 +4176,32 @@ async function handleFailureAction(action, failureId, button) {
   const workflows = {
     'create-task': {
       title: 'Task drafted',
-      message: 'Task draft created.',
+      message: comment || 'Task draft created.',
       status: 'Task drafted',
       log: `Task task-${failure.id} drafted.`,
     },
     'false-positive': {
-      title: 'Review requested',
-      message: 'Flagged this failure for false-positive review without resolving it.',
-      status: 'False-positive review',
-      log: 'False-positive review requested.',
+      title: 'False positive resolved',
+      message: comment || 'Resolved as false positive after reviewer check.',
+      status: 'False positive',
+      log: 'Resolved as false positive.',
     },
     'change-severity': {
       title: 'Severity changed',
-      message: 'Severity changed to Major pending review.',
+      message: comment || `Severity changed to ${selectedSeverity}.`,
       status: 'Severity review',
-      severity: 'Major',
-      log: 'Severity changed to Major.',
+      severity: selectedSeverity,
+      log: `Severity changed to ${selectedSeverity}.`,
     },
     'add-comment': {
       title: 'Comment added',
-      message: 'Comment added.',
+      message: comment || 'Comment added.',
       status: 'Commented',
-      log: 'Comment added.',
+      log: comment || 'Comment added.',
     },
     'add-regression': {
       title: 'Added to regression suite',
-      message: 'Pinned this case to the next HealthGuard regression run.',
+      message: comment || 'Pinned this case to the next HealthGuard regression run.',
       status: 'Regression pinned',
       log: 'Case added to regression suite.',
     },
@@ -3901,7 +4218,7 @@ async function handleFailureAction(action, failureId, button) {
   await persistFailureWorkflowAction(failure, {
     action,
     status: workflow.status ?? 'Updated',
-    owner: document.querySelector('#failure-owner')?.textContent ?? failure.owner,
+    owner: selectedOwner || document.querySelector('#failure-owner')?.textContent || failure.owner,
     severity: workflow.severity ?? document.querySelector('#failure-severity')?.textContent ?? failure.severity,
     message: workflow.message,
   });
@@ -4037,6 +4354,21 @@ function renderFailureWorkflowLog(actions = []) {
     const label = item.message || item.status || item.action;
     return `<li>${escapeHtml([time, label].filter(Boolean).join(' - '))}</li>`;
   }).join('');
+}
+
+function failureRowWithWorkflow(failure) {
+  const [severity, contract, mutation, scenario, status, owner, repro, id] = failure;
+  const workflow = readLocalFailureWorkflow(id);
+  return [
+    workflow?.severity ?? severity,
+    contract,
+    mutation,
+    scenario,
+    workflow?.status ?? status,
+    workflow?.owner ?? owner,
+    repro,
+    id,
+  ];
 }
 
 function showFailureWorkflowStatus(title, message) {
@@ -4409,6 +4741,17 @@ function loadConsoleState() {
     return {
       harnesses,
       selectedHarnessId: saved.selectedHarnessId ?? harnesses[0]?.id ?? '',
+      runDraft: {
+        ...defaultRunDraft(harnesses),
+        ...(saved.runDraft ?? {}),
+      },
+      runs: Array.isArray(saved.runs) ? saved.runs.map(normalizeConsoleRun).filter(Boolean) : [],
+      activeRunId: typeof saved.activeRunId === 'string' ? saved.activeRunId : '',
+      runFeedback: '',
+      failureFilters: {
+        ...defaultFailureFilters(),
+        ...(saved.failureFilters ?? {}),
+      },
       newHarnessDraft: {
         ...defaultConsoleHarnessDraft(),
         ...(saved.newHarnessDraft ?? {}),
@@ -4424,6 +4767,11 @@ function loadConsoleState() {
     return {
       harnesses,
       selectedHarnessId: harnesses[0]?.id ?? '',
+      runDraft: defaultRunDraft(harnesses),
+      runs: [],
+      activeRunId: '',
+      runFeedback: '',
+      failureFilters: defaultFailureFilters(),
       newHarnessDraft: defaultConsoleHarnessDraft(),
       smokeResult: defaultSmokeResult(),
       feedback: '',
@@ -4435,9 +4783,55 @@ function persistConsoleState() {
   localStorage.setItem(CONSOLE_STORAGE_KEY, JSON.stringify({
     harnesses: consoleState.harnesses,
     selectedHarnessId: consoleState.selectedHarnessId,
+    runDraft: consoleState.runDraft,
+    runs: consoleState.runs,
+    activeRunId: consoleState.activeRunId,
+    failureFilters: consoleState.failureFilters,
     newHarnessDraft: consoleState.newHarnessDraft,
     smokeResult: consoleState.smokeResult,
   }));
+}
+
+function defaultRunDraft(harnesses = defaultConsoleHarnesses()) {
+  return {
+    harnessId: harnesses[0]?.id ?? '',
+    packId: 'healthguard-core',
+    tier: 'smoke',
+    failCondition: 'block on critical failures',
+    maxObservations: 2000,
+  };
+}
+
+function normalizeConsoleRun(value) {
+  if (!value || typeof value !== 'object') return null;
+  const id = String(value.id ?? '').trim();
+  if (!id) return null;
+  return {
+    id,
+    name: String(value.name ?? 'HarnessAmp Run'),
+    harness: String(value.harness ?? 'Unknown harness'),
+    pack: String(value.pack ?? 'Custom Pack'),
+    packId: String(value.packId ?? ''),
+    tier: String(value.tier ?? 'smoke'),
+    tierLabel: String(value.tierLabel ?? 'Smoke'),
+    status: String(value.status ?? 'queued'),
+    score: String(value.score ?? '--'),
+    critical: String(value.critical ?? '--'),
+    observations: String(value.observations ?? '0'),
+    started: String(value.started ?? ''),
+    progress: clampNumber(Number(value.progress ?? 0), 0, 100),
+    timeline: Array.isArray(value.timeline) ? value.timeline.map(String).slice(0, 12) : defaultRunTimeline(value.status),
+    jobId: String(value.jobId ?? ''),
+  };
+}
+
+function defaultFailureFilters() {
+  return {
+    search: '',
+    severity: 'All',
+    status: 'All',
+    owner: 'All',
+  };
 }
 
 function defaultConsoleHarnesses() {
