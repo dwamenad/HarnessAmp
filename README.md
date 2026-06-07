@@ -1,6 +1,6 @@
 # HarnessAmp
 
-Production-ready mutation testing and release gates for AI agents.
+Mutation testing and release gates for AI agents.
 
 HarnessAmp wraps an existing agent harness, mutates the operating envelope around it, runs baseline and mutated tasks through the same runner, and turns wrapper fragility into a clear release verdict: `pass`, `warn`, or `block`.
 
