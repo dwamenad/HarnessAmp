@@ -148,9 +148,17 @@ test('saas console persists harnesses and exposes smoke-test controls', () => {
 
 test('saas failure page exposes actionable workflow controls', () => {
   [
+    'renderSaasFailuresList',
+    'failure-search',
+    'failure-filter-severity',
+    'failure-filter-status',
+    'failure-filter-owner',
     'failure-assign-owner',
     'failure-rerun-case',
     'failure-export',
+    'failure-owner-select',
+    'failure-severity-select',
+    'failure-comment',
     'failure-severity',
     'failure-action-status',
     'failure-action-title',
@@ -163,16 +171,39 @@ test('saas failure page exposes actionable workflow controls', () => {
     'persistFailureWorkflowAction',
     'applyFailureWorkflow',
     'renderFailureWorkflowLog',
+    'failureRowWithWorkflow',
+    'filteredFailures',
+    'updateFailureFilter',
     '/api/failures\\?projectId=',
     'appendFailureWorkflowLog',
     'updateFailureSeverity',
     'failurePayload',
     'Task drafted',
-    'False-positive review',
+    'False positive resolved',
     'Severity changed',
     'Regression pinned',
     'Exported failure evidence',
   ].forEach((text) => assert.match(source, new RegExp(text)));
+});
+
+test('saas start run supports end-to-end queued run flow', () => {
+  [
+    'run-config-form',
+    'run-harness-select',
+    'run-pack-select',
+    'run-tier-select',
+    'run-fail-condition',
+    'start-configured-run',
+    'bindRunExecutionEvents',
+    'startConfiguredRun',
+    'createLocalRunRecord',
+    'scheduleActiveRunProgression',
+    'run-live-status',
+    'failure queue',
+    '/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs',
+    'window.location.href = `/runs/${encodeURIComponent(run.id)}`',
+    'window.location.href = `/runs/${encodeURIComponent(current.id)}/summary`',
+  ].forEach((text) => assert.match(source, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 });
 
 test('saas reports page exposes working export controls', () => {
