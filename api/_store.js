@@ -21,6 +21,7 @@ const memory = globalThis.__harnessAmpStore ?? {
   runners: new Map(),
   reports: new Map(),
   jobs: new Map(),
+  failureWorkflows: new Map(),
   benchmarkPacks: new Map(),
   benchmarkVersions: new Map(),
   benchmarkReviews: new Map(),
@@ -40,6 +41,7 @@ memory.benchmarkReviews ??= new Map();
 memory.benchmarkReviewAssignments ??= new Map();
 memory.promotionCandidates ??= new Map();
 memory.goldenCases ??= new Map();
+memory.failureWorkflows ??= new Map();
 
 export async function getOrCreateGitHubUser(profile) {
   if (useMemory()) {
@@ -308,6 +310,110 @@ export async function getReport({ id, userId }) {
     [id, userId],
   );
   return result.rows[0] ? normalizeReportRow(result.rows[0]) : null;
+}
+
+export async function getFailureWorkflow({ projectId, failureId, userId }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership) throw new Error('Project membership not found');
+
+  if (useMemory()) {
+    return memory.failureWorkflows.get(failureWorkflowKey(projectId, failureId)) ?? null;
+  }
+
+  await ensureSchema();
+  const result = await query(
+    `select * from failure_workflows
+     where project_id = $1 and failure_id = $2
+     limit 1`,
+    [projectId, failureId],
+  );
+  return result.rows[0] ? normalizeFailureWorkflowRow(result.rows[0]) : null;
+}
+
+export async function recordFailureWorkflowAction({
+  projectId,
+  failureId,
+  userId,
+  action,
+  status,
+  owner = null,
+  severity = null,
+  message = null,
+  evidence = {},
+}) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can update failure workflows');
+  }
+
+  const now = new Date().toISOString();
+  const actionEntry = {
+    id: createId('fwact'),
+    action: normalizeOptionalText(action) ?? 'unknown',
+    status: normalizeOptionalText(status) ?? 'Updated',
+    owner: normalizeOptionalText(owner),
+    severity: normalizeOptionalText(severity),
+    message: normalizeOptionalText(message),
+    createdBy: userId,
+    createdAt: now,
+  };
+
+  if (useMemory()) {
+    const key = failureWorkflowKey(projectId, failureId);
+    const existing = memory.failureWorkflows.get(key);
+    const workflow = {
+      id: existing?.id ?? createId('fw'),
+      projectId,
+      workspaceId: membership.workspaceId,
+      failureId,
+      status: actionEntry.status,
+      owner: actionEntry.owner ?? existing?.owner ?? null,
+      severity: actionEntry.severity ?? existing?.severity ?? null,
+      latestAction: actionEntry.action,
+      evidence: {
+        ...(existing?.evidence ?? {}),
+        ...(evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? cloneJson(evidence) : {}),
+      },
+      actions: [actionEntry, ...(existing?.actions ?? [])].slice(0, 100),
+      createdBy: existing?.createdBy ?? userId,
+      updatedBy: userId,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    memory.failureWorkflows.set(key, workflow);
+    return workflow;
+  }
+
+  await ensureSchema();
+  const inserted = await query(
+    `insert into failure_workflows
+       (id, project_id, workspace_id, failure_id, status, owner, severity, latest_action, evidence, actions, created_by, updated_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, jsonb_build_array($10::jsonb), $11, $11)
+     on conflict (project_id, failure_id) do update set
+       status = excluded.status,
+       owner = coalesce(excluded.owner, failure_workflows.owner),
+       severity = coalesce(excluded.severity, failure_workflows.severity),
+       latest_action = excluded.latest_action,
+       evidence = failure_workflows.evidence || excluded.evidence,
+       actions = jsonb_insert(failure_workflows.actions, '{0}', $10::jsonb),
+       updated_by = excluded.updated_by,
+       updated_at = now()
+     returning *`,
+    [
+      createId('fw'),
+      projectId,
+      membership.workspaceId,
+      failureId,
+      actionEntry.status,
+      actionEntry.owner,
+      actionEntry.severity,
+      actionEntry.action,
+      evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? evidence : {},
+      actionEntry,
+      userId,
+    ],
+  );
+  return normalizeFailureWorkflowRow(inserted.rows[0]);
 }
 
 export async function createRunnerRegistration({ projectId, userId, name, endpointUrl, sharedSecret, status = 'active' }) {
@@ -1785,6 +1891,29 @@ function normalizeReportRow(row) {
     snapshot: row.snapshot,
     createdAt: String(row.created_at),
   };
+}
+
+function normalizeFailureWorkflowRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    failureId: row.failure_id,
+    status: row.status,
+    owner: row.owner ?? null,
+    severity: row.severity ?? null,
+    latestAction: row.latest_action ?? null,
+    evidence: row.evidence ?? {},
+    actions: Array.isArray(row.actions) ? row.actions : [],
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function failureWorkflowKey(projectId, failureId) {
+  return `${projectId}:${failureId}`;
 }
 
 function normalizeJobRow(row) {

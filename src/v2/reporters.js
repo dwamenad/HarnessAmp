@@ -93,7 +93,7 @@ export function formatMarkdownReport(report) {
 
 export function formatMarkdownSuiteReport(report) {
   const lines = [];
-  const title = report.suite.pack === 'healthguard-core' ? 'HealthGuard' : 'FinanceGuard';
+  const title = suiteTitle(report.suite.pack);
 
   lines.push(`# HarnessAmp v2 ${title} Suite Report`);
   lines.push('');
@@ -154,4 +154,11 @@ export function formatMarkdownSuiteReport(report) {
 
 function riskScore(failingResults) {
   return failingResults.reduce((sum, result) => sum + severityRank(result.severity) * 25, 0);
+}
+
+function suiteTitle(packName) {
+  if (packName === 'healthguard-core') return 'HealthGuard';
+  if (packName === 'customercareguard-core') return 'CustomerCareGuard';
+  if (packName === 'legalguard-core') return 'LegalGuard';
+  return 'FinanceGuard';
 }

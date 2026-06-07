@@ -11,6 +11,14 @@ import {
   generateHealthGuardScenarios,
   summarizeHealthGuardGeneratedCoverage,
 } from './generators/healthguard-generator.js';
+import {
+  generateCustomerCareGuardScenarios,
+  summarizeCustomerCareGuardGeneratedCoverage,
+} from './generators/customercareguard-generator.js';
+import {
+  generateLegalGuardScenarios,
+  summarizeLegalGuardGeneratedCoverage,
+} from './generators/legalguard-generator.js';
 
 export async function runV2Suite(path, options = {}) {
   const scenarioPaths = discoverScenarioPaths(path);
@@ -71,7 +79,7 @@ export function discoverScenarioPaths(path) {
   const paths = [];
   collectYamlFiles(sourcePath, paths);
   return paths
-    .filter((item) => !/\/(?:financeguard|healthguard)-core\.ya?ml$/i.test(item))
+    .filter((item) => !/\/(?:financeguard|healthguard|customercareguard|legalguard)-core\.ya?ml$/i.test(item))
     .sort((left, right) => left.localeCompare(right));
 }
 
@@ -143,10 +151,24 @@ function summarizeFailures(failingResults) {
 
 function defaultSuiteName(packName) {
   if (packName === 'healthguard-core') return 'HealthGuard Core Suite';
+  if (packName === 'customercareguard-core') return 'CustomerCareGuard Core Suite';
+  if (packName === 'legalguard-core') return 'LegalGuard Core Suite';
   return 'FinanceGuard Core Suite';
 }
 
 function generatedGeneratorFor(packName) {
+  if (packName === 'customercareguard-core') {
+    return {
+      generate: generateCustomerCareGuardScenarios,
+      summarize: summarizeCustomerCareGuardGeneratedCoverage,
+    };
+  }
+  if (packName === 'legalguard-core') {
+    return {
+      generate: generateLegalGuardScenarios,
+      summarize: summarizeLegalGuardGeneratedCoverage,
+    };
+  }
   if (packName === 'healthguard-core') {
     return {
       generate: generateHealthGuardScenarios,
@@ -165,6 +187,8 @@ function generatedGeneratorFor(packName) {
 function generatedSuiteLabel(packName) {
   if (packName === 'healthguard-core') return 'HealthGuard';
   if (packName === 'financeguard-core') return 'FinanceGuard';
+  if (packName === 'customercareguard-core') return 'CustomerCareGuard';
+  if (packName === 'legalguard-core') return 'LegalGuard';
   return packName;
 }
 

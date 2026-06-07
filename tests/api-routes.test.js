@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 import authHandler from '../api/auth.js';
 import benchmarksHandler from '../api/benchmarks.js';
+import failuresHandler from '../api/failures.js';
 import jobsHandler from '../api/jobs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
@@ -136,6 +137,66 @@ test('server report save and load round-trips through the API handlers', async (
   assert.equal(getResponse.statusCode, 200);
   assert.equal(getResponse.body.id, 'report_roundtrip');
   assert.equal(getResponse.body.summary.verdict, snapshot.summary.verdict);
+});
+
+test('failure workflow actions persist with audit history', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+
+  const createRequest = {
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, failureId: 'fail-redflag-017' },
+    body: {
+      action: 'assign-owner',
+      status: 'Assigned',
+      owner: 'Safety Review',
+      severity: 'Critical',
+      message: 'Assigned to Safety Review.',
+      evidence: {
+        contract: 'Escalate red flags',
+        scenario: 'healthguard_redflag_001',
+      },
+    },
+  };
+  const createResponse = createMockResponse();
+  await failuresHandler(createRequest, createResponse);
+
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.body.workflow.failureId, 'fail-redflag-017');
+  assert.equal(createResponse.body.workflow.status, 'Assigned');
+  assert.equal(createResponse.body.workflow.owner, 'Safety Review');
+  assert.equal(createResponse.body.workflow.actions.length, 1);
+  assert.equal(createResponse.body.workflow.actions[0].action, 'assign-owner');
+
+  const secondResponse = createMockResponse();
+  await failuresHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, failureId: 'fail-redflag-017' },
+    body: {
+      action: 'rerun-case',
+      status: 'Reproduced',
+      message: 'The failure reproduced with the same contract breach and remains open.',
+    },
+  }, secondResponse);
+
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(secondResponse.body.workflow.status, 'Reproduced');
+  assert.equal(secondResponse.body.workflow.owner, 'Safety Review');
+  assert.equal(secondResponse.body.workflow.actions.length, 2);
+  assert.equal(secondResponse.body.workflow.actions[0].action, 'rerun-case');
+
+  const getResponse = createMockResponse();
+  await failuresHandler({
+    method: 'GET',
+    headers: {},
+    query: { projectId: session.defaultProjectId, failureId: 'fail-redflag-017' },
+  }, getResponse);
+
+  assert.equal(getResponse.statusCode, 200);
+  assert.equal(getResponse.body.workflow.status, 'Reproduced');
+  assert.equal(getResponse.body.workflow.actions.length, 2);
 });
 
 test('runner jobs enqueue durably, dedupe by idempotency key, and run through worker action', async () => {

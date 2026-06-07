@@ -211,6 +211,24 @@ export async function ensureSchema() {
       on runner_jobs (project_id, runner_id, idempotency_key)
       where idempotency_key is not null;
 
+    create table if not exists failure_workflows (
+      id text primary key,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      failure_id text not null,
+      status text not null,
+      owner text,
+      severity text,
+      latest_action text,
+      evidence jsonb not null default '{}'::jsonb,
+      actions jsonb not null default '[]'::jsonb,
+      created_by text not null references users(id) on delete cascade,
+      updated_by text not null references users(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (project_id, failure_id)
+    );
+
     create table if not exists events (
       id text primary key,
       name text not null,
