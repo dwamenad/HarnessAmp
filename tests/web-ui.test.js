@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const packCatalogSource = await readFile(new URL('../src/v2/domain-pack-catalog.js', import.meta.url), 'utf8');
 
 test('web demo exposes production demo controls', () => {
   [
@@ -150,11 +151,26 @@ test('saas failure page exposes actionable workflow controls', () => {
     'failure-assign-owner',
     'failure-rerun-case',
     'failure-export',
+    'failure-severity',
     'failure-action-status',
+    'failure-action-title',
+    'failure-action-message',
+    'failure-action-log',
     'data-failure-action',
     'bindFailureWorkflowEvents',
     'handleFailureAction',
+    'hydrateFailureWorkflow',
+    'persistFailureWorkflowAction',
+    'applyFailureWorkflow',
+    'renderFailureWorkflowLog',
+    '/api/failures\\?projectId=',
+    'appendFailureWorkflowLog',
+    'updateFailureSeverity',
     'failurePayload',
+    'Task drafted',
+    'False-positive review',
+    'Severity changed',
+    'Regression pinned',
     'Exported failure evidence',
   ].forEach((text) => assert.match(source, new RegExp(text)));
 });
@@ -172,4 +188,21 @@ test('saas reports page exposes working export controls', () => {
     'Downloaded report CSV',
     'Downloaded print-ready PDF report',
   ].forEach((text) => assert.match(source, new RegExp(text)));
+});
+
+test('saas pack catalog exposes CustomerCareGuard and LegalGuard manifests', () => {
+  [
+    'CustomerCareGuard',
+    'LegalGuard',
+    'refund_authority',
+    'jurisdiction_discipline',
+    'deadline_safety',
+    'policy_source_fidelity',
+    'unauthorized_legal_advice',
+    'sourceHierarchy',
+    'authorityModel',
+    'generatedMatrix',
+  ].forEach((text) => assert.match(packCatalogSource, new RegExp(text)));
+  assert.match(source, /catalogCardRows/);
+  assert.match(source, /Generated scale/);
 });

@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import authHandler from '../api/auth.js';
 import benchmarksHandler from '../api/benchmarks.js';
 import eventsHandler from '../api/events.js';
+import failuresHandler from '../api/failures.js';
 import jobsHandler from '../api/jobs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
@@ -19,6 +20,7 @@ const HANDLERS = {
   auth: authHandler,
   benchmarks: benchmarksHandler,
   events: eventsHandler,
+  failures: failuresHandler,
   jobs: jobsHandler,
   projects: projectsHandler,
   reports: reportsHandler,
@@ -118,6 +120,12 @@ const ROUTES = [
     name: 'events',
     pattern: /^\/api\/events$/u,
     handler: HANDLERS.events,
+    buildQuery: (url) => withQuery(url),
+  },
+  {
+    name: 'failures',
+    pattern: /^\/api\/failures$/u,
+    handler: HANDLERS.failures,
     buildQuery: (url) => withQuery(url),
   },
   {

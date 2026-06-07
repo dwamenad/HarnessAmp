@@ -2955,21 +2955,39 @@ section[id] {
 
 .ha-failure-status {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   border-color: rgba(37, 99, 235, 0.24);
   background: #eff6ff;
   box-shadow: none;
 }
 
 .ha-failure-status strong {
+  display: block;
   color: var(--ha-blue);
   font-size: 13px;
 }
 
 .ha-failure-status span {
+  display: block;
+  margin-top: 4px;
   color: #334155;
   font-size: 13px;
+}
+
+.ha-action-log {
+  min-width: 260px;
+  max-width: 420px;
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ha-action-log li + li {
+  margin-top: 4px;
 }
 
 .ha-report-status {

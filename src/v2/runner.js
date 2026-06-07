@@ -1,5 +1,7 @@
 import { runFinanceGuardDemoAgent } from './demo-agents/financeguard-agent.js';
 import { runHealthGuardDemoAgent } from './demo-agents/healthguard-agent.js';
+import { runCustomerCareGuardDemoAgent } from './demo-agents/customercareguard-agent.js';
+import { runLegalGuardDemoAgent } from './demo-agents/legalguard-agent.js';
 import { checkContracts } from './contract-checkers.js';
 import { buildRunReport } from './reporters.js';
 import { diffTraces } from './trace-diff.js';
@@ -67,6 +69,12 @@ function runScenarioAgent(scenario, context) {
   }
   if (scenario.domain === 'healthcare' || scenario.domain === 'health') {
     return runHealthGuardDemoAgent(scenario, context);
+  }
+  if (scenario.domain === 'customer_support') {
+    return runCustomerCareGuardDemoAgent(scenario, context);
+  }
+  if (scenario.domain === 'legal') {
+    return runLegalGuardDemoAgent(scenario, context);
   }
   throw new Error(`No v2 demo agent available for domain: ${scenario.domain}`);
 }
