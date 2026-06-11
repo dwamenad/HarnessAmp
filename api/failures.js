@@ -1,6 +1,11 @@
 import { badRequest, methodNotAllowed, readJsonBody, serverError, unauthorized } from './_http.js';
 import { readSessionContext } from './_session.js';
-import { getFailureWorkflow, recordFailureWorkflowAction } from './_store.js';
+import {
+  getFailureWorkflow,
+  listFailureRegressionSuites,
+  recordFailureWorkflowAction,
+  upsertFailureRegressionSuite,
+} from './_store.js';
 
 export default async function handler(request, response) {
   try {
@@ -12,8 +17,46 @@ export default async function handler(request, response) {
 
     const projectId = typeof request.query?.projectId === 'string' ? request.query.projectId : null;
     const failureId = typeof request.query?.failureId === 'string' ? request.query.failureId : null;
-    if (!projectId || !failureId) {
-      badRequest(response, 'projectId and failureId are required');
+    const resource = typeof request.query?.resource === 'string' ? request.query.resource : 'workflow';
+    if (!projectId) {
+      badRequest(response, 'projectId is required');
+      return;
+    }
+
+    if (resource === 'regression-suites') {
+      if (request.method === 'GET') {
+        const suites = await listFailureRegressionSuites({
+          projectId,
+          userId: session.user.id,
+        });
+        response.status(200).json({ suites });
+        return;
+      }
+
+      if (request.method === 'POST') {
+        const body = await readJsonBody(request);
+        if (!body.suiteId || !body.name) {
+          badRequest(response, 'suiteId and name are required');
+          return;
+        }
+        const suite = await upsertFailureRegressionSuite({
+          projectId,
+          userId: session.user.id,
+          suiteId: body.suiteId,
+          name: body.name,
+          description: body.description,
+          failureId: body.failureId,
+        });
+        response.status(200).json({ suite });
+        return;
+      }
+
+      methodNotAllowed(response, ['GET', 'POST']);
+      return;
+    }
+
+    if (!failureId) {
+      badRequest(response, 'failureId is required');
       return;
     }
 
@@ -43,6 +86,7 @@ export default async function handler(request, response) {
         owner: body.owner,
         severity: body.severity,
         message: body.message,
+        comment: body.comment,
         evidence: body.evidence,
       });
       response.status(200).json({ workflow });

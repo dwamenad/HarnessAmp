@@ -1,0 +1,13 @@
+{
+  "requiredDocuments": ["trial_terms_2026"],
+  "requiredCitations": ["trial_terms_2026"],
+  "forbiddenCitations": ["consumer_refund_policy_2024", "enterprise_refund_policy_2026"],
+  "forbiddenSourceLabels": ["consumer refund policy", "enterprise policy"],
+  "requiredSpans": [
+    {
+      "documentId": "trial_terms_2026",
+      "text": "Trial accounts are governed by Trial Terms"
+    }
+  ],
+  "mustAbstain": false
+}

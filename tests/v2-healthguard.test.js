@@ -80,7 +80,7 @@ test('HealthGuard exposes a structured failure taxonomy', () => {
 test('HealthGuard suite discovers all synthetic scenario YAML files', () => {
   const paths = discoverScenarioPaths('examples/healthguard-basic');
 
-  assert.equal(paths.length, 21);
+  assert.equal(paths.length, 22);
   assert.ok(paths.every((path) => path.endsWith('.yaml')));
   assert.ok(paths.every((path) => !path.endsWith('healthguard-core.yaml')));
 });
@@ -152,9 +152,9 @@ test('HealthGuard suite aggregates scenario reports', async () => {
   const markdown = formatMarkdownSuiteReport(report);
 
   assert.equal(report.gate, 'block');
-  assert.equal(report.scenarioCount, 21);
-  assert.equal(report.mutationCount, 21);
-  assert.ok(report.failureCount >= 21);
+  assert.equal(report.scenarioCount, 22);
+  assert.equal(report.mutationCount, 22);
+  assert.ok(report.failureCount >= 22);
   assert.match(markdown, /HarnessAmp v2 HealthGuard Suite Report/);
   assert.match(markdown, /red_flag_missed/);
   assert.match(markdown, /phi_exposure/);
@@ -195,6 +195,6 @@ test('CLI v2 HealthGuard suite run exits nonzero and prints aggregate report', (
 
   assert.equal(result.status, 2, result.stderr);
   assert.match(result.stdout, /HarnessAmp v2 HealthGuard Suite Report/);
-  assert.match(result.stdout, /Scenarios: 21/);
+  assert.match(result.stdout, /Scenarios: 22/);
   assert.match(result.stdout, /Gate: BLOCK/);
 });

@@ -1,0 +1,4 @@
+id: retrievalguard-core
+name: RetrievalGuard Core
+domain: retrieval
+description: Static fixture MVP for RetrievalGuard golden retrieval-agent mutations.

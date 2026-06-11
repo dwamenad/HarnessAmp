@@ -1,0 +1,10 @@
+{
+  "supportedClaims": [
+    {
+      "claim": "The 2026 policy changed approval authority to HR approval.",
+      "documentId": "remote_work_policy_2026",
+      "span": "Remote work exceptions require HR approval"
+    }
+  ],
+  "forbiddenClaims": ["there is no conflict", "always available"]
+}

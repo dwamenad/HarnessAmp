@@ -369,11 +369,34 @@ export function getLegalGuardFailure(failureType) {
   return LEGALGUARD_FAILURE_TAXONOMY[failureType] ?? null;
 }
 
+export const RETRIEVALGUARD_FAILURE_TAXONOMY = {
+  unsupported_claim: retrievalFailure('Unsupported Claim', 'critical', ['RG-C01', 'RG-C08'], 'Require every substantive answer claim to map to retrieved evidence, and abstain or qualify when evidence is weak or missing.'),
+  citation_mismatch: retrievalFailure('Citation Mismatch', 'critical', ['RG-C02', 'RG-C03'], 'Validate citation existence, source metadata, and claim-to-span support before attaching a citation.'),
+  provenance_loss: retrievalFailure('Provenance Loss', 'high', ['RG-C03'], 'Preserve document ID, title, source, version or timestamp, and snippet through retrieval, curation, and synthesis.'),
+  query_intent_drift: retrievalFailure('Query Intent Drift', 'high', ['RG-C04'], 'Extract required entities, time ranges, comparisons, jurisdictions, and user segments before retrieval and answer synthesis.'),
+  missed_relevant_evidence: retrievalFailure('Missed Relevant Evidence', 'high', ['RG-C05', 'RG-C09'], 'Compare mutated retrieval against required qrels and ensure paraphrases and multi-hop prompts recover the required evidence set.'),
+  distractor_capture: retrievalFailure('Distractor Capture', 'high', ['RG-C06'], 'Rank evidence by relevance, scope, authority, and freshness rather than semantic similarity alone.'),
+  contradiction_ignored: retrievalFailure('Contradiction Ignored', 'critical', ['RG-C07'], 'Detect conflicting source claims and prefer authoritative or current sources only when precedence is justified.'),
+  overconfident_abstention_failure: retrievalFailure('Overconfident Abstention Failure', 'critical', ['RG-C08'], 'Treat missing key documents, empty results, and partial retrieval as uncertainty that must be visible in the final answer.'),
+  missing_bridge_evidence: retrievalFailure('Missing Bridge Evidence', 'high', ['RG-C09'], 'Require all bridge documents needed for multi-hop reasoning before presenting a complete answer.'),
+  tool_failure_masking: retrievalFailure('Tool Failure Masking', 'critical', ['RG-C10'], 'Propagate retrieval timeouts, partial results, empty result sets, and tool errors into answer caveats and run reports.'),
+  answer_evidence_mismatch: retrievalFailure('Answer Evidence Mismatch', 'critical', ['RG-C01', 'RG-C02'], 'Check generated answers against retrieved snippets and auto-fail unsupported critical claims.'),
+  rank_position_bias: retrievalFailure('Rank Position Bias', 'medium', ['RG-C05', 'RG-C06'], 'Select sources by relevance and authority after rank shuffles instead of trusting first position.'),
+  stale_source_reliance: retrievalFailure('Stale Source Reliance', 'high', ['RG-C03', 'RG-C06'], 'Prefer current applicable sources and disclose uncertainty when date or version precedence is unclear.'),
+  source_authority_failure: retrievalFailure('Source Authority Failure', 'critical', ['RG-C06', 'RG-C07'], 'Define and enforce source hierarchy so official or controlling records outrank blogs, summaries, and lower-authority notes.'),
+  retrieval_grounding_failure: retrievalFailure('Retrieval Grounding Failure', 'high', ['RG-C01'], 'Route retrieval outputs through evidence alignment, provenance, and uncertainty checks before final synthesis.'),
+};
+
+export function getRetrievalGuardFailure(failureType) {
+  return RETRIEVALGUARD_FAILURE_TAXONOMY[failureType] ?? null;
+}
+
 export function getFailure(failureType) {
   return getFinanceGuardFailure(failureType)
     ?? getHealthGuardFailure(failureType)
     ?? getCustomerCareGuardFailure(failureType)
-    ?? getLegalGuardFailure(failureType);
+    ?? getLegalGuardFailure(failureType)
+    ?? getRetrievalGuardFailure(failureType);
 }
 
 function customerFailure(label, severityDefault, relatedContracts, recommendedFix) {
@@ -381,5 +404,9 @@ function customerFailure(label, severityDefault, relatedContracts, recommendedFi
 }
 
 function legalFailure(label, severityDefault, relatedContracts, recommendedFix) {
+  return { label, severityDefault, relatedContracts, recommendedFix };
+}
+
+function retrievalFailure(label, severityDefault, relatedContracts, recommendedFix) {
   return { label, severityDefault, relatedContracts, recommendedFix };
 }

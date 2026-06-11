@@ -1,0 +1,13 @@
+{
+  "requiredDocuments": ["adult_dosage_table"],
+  "requiredCitations": ["adult_dosage_table"],
+  "forbiddenCitations": ["drug_label_overview"],
+  "forbiddenSourceLabels": ["dosage table is not present"],
+  "requiredSpans": [
+    {
+      "documentId": "adult_dosage_table",
+      "text": "Adult dosing recommendations are listed only in this table"
+    }
+  ],
+  "mustAbstain": true
+}

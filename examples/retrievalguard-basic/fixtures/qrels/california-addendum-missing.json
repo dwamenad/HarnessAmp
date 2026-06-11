@@ -1,0 +1,14 @@
+{
+  "requiredDocuments": ["general_lease_policy", "california_addendum_2026"],
+  "requiredBridgeDocuments": ["california_addendum_2026"],
+  "requiredCitations": ["california_addendum_2026"],
+  "forbiddenCitations": ["general_lease_policy"],
+  "forbiddenSourceLabels": ["final source alone"],
+  "requiredSpans": [
+    {
+      "documentId": "california_addendum_2026",
+      "text": "California-specific notice rules override"
+    }
+  ],
+  "mustAbstain": true
+}

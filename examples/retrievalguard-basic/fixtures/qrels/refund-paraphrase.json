@@ -1,0 +1,13 @@
+{
+  "requiredDocuments": ["refund_policy_2026"],
+  "requiredCitations": ["refund_policy_2026"],
+  "forbiddenCitations": ["cancellation_faq_2026"],
+  "forbiddenSourceLabels": ["cancellation FAQ"],
+  "requiredSpans": [
+    {
+      "documentId": "refund_policy_2026",
+      "text": "Annual subscriptions may be refunded within 30 days"
+    }
+  ],
+  "mustAbstain": false
+}

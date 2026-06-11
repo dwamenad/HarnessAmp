@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { parse } from 'yaml';
 
 export function loadScenarioFile(path) {
@@ -19,11 +19,12 @@ export function normalizeScenario(input, sourcePath = null) {
     throw new Error('Scenario must include at least one contract.');
   }
 
-  return {
+  const normalized = {
     id: stringOr(input.id, 'scenario'),
     domain: stringOr(input.domain, 'general'),
     name: stringOr(input.name, input.id ?? 'Scenario'),
     baselinePrompt: stringOr(input.baselinePrompt ?? input.baseline_prompt, ''),
+    turns: normalizeTurns(input.turns),
     syntheticData: input.syntheticData ?? input.synthetic_data ?? {},
     tools: Array.isArray(input.tools) ? input.tools : [],
     policies: Array.isArray(input.policies) ? input.policies : [],
@@ -34,6 +35,20 @@ export function normalizeScenario(input, sourcePath = null) {
     metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : {},
     sourcePath,
   };
+  normalized.fixtures = loadScenarioFixtures(input.fixtures, sourcePath);
+  return normalized;
+}
+
+function loadScenarioFixtures(value, sourcePath) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const baseDir = sourcePath ? dirname(sourcePath) : process.cwd();
+  const loaded = {};
+  for (const [key, fixturePath] of Object.entries(value)) {
+    if (typeof fixturePath !== 'string' || !fixturePath.length) continue;
+    const resolved = resolve(baseDir, fixturePath);
+    loaded[key] = JSON.parse(readFileSync(resolved, 'utf8'));
+  }
+  return loaded;
 }
 
 function normalizeMutationRefs(value) {
@@ -51,6 +66,20 @@ function normalizeMutationRefs(value) {
       return null;
     })
     .filter((item) => item?.id || item?.family);
+}
+
+function normalizeTurns(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((turn) => {
+      if (typeof turn === 'string') return { role: 'user', content: turn };
+      if (!turn || typeof turn !== 'object' || Array.isArray(turn)) return null;
+      return {
+        role: stringOr(turn.role, 'user'),
+        content: stringOr(turn.content ?? turn.text, ''),
+      };
+    })
+    .filter((turn) => turn?.content);
 }
 
 function withoutKnownKeys(value) {

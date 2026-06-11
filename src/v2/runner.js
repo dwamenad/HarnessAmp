@@ -2,10 +2,12 @@ import { runFinanceGuardDemoAgent } from './demo-agents/financeguard-agent.js';
 import { runHealthGuardDemoAgent } from './demo-agents/healthguard-agent.js';
 import { runCustomerCareGuardDemoAgent } from './demo-agents/customercareguard-agent.js';
 import { runLegalGuardDemoAgent } from './demo-agents/legalguard-agent.js';
+import { runRetrievalGuardDemoAgent } from './demo-agents/retrievalguard-agent.js';
 import { checkContracts } from './contract-checkers.js';
 import { buildRunReport } from './reporters.js';
 import { diffTraces } from './trace-diff.js';
 import { getV2Pack } from './packs/index.js';
+import { evaluateDomainObservation } from './domain-evaluator.js';
 
 export async function runV2Scenario(scenario, options = {}) {
   const pack = getV2Pack(options.packName ?? 'financeguard-core');
@@ -15,20 +17,32 @@ export async function runV2Scenario(scenario, options = {}) {
   const mutatedTraces = [];
   const behavioralDiffs = [];
   const contractResults = [];
+  const domainEvaluations = [];
+  const retrievalEvaluations = [];
 
   for (const { mutation, mutationRef } of mutations) {
     const mutatedScenario = mutation.apply(scenario, mutationRef);
     const mutatedTrace = await runScenarioAgent(mutatedScenario, { mutation });
     const diff = diffTraces(baselineTrace, mutatedTrace, mutation);
-    mutatedTraces.push(mutatedTrace);
-    behavioralDiffs.push(diff);
-    contractResults.push(...checkContracts({
+    const mutationResults = checkContracts({
       scenario,
       baselineTrace,
       mutatedTrace,
       mutation,
       diff,
-    }));
+    });
+    mutatedTraces.push(mutatedTrace);
+    behavioralDiffs.push(diff);
+    contractResults.push(...mutationResults);
+    const domainEvaluation = evaluateDomainObservation({
+      scenario,
+      trace: mutatedTrace,
+      contractResults: mutationResults,
+    });
+    domainEvaluations.push(domainEvaluation);
+    if (isRetrievalScenario(scenario)) {
+      retrievalEvaluations.push(domainEvaluation);
+    }
   }
 
   return buildRunReport({
@@ -38,6 +52,8 @@ export async function runV2Scenario(scenario, options = {}) {
     mutatedTraces,
     behavioralDiffs,
     contractResults,
+    domainEvaluations,
+    retrievalEvaluations,
     failOn,
   });
 }
@@ -76,5 +92,12 @@ function runScenarioAgent(scenario, context) {
   if (scenario.domain === 'legal') {
     return runLegalGuardDemoAgent(scenario, context);
   }
+  if (scenario.domain === 'retrieval' || scenario.domain === 'rag' || scenario.domain === 'knowledge_retrieval') {
+    return runRetrievalGuardDemoAgent(scenario, context);
+  }
   throw new Error(`No v2 demo agent available for domain: ${scenario.domain}`);
+}
+
+function isRetrievalScenario(scenario) {
+  return ['retrieval', 'rag', 'knowledge_retrieval'].includes(scenario.domain);
 }

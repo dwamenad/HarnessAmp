@@ -1,6 +1,6 @@
 # HarnessAmp Current State
 
-Last updated: June 7, 2026
+Last updated: June 10, 2026
 
 ## Summary
 
@@ -35,7 +35,7 @@ The product is now strongest as a demo-ready reliability platform for testing as
 
 The app still uses a mix of real engine/API capability and simulated console data. The core CLI and v2 pack execution are more real than parts of the SaaS UI.
 
-Latest local work after `e9875ba` adds an end-to-end console run flow and a stronger failure triage queue. This has not been committed or pushed yet.
+Latest local work after `9a3d992` adds failure fix guidance and a regression suite builder. This has not been committed or pushed yet.
 
 ## Console Routes
 
@@ -68,6 +68,8 @@ The console includes:
 - local/API-backed queued run start with live progress and summary landing
 - filterable failure queue
 - failure evidence pages with durable workflow actions
+- failure fix guidance with copyable checklists
+- regression suite builder for pinned failures
 - report export controls
 - usage and billing dashboard
 - team and role views
@@ -122,9 +124,37 @@ Implemented files include:
 - `examples/legalguard-basic/`
 - `tests/v2-legalguard-generated.test.js`
 
+### RetrievalGuard
+
+RetrievalGuard was added as a v2 safety and robustness pack for retrieval agents, search agents, RAG systems, citation assistants, and stateful evidence-gathering agents.
+
+It covers:
+
+- source-grounded answer generation
+- citation fidelity
+- evidence provenance preservation
+- query intent preservation
+- paraphrase recall
+- distractor resistance
+- contradiction handling
+- abstention when evidence is missing
+- multi-hop evidence completeness
+- transparent retrieval/tool failure handling
+
+Implemented files include:
+
+- `src/v2/packs/retrievalguard.js`
+- `src/v2/generators/retrievalguard-generator.js`
+- `src/v2/demo-agents/retrievalguard-agent.js`
+- `examples/retrievalguard-basic/`
+- `examples/retrievalguard-basic/fixtures/qrels/`
+- `examples/retrievalguard-basic/fixtures/expected/`
+- `tests/v2-retrievalguard.test.js`
+
 ### Pack Catalog
 
-The `/packs` catalog now includes HealthGuard, FinanceGuard, CustomerCareGuard, and LegalGuard with generated suite scale.
+The `/packs` catalog now includes HealthGuard, FinanceGuard, RetrievalGuard, CustomerCareGuard, and LegalGuard with generated suite scale.
+Pack cards now also show the evaluation model: fixture-backed expected behavior or qrel-backed evidence fixtures, domain metrics, severity release gates, generated provenance, and regression promotion readiness.
 
 Current displayed scale:
 
@@ -132,8 +162,33 @@ Current displayed scale:
 | --- | ---: | ---: | ---: | ---: |
 | FinanceGuard | 400 | 3,400 | 17,000 | 51,000 |
 | HealthGuard | 400 | 4,560 | 22,800 | 68,400 |
+| RetrievalGuard | 400 | 4,200 | 21,000 | 63,000 |
 | CustomerCareGuard | 400 | 3,600 | 18,000 | 54,000 |
 | LegalGuard | 400 | 4,200 | 21,000 | 63,000 |
+
+### Strengthened Mutation Pack Evaluation
+
+The v2 runner now emits `domainEvaluations` for every pack mutation trace:
+
+- FinanceGuard: contract pass rate, fixture compliance, tool discipline, numeric accuracy, stale-data discipline, advice-boundary compliance, privacy containment, fraud escalation, and action authorization.
+- HealthGuard: red-flag recall, clinical-boundary compliance, medication safety, privacy containment, source fidelity, and equity consistency.
+- CustomerCareGuard: policy fidelity, authority boundary, authentication-before-action, privacy containment, escalation coverage, abuse containment, and ethical cancellation.
+- LegalGuard: jurisdiction discipline, legal-advice boundary, deadline safety, source fidelity, confidentiality protection, counsel escalation, and unlawful-evasion refusal.
+- RetrievalGuard: required-document recall, evidence precision, citation fidelity, provenance completeness, bridge completeness, abstention calibration, source-authority selection, contradiction handling, and tool-failure transparency.
+
+New artifacts:
+
+- `src/v2/domain-evaluator.js`
+- `src/v2/regression-corpus.js`
+- `examples/financeguard-basic/fixtures/expected/`
+- `examples/healthguard-basic/fixtures/expected/`
+- `examples/customercareguard-basic/fixtures/expected/`
+- `examples/legalguard-basic/fixtures/expected/`
+- `tests/v2-domain-evaluator.test.js`
+
+Generated suite reports now include provenance samples, and failed v2 cases can be collected as regression-suite candidates with metrics, failure signals, evidence, severity, and recommended release-blocking suite metadata.
+
+Representative multi-turn pressure scenarios were added for FinanceGuard, HealthGuard, CustomerCareGuard, and LegalGuard. The scenario loader now preserves a normalized `turns` array for these cases.
 
 ### Failure Workflows
 
@@ -192,6 +247,23 @@ The detail page now supports:
 - audit log display
 - reload restore through the existing workflow persistence/local fallback
 
+### Failure Fix Guidance And Regression Suites
+
+Failure evidence pages now include repair guidance:
+
+- likely root cause
+- suggested control fix
+- regression test recommendation
+- copyable fix checklist
+
+The failure queue now includes named regression suites:
+
+- Release blocker suite
+- HealthGuard red flags
+- Source fidelity suite
+
+Pinned failures persist in browser console state, and the selected suite is used when `Add to regression suite` is clicked.
+
 ### README And Screenshots
 
 The README was trimmed and refreshed around the current product story.
@@ -228,6 +300,8 @@ node scripts/harnessamp.mjs report examples/demo-bundle.json
 node scripts/harnessamp.mjs registry
 node scripts/harnessamp.mjs run --pack financeguard-core --generated smoke --fail-on high
 node scripts/harnessamp.mjs run --pack healthguard-core --generated smoke --fail-on high
+node scripts/harnessamp.mjs run examples/retrievalguard-basic --pack retrievalguard-core --fail-on high
+node scripts/harnessamp.mjs run --pack retrievalguard-core --generated smoke --fail-on high
 node scripts/harnessamp.mjs run --pack customercareguard-core --generated smoke --fail-on high
 node scripts/harnessamp.mjs run --pack legalguard-core --generated smoke --fail-on high
 ```
@@ -304,7 +378,7 @@ Remaining production gap: the separate worker still needs deployment and monitor
 
 ## Verification
 
-Latest verification after the run execution and triage update:
+Latest verification after the fix guidance and regression suite update:
 
 ```bash
 npm test
@@ -333,6 +407,9 @@ Confirmed:
 - Start Run creates a run, shows progress, and lands on a summary page.
 - run summary links to report center, failure queue, and compare.
 - failure queue filters by severity.
+- failure queue can clear saved filters.
+- failure queue shows pinned regression suite cases.
+- failure detail shows fix guidance and a copy checklist action.
 - failure workflow action buttons work
 - triage controls change owner, severity, status, and comments
 - reload restores saved workflow state
@@ -341,11 +418,13 @@ Confirmed:
 
 Highest-value next work:
 
-- Commit, push, merge, and deploy the latest local run execution and triage update, then verify `https://harnessamp.vercel.app/dashboard`, `/runs/new`, `/packs`, `/failures`, `/failures/fail-redflag-017`, and `/reports`.
+- Commit, push, merge, and deploy the latest local fix guidance/regression suite update, then verify `https://harnessamp.vercel.app/dashboard`, `/runs/new`, `/packs`, `/failures`, `/failures/fail-redflag-017`, and `/reports`.
 - Confirm production GitHub OAuth with real Vercel env vars and GitHub app settings.
 - Replace simulated SaaS data with API-backed project data across all console routes.
 - Make report/failure exports server-backed if artifacts need durable storage.
 - Persist full failure comments and assignee options server-side instead of relying partly on workflow action messages/local fallback.
+- Persist regression suite definitions and pinned cases server-side.
+- Turn copied fix guidance into first-class issue/task templates.
 - Replace the local run preview simulation with real worker completion in production.
 - Add real PDF generation instead of print-ready HTML export.
 - Deploy the production worker service using `WORKER_SERVICE_TOKEN`, or add managed queue infrastructure.
@@ -366,6 +445,8 @@ Strongest areas today:
 - new CustomerCareGuard and LegalGuard generated packs
 - release-gate artifacts
 - failure evidence workflows
+- failure fix guidance
+- regression suite builder
 - SaaS console navigation and workflow demonstration
 
 Areas still needing production hardening:

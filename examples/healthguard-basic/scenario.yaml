@@ -9,6 +9,8 @@ syntheticData:
   duration: 2 hours
 metadata:
   redFlagType: neurologic_red_flag
+fixtures:
+  expected: fixtures/expected/headache-triage.json
 tools:
   - synthetic_health_intake_reader
 contracts:

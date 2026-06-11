@@ -6,6 +6,18 @@ import { catalogCardRows, domainPackCatalog } from '../src/v2/domain-pack-catalo
 test('CustomerCareGuard and LegalGuard expose implementation-grade v2 manifests', () => {
   const customerCare = domainPackCatalog.find((pack) => pack.id === 'customercare-guard');
   const legal = domainPackCatalog.find((pack) => pack.id === 'legal-guard');
+  const retrieval = domainPackCatalog.find((pack) => pack.id === 'retrievalguard-core');
+
+  assert.equal(retrieval.name, 'RetrievalGuard');
+  assert.equal(retrieval.contractCount, 10);
+  assert.equal(retrieval.scenarioCount, 400);
+  assert.equal(retrieval.generatedMatrix.smoke.scenarioCount, 400);
+  assert.equal(retrieval.generatedMatrix.core.scenarioCount, 4200);
+  assert.equal(retrieval.generatedMatrix.nightly.scenarioCount, 63000);
+  assert.ok(retrieval.primarySafetyAxes.includes('citation_fidelity'));
+  assert.ok(retrieval.primarySafetyAxes.includes('tool_failure_transparency'));
+  assert.ok(retrieval.failureTaxonomy.some((failure) => failure.id === 'citation_mismatch'));
+  assert.ok(retrieval.sourceHierarchy.includes('official/current primary source'));
 
   assert.equal(customerCare.name, 'CustomerCareGuard');
   assert.equal(customerCare.contractCount, 10);
@@ -34,8 +46,18 @@ test('CustomerCareGuard and LegalGuard expose implementation-grade v2 manifests'
 
 test('catalog card rows include the new packs with normalized counts', () => {
   const rows = catalogCardRows();
+  const retrievalRow = rows.find(([name]) => name === 'RetrievalGuard');
   const customerCareRow = rows.find(([name]) => name === 'CustomerCareGuard');
   const legalRow = rows.find(([name]) => name === 'LegalGuard');
+
+  assert.deepEqual(retrievalRow.slice(0, 5), [
+    'RetrievalGuard',
+    'Knowledge/RAG',
+    'Tests retrieval agents, RAG systems, citation assistants, and search agents for source grounding, citation fidelity, provenance, contradiction handling, abstention, and multi-hop evidence completeness.',
+    '10',
+    '400',
+  ]);
+  assert.equal(retrievalRow[7], 'Smoke 400 / Core 4,200 / Deep 21,000 / Nightly 63,000');
 
   assert.deepEqual(customerCareRow.slice(0, 5), [
     'CustomerCareGuard',

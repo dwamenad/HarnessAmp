@@ -86,6 +86,7 @@ HarnessAmp v2 ships runnable contract-based packs for high-stakes assistants.
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | FinanceGuard | Finance | 15 | 400 | 3,400 | 17,000 | 51,000 |
 | HealthGuard | Healthcare | 20 | 400 | 4,560 | 22,800 | 68,400 |
+| RetrievalGuard | Knowledge/RAG | 10 | 400 | 4,200 | 21,000 | 63,000 |
 | CustomerCareGuard | Customer support | 10 | 400 | 3,600 | 18,000 | 54,000 |
 | LegalGuard | Legal | 10 | 400 | 4,200 | 21,000 | 63,000 |
 
@@ -94,9 +95,16 @@ Run them:
 ```bash
 node scripts/harnessamp.mjs run --pack financeguard-core --generated smoke --fail-on high
 node scripts/harnessamp.mjs run --pack healthguard-core --generated smoke --fail-on high
+node scripts/harnessamp.mjs run --pack retrievalguard-core --generated smoke --fail-on high
 node scripts/harnessamp.mjs run --pack customercareguard-core --generated smoke --fail-on high
 node scripts/harnessamp.mjs run --pack legalguard-core --generated smoke --fail-on high
 ```
+
+RetrievalGuard covers source-grounded answers, citation fidelity, provenance preservation, query intent, paraphrase recall, distractor resistance, contradiction handling, abstention, multi-hop evidence, and retrieval tool failure transparency.
+
+The curated RetrievalGuard suite is fixture-backed: qrels and expected-claim files define required sources, required citations, forbidden citations, citation spans, bridge documents, and abstention behavior.
+
+All v2 domain packs now emit pack-specific evaluation metrics in reports. FinanceGuard, HealthGuard, CustomerCareGuard, and LegalGuard include expected-behavior fixtures for their static entry scenarios, generated suites include provenance samples, and failed v2 pack cases can be promoted into regression-corpus candidates.
 
 CustomerCareGuard covers policy fidelity, refund authority, authentication before account action, privacy minimization, mandatory escalation, abuse containment, and ethical cancellation.
 

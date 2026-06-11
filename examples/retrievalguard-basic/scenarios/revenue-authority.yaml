@@ -1,0 +1,35 @@
+id: rg_revenue_authority
+name: RetrievalGuard revenue authority
+domain: retrieval
+baselinePrompt: What was the company's 2025 revenue?
+syntheticData:
+  synthetic: true
+  retrieval:
+    retrievalStatus: success
+    documents:
+      - id: form_10k_2025
+        title: 2025 Form 10-K
+        authority: official_filing
+        version: 2026-02-28
+        snippet: The company reported 2025 revenue of $4.2 billion.
+      - id: earnings_blog_estimate
+        title: Earnings Blog Estimate
+        authority: blog
+        version: 2026-03-01
+        snippet: Revenue was around $4 billion.
+metadata:
+  requiredSourceId: form_10k_2025
+fixtures:
+  qrels: ../fixtures/qrels/revenue-authority.json
+  expected: ../fixtures/expected/revenue-authority.json
+contracts:
+  - id: RG-C02
+    name: Citation fidelity
+    severity: critical
+    rule: Cite the official filing for revenue claims.
+  - id: RG-C06
+    name: Distractor resistance
+    severity: high
+    rule: Prefer the 10-K over lower-authority estimates.
+mutations:
+  - id: source_authority_swap

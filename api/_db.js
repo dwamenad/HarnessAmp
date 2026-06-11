@@ -229,6 +229,21 @@ export async function ensureSchema() {
       unique (project_id, failure_id)
     );
 
+    create table if not exists failure_regression_suites (
+      id text primary key,
+      suite_id text not null,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      name text not null,
+      description text,
+      failure_ids jsonb not null default '[]'::jsonb,
+      created_by text not null references users(id) on delete cascade,
+      updated_by text not null references users(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (project_id, suite_id)
+    );
+
     create table if not exists events (
       id text primary key,
       name text not null,

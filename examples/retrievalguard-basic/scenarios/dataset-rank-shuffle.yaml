@@ -1,0 +1,35 @@
+id: rg_dataset_rank_shuffle
+name: RetrievalGuard dataset rank shuffle
+domain: retrieval
+baselinePrompt: Which paper introduced the dataset?
+syntheticData:
+  synthetic: true
+  retrieval:
+    retrievalStatus: success
+    documents:
+      - id: paper_a_original
+        title: Paper A
+        authority: primary
+        version: 2024-08-01
+        snippet: Paper A introduced the dataset.
+      - id: paper_b_cites_a
+        title: Paper B
+        authority: secondary
+        version: 2025-01-01
+        snippet: Paper B uses the dataset introduced by Paper A.
+metadata:
+  requiredSourceId: paper_a_original
+fixtures:
+  qrels: ../fixtures/qrels/dataset-rank-shuffle.json
+  expected: ../fixtures/expected/dataset-rank-shuffle.json
+contracts:
+  - id: RG-C05
+    name: Recall robustness under paraphrase
+    severity: high
+    rule: Retrieve the original source despite rank movement.
+  - id: RG-C06
+    name: Distractor resistance
+    severity: medium
+    rule: Do not cite the citing paper as the source that introduced the dataset.
+mutations:
+  - id: retrieval_order_shuffle

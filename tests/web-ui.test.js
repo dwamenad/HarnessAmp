@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const packCatalogSource = await readFile(new URL('../src/v2/domain-pack-catalog.js', import.meta.url), 'utf8');
+const styleSource = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
 
 test('web demo exposes production demo controls', () => {
   [
@@ -71,6 +72,11 @@ test('web report exposes export and persistence actions', () => {
     'failure-corpus-summary',
     'report-comparison',
   ].forEach((id) => assert.match(source, new RegExp(`id="${id}"`)));
+  [
+    'Release decision',
+    'Create CI gate',
+    'Compare latest run',
+  ].forEach((text) => assert.match(source, new RegExp(text)));
 });
 
 test('web app splits the product landing page from the operator surface', () => {
@@ -86,6 +92,8 @@ test('web app splits the product landing page from the operator surface', () => 
     'renderDocsOverview',
     'rawMarkdownDocs',
     '/report/',
+    'href="/dashboard"',
+    '>Dashboard</a>',
     'Launch the app',
     'Manage saved reports and connected runners.',
     'Project command center',
@@ -116,6 +124,19 @@ test('web app splits the product landing page from the operator surface', () => 
     'Worker',
     'Retry schedule',
     'Error history',
+    'Release decision',
+    'Block release',
+    'Review critical failures',
+    'Operational states',
+    'API unavailable',
+    'runLifecycleLabel',
+    'failed quality gate',
+    'Release gate configuration',
+    'Release gate policy editor',
+    'Loading and error states',
+    'Environment separation',
+    'ha-skip-link',
+    'Governance ownership',
   ].forEach((text) => assert.match(source, new RegExp(text)));
 });
 
@@ -137,11 +158,27 @@ test('saas console persists harnesses and exposes smoke-test controls', () => {
     'console-harness-name',
     'console-harness-project',
     'console-harness-endpoint',
+    'console-save-gate',
+    'copy-smoke-payload',
+    'customer care',
+    'legal',
+    'inferHarnessDomain',
+    'Expected runner contract',
+    'Run a passing smoke test before saving this harness.',
+    'Endpoint not compatible yet',
+    'isSmokeReadyForDraft',
+    'harnessDraftSignature',
+    'endpointUrlIsValid',
     'console-save-harness',
     'console-run-smoke',
     'console-smoke-panel',
+    'ha-table-wrap',
+    'ha-harness-table',
     'validateHarnessObservationResponse',
     'runConsoleHarnessSmokeTest',
+    'runHarnessSmokeProbe',
+    '/api/harness-smoke',
+    'The endpoint route was not found',
     'persistConsoleState',
   ].forEach((text) => assert.match(source, new RegExp(text)));
 });
@@ -153,28 +190,52 @@ test('saas failure page exposes actionable workflow controls', () => {
     'failure-filter-severity',
     'failure-filter-status',
     'failure-filter-owner',
+    'failure-saved-view-select',
+    'failure-save-view',
+    'failure-clear-filters',
     'failure-assign-owner',
     'failure-rerun-case',
     'failure-export',
     'failure-owner-select',
     'failure-severity-select',
+    'failure-regression-suite-select',
     'failure-comment',
+    'copy-fix-checklist',
     'failure-severity',
     'failure-action-status',
     'failure-action-title',
     'failure-action-message',
     'failure-action-log',
     'data-failure-action',
+    'Regression suite',
+    'Auditability',
+    'Pin reproducible evidence',
     'bindFailureWorkflowEvents',
     'handleFailureAction',
     'hydrateFailureWorkflow',
     'persistFailureWorkflowAction',
     'applyFailureWorkflow',
     'renderFailureWorkflowLog',
+    'renderFailureAuditTrail',
     'failureRowWithWorkflow',
     'filteredFailures',
     'updateFailureFilter',
+    'applySavedFailureView',
+    'saveCurrentFailureView',
+    'defaultSavedFailureViews',
+    'clearFailureFilters',
+    'failureFixGuidance',
+    'copyFailureFixChecklist',
+    'pinFailureToRegressionSuite',
+    'hydrateRegressionSuites',
+    'persistRegressionSuitePin',
+    'mergeRegressionSuitesFromServer',
+    'regressionSuitesWithFailures',
+    'renderRegressionSuiteCard',
+    'defaultRegressionSuites',
     '/api/failures\\?projectId=',
+    'resource=regression-suites',
+    'comment: workflow.comment',
     'appendFailureWorkflowLog',
     'updateFailureSeverity',
     'failurePayload',
@@ -182,6 +243,8 @@ test('saas failure page exposes actionable workflow controls', () => {
     'False positive resolved',
     'Severity changed',
     'Regression pinned',
+    'Release blocker suite',
+    'Suggested control fix',
     'Exported failure evidence',
   ].forEach((text) => assert.match(source, new RegExp(text)));
 });
@@ -221,10 +284,13 @@ test('saas reports page exposes working export controls', () => {
   ].forEach((text) => assert.match(source, new RegExp(text)));
 });
 
-test('saas pack catalog exposes CustomerCareGuard and LegalGuard manifests', () => {
+test('saas pack catalog exposes RetrievalGuard, CustomerCareGuard, and LegalGuard manifests', () => {
   [
+    'RetrievalGuard',
     'CustomerCareGuard',
     'LegalGuard',
+    'citation_fidelity',
+    'tool_failure_transparency',
     'refund_authority',
     'jurisdiction_discipline',
     'deadline_safety',
@@ -233,7 +299,55 @@ test('saas pack catalog exposes CustomerCareGuard and LegalGuard manifests', () 
     'sourceHierarchy',
     'authorityModel',
     'generatedMatrix',
+    'evaluationModel',
+    'fixture-backed expected behavior',
+    'qrel-backed evidence fixtures',
+    'generated provenance',
   ].forEach((text) => assert.match(packCatalogSource, new RegExp(text)));
   assert.match(source, /catalogCardRows/);
   assert.match(source, /Generated scale/);
+  assert.match(source, /Evaluation model/);
+  assert.match(source, /Fixture-backed/);
+  assert.match(source, /Catalog only/);
+  assert.match(source, /Roadmap only/);
+});
+
+test('saas console exposes strengthened operator controls', () => {
+  [
+    'renderSaasPackDetail',
+    'packContractNames',
+    'compactPackDescription',
+    'compactEvaluationModel',
+    'compactScaleText',
+    'Fixture coverage',
+    'Recent run history',
+    'Known regressions',
+    'compare-baseline-run',
+    'compare-latest-run',
+    'selectedRunComparison',
+    'Pack metric changes',
+    'policy-block-critical',
+    'policy-min-score',
+    'policy-max-gap',
+    'releasePolicyDecisionLabel',
+    'renderRouteStatePanels',
+    'Loading state',
+    'Error state',
+    'Empty state',
+    'renderEnvironmentOverview',
+    'production blocking',
+  ].forEach((text) => assert.match(source, new RegExp(text)));
+});
+
+test('saas console includes keyboard and motion accessibility styles', () => {
+  [
+    'focus-visible',
+    'ha-skip-link',
+    'prefers-reduced-motion',
+    'ha-state-grid',
+    'ha-env-grid',
+    'ha-audit-trail',
+    'ha-policy-form',
+    'ha-skeleton',
+  ].forEach((text) => assert.match(styleSource, new RegExp(text)));
 });

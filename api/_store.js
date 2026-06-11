@@ -22,6 +22,7 @@ const memory = globalThis.__harnessAmpStore ?? {
   reports: new Map(),
   jobs: new Map(),
   failureWorkflows: new Map(),
+  failureRegressionSuites: new Map(),
   benchmarkPacks: new Map(),
   benchmarkVersions: new Map(),
   benchmarkReviews: new Map(),
@@ -42,6 +43,7 @@ memory.benchmarkReviewAssignments ??= new Map();
 memory.promotionCandidates ??= new Map();
 memory.goldenCases ??= new Map();
 memory.failureWorkflows ??= new Map();
+memory.failureRegressionSuites ??= new Map();
 
 export async function getOrCreateGitHubUser(profile) {
   if (useMemory()) {
@@ -330,6 +332,100 @@ export async function getFailureWorkflow({ projectId, failureId, userId }) {
   return result.rows[0] ? normalizeFailureWorkflowRow(result.rows[0]) : null;
 }
 
+export async function listFailureRegressionSuites({ projectId, userId }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership) throw new Error('Project membership not found');
+
+  if (useMemory()) {
+    return Array.from(memory.failureRegressionSuites.values())
+      .filter((suite) => suite.projectId === projectId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  await ensureSchema();
+  const result = await query(
+    `select * from failure_regression_suites
+     where project_id = $1
+     order by updated_at desc`,
+    [projectId],
+  );
+  return result.rows.map(normalizeFailureRegressionSuiteRow);
+}
+
+export async function upsertFailureRegressionSuite({
+  projectId,
+  userId,
+  suiteId,
+  name,
+  description = null,
+  failureId = null,
+}) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can update regression suites');
+  }
+
+  const normalizedSuiteId = normalizeOptionalText(suiteId);
+  const normalizedName = normalizeOptionalText(name);
+  if (!normalizedSuiteId || !normalizedName) {
+    throw new Error('suiteId and name are required');
+  }
+
+  const normalizedFailureId = normalizeOptionalText(failureId);
+  const now = new Date().toISOString();
+
+  if (useMemory()) {
+    const key = failureRegressionSuiteKey(projectId, normalizedSuiteId);
+    const existing = memory.failureRegressionSuites.get(key);
+    const suite = {
+      id: normalizedSuiteId,
+      projectId,
+      workspaceId: membership.workspaceId,
+      name: normalizedName,
+      description: normalizeOptionalText(description) ?? existing?.description ?? 'Pinned regression cases.',
+      failureIds: mergeFailureIds(normalizedFailureId, existing?.failureIds),
+      createdBy: existing?.createdBy ?? userId,
+      updatedBy: userId,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    memory.failureRegressionSuites.set(key, suite);
+    return suite;
+  }
+
+  await ensureSchema();
+  const existing = await query(
+    `select * from failure_regression_suites
+     where project_id = $1 and suite_id = $2
+     limit 1`,
+    [projectId, normalizedSuiteId],
+  );
+  const failureIds = mergeFailureIds(normalizedFailureId, existing.rows[0]?.failure_ids);
+  const inserted = await query(
+    `insert into failure_regression_suites
+       (id, suite_id, project_id, workspace_id, name, description, failure_ids, created_by, updated_by)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $8)
+     on conflict (project_id, suite_id) do update set
+       name = excluded.name,
+       description = coalesce(excluded.description, failure_regression_suites.description),
+       failure_ids = excluded.failure_ids,
+       updated_by = excluded.updated_by,
+       updated_at = now()
+     returning *`,
+    [
+      existing.rows[0]?.id ?? createId('frs'),
+      normalizedSuiteId,
+      projectId,
+      membership.workspaceId,
+      normalizedName,
+      normalizeOptionalText(description),
+      JSON.stringify(failureIds),
+      userId,
+    ],
+  );
+  return normalizeFailureRegressionSuiteRow(inserted.rows[0]);
+}
+
 export async function recordFailureWorkflowAction({
   projectId,
   failureId,
@@ -339,6 +435,7 @@ export async function recordFailureWorkflowAction({
   owner = null,
   severity = null,
   message = null,
+  comment = null,
   evidence = {},
 }) {
   const membership = await getProjectMembership(userId, projectId);
@@ -354,6 +451,7 @@ export async function recordFailureWorkflowAction({
     owner: normalizeOptionalText(owner),
     severity: normalizeOptionalText(severity),
     message: normalizeOptionalText(message),
+    comment: normalizeOptionalText(comment),
     createdBy: userId,
     createdAt: now,
   };
@@ -1914,6 +2012,30 @@ function normalizeFailureWorkflowRow(row) {
 
 function failureWorkflowKey(projectId, failureId) {
   return `${projectId}:${failureId}`;
+}
+
+function normalizeFailureRegressionSuiteRow(row) {
+  return {
+    id: row.suite_id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    description: row.description ?? 'Pinned regression cases.',
+    failureIds: Array.isArray(row.failure_ids) ? row.failure_ids.map(String).filter(Boolean) : [],
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function failureRegressionSuiteKey(projectId, suiteId) {
+  return `${projectId}:${suiteId}`;
+}
+
+function mergeFailureIds(failureId, existingFailureIds = []) {
+  const existing = Array.isArray(existingFailureIds) ? existingFailureIds.map(String).filter(Boolean) : [];
+  return Array.from(new Set([failureId, ...existing].filter(Boolean)));
 }
 
 function normalizeJobRow(row) {

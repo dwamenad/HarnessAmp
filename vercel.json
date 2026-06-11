@@ -47,6 +47,10 @@
       "destination": "/api/jobs"
     },
     {
+      "source": "/api/harness-smoke",
+      "destination": "/api/harness-smoke"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

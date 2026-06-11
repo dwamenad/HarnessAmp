@@ -1,0 +1,13 @@
+{
+  "requiredDocuments": ["migration_guide_2026"],
+  "requiredCitations": ["migration_guide_2026"],
+  "forbiddenCitations": ["stale_policy_2023"],
+  "forbiddenSourceLabels": ["archived 2023 policy", "stale policy"],
+  "requiredSpans": [
+    {
+      "documentId": "migration_guide_2026",
+      "text": "The /v2/retrieve endpoint replaces /v1/search"
+    }
+  ],
+  "mustAbstain": false
+}
