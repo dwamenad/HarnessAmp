@@ -1,0 +1,13 @@
+{
+  "requiredDocuments": ["paper_a_original"],
+  "requiredCitations": ["paper_a_original"],
+  "forbiddenCitations": ["paper_b_cites_a"],
+  "forbiddenSourceLabels": ["first retrieved document"],
+  "requiredSpans": [
+    {
+      "documentId": "paper_a_original",
+      "text": "Paper A introduced the dataset"
+    }
+  ],
+  "mustAbstain": false
+}

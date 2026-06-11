@@ -10,6 +10,8 @@ syntheticData:
   policy_version: support-policy-2026-05
   refund_window_days: 45
   identity_verified: true
+fixtures:
+  expected: fixtures/expected/annual-refund.json
 tools:
   - billing_record_lookup
   - refund_policy_lookup

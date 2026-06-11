@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import authHandler from '../api/auth.js';
 import benchmarksHandler from '../api/benchmarks.js';
 import failuresHandler from '../api/failures.js';
+import harnessSmokeHandler from '../api/harness-smoke.js';
 import jobsHandler from '../api/jobs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
@@ -153,6 +154,7 @@ test('failure workflow actions persist with audit history', async () => {
       owner: 'Safety Review',
       severity: 'Critical',
       message: 'Assigned to Safety Review.',
+      comment: 'Reviewer confirmed this needs clinical safety owner.',
       evidence: {
         contract: 'Escalate red flags',
         scenario: 'healthguard_redflag_001',
@@ -168,6 +170,7 @@ test('failure workflow actions persist with audit history', async () => {
   assert.equal(createResponse.body.workflow.owner, 'Safety Review');
   assert.equal(createResponse.body.workflow.actions.length, 1);
   assert.equal(createResponse.body.workflow.actions[0].action, 'assign-owner');
+  assert.equal(createResponse.body.workflow.actions[0].comment, 'Reviewer confirmed this needs clinical safety owner.');
 
   const secondResponse = createMockResponse();
   await failuresHandler({
@@ -197,6 +200,88 @@ test('failure workflow actions persist with audit history', async () => {
   assert.equal(getResponse.statusCode, 200);
   assert.equal(getResponse.body.workflow.status, 'Reproduced');
   assert.equal(getResponse.body.workflow.actions.length, 2);
+});
+
+test('failure regression suites persist pinned cases per project', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+
+  const createResponse = createMockResponse();
+  await failuresHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'regression-suites' },
+    body: {
+      suiteId: 'healthguard-red-flags',
+      name: 'HealthGuard red flags',
+      description: 'Urgent symptom, diagnosis-boundary, and escalation regressions.',
+      failureId: 'fail-redflag-017',
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.body.suite.id, 'healthguard-red-flags');
+  assert.deepEqual(createResponse.body.suite.failureIds, ['fail-redflag-017']);
+
+  const getResponse = createMockResponse();
+  await failuresHandler({
+    method: 'GET',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'regression-suites' },
+  }, getResponse);
+
+  assert.equal(getResponse.statusCode, 200);
+  assert.ok(getResponse.body.suites.some((suite) => (
+    suite.id === 'healthguard-red-flags'
+    && suite.failureIds.includes('fail-redflag-017')
+  )));
+});
+
+test('harness smoke probe reports upstream HTTP diagnostics', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  await seedDevSession();
+  const originalFetch = globalThis.fetch;
+
+  try {
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, 'https://agent.example.test/harnessamp');
+      assert.equal(init.method, 'POST');
+      return {
+        ok: false,
+        status: 404,
+        headers: {
+          get(name) {
+            return name === 'content-type' ? 'text/html' : null;
+          },
+        },
+        async text() {
+          return '<h1>Not found</h1>';
+        },
+      };
+    };
+
+    const response = createMockResponse();
+    await harnessSmokeHandler({
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: {
+        endpoint: 'https://agent.example.test/harnessamp',
+        payload: {
+          scenario_id: 'healthguard_redflag_001',
+          mutation_id: 'symptom_minimization',
+          input: { user_message: 'Chest pressure' },
+        },
+      },
+    }, response);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.ok, false);
+    assert.equal(response.body.statusCode, 404);
+    assert.equal(response.body.responsePreview, '<h1>Not found</h1>');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('runner jobs enqueue durably, dedupe by idempotency key, and run through worker action', async () => {

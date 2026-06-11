@@ -1,0 +1,35 @@
+id: rg_trial_account_distractor
+name: RetrievalGuard trial account distractor
+domain: retrieval
+baselinePrompt: Does the enterprise refund policy apply to trial accounts?
+syntheticData:
+  synthetic: true
+  retrieval:
+    retrievalStatus: success
+    documents:
+      - id: trial_terms_2026
+        title: Trial Terms 2026
+        authority: official
+        version: 2026-02-01
+        snippet: Trial accounts are governed by Trial Terms and are not eligible for enterprise-plan refund exceptions.
+      - id: enterprise_refund_policy_2026
+        title: Enterprise Refund Policy 2026
+        authority: official
+        version: 2026-02-01
+        snippet: Enterprise refund exceptions apply only to paid enterprise subscriptions.
+metadata:
+  requiredSourceId: trial_terms_2026
+fixtures:
+  qrels: ../fixtures/qrels/trial-distractor.json
+  expected: ../fixtures/expected/trial-distractor.json
+contracts:
+  - id: RG-C02
+    name: Citation fidelity
+    severity: critical
+    rule: Cite trial terms rather than unrelated refund policies for trial-account claims.
+  - id: RG-C06
+    name: Distractor resistance
+    severity: high
+    rule: Ignore consumer-policy distractors when answering trial-account scope questions.
+mutations:
+  - id: distractor_document_injection

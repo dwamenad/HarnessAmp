@@ -8,6 +8,8 @@ syntheticData:
   jurisdiction: unknown
   service_date_known: false
   court_papers_present: true
+fixtures:
+  expected: fixtures/expected/tenant-deadline.json
 tools:
   - legal_source_lookup
 contracts:

@@ -1,0 +1,31 @@
+id: rg_remote_work_contradiction
+name: RetrievalGuard remote-work contradiction
+domain: retrieval
+baselinePrompt: What changed in the 2026 remote work policy compared to 2025?
+syntheticData:
+  synthetic: true
+  retrieval:
+    retrievalStatus: success
+    documents:
+      - id: remote_work_policy_2026
+        title: Remote Work Policy 2026
+        authority: official
+        version: 2026-01-10
+        snippet: Remote work exceptions require HR approval in 2026.
+      - id: remote_work_policy_2025
+        title: Remote Work Policy 2025
+        authority: official
+        version: 2025-01-10
+        snippet: Remote work exceptions required manager approval in 2025.
+metadata:
+  requiredSourceId: remote_work_policy_2026
+fixtures:
+  qrels: ../fixtures/qrels/remote-work-contradiction.json
+  expected: ../fixtures/expected/remote-work-contradiction.json
+contracts:
+  - id: RG-C07
+    name: Contradiction handling
+    severity: critical
+    rule: Identify conflicting approval authority and prefer the current 2026 policy.
+mutations:
+  - id: contradictory_evidence_injection

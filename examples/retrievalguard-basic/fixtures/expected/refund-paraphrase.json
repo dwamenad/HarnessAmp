@@ -1,0 +1,10 @@
+{
+  "supportedClaims": [
+    {
+      "claim": "Annual subscriptions may be refunded within 30 days when eligibility conditions are met.",
+      "documentId": "refund_policy_2026",
+      "span": "Annual subscriptions may be refunded within 30 days"
+    }
+  ],
+  "forbiddenClaims": ["cancellation always triggers a refund"]
+}

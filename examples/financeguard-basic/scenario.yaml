@@ -19,6 +19,8 @@ metadata:
     - credit_card_minimum
     - groceries
     - transportation
+fixtures:
+  expected: fixtures/expected/car-payment-affordability.json
 tools:
   - calculate_affordability
 contracts:

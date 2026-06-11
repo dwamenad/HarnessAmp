@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { loadScenarioFile } from './scenario-loader.js';
 import { runV2Scenario } from './runner.js';
 import { meetsSeverityThreshold, severityRank } from './severity.js';
+import { summarizeDomainEvaluations } from './domain-evaluator.js';
 import {
   generateFinanceGuardScenarios,
   summarizeFinanceGuardGeneratedCoverage,
@@ -19,6 +20,10 @@ import {
   generateLegalGuardScenarios,
   summarizeLegalGuardGeneratedCoverage,
 } from './generators/legalguard-generator.js';
+import {
+  generateRetrievalGuardScenarios,
+  summarizeRetrievalGuardGeneratedCoverage,
+} from './generators/retrievalguard-generator.js';
 
 export async function runV2Suite(path, options = {}) {
   const scenarioPaths = discoverScenarioPaths(path);
@@ -65,6 +70,7 @@ export async function runGeneratedV2Suite(options = {}) {
       tier,
       maxGeneratedScenarios: options.maxGeneratedScenarios ?? null,
       coverage: generator.summarize(scenarios),
+      provenanceSamples: scenarios.slice(0, 3).map(generatedProvenanceSample),
     },
   });
 }
@@ -79,7 +85,7 @@ export function discoverScenarioPaths(path) {
   const paths = [];
   collectYamlFiles(sourcePath, paths);
   return paths
-    .filter((item) => !/\/(?:financeguard|healthguard|customercareguard|legalguard)-core\.ya?ml$/i.test(item))
+    .filter((item) => !/\/(?:financeguard|healthguard|customercareguard|legalguard|retrievalguard)-core\.ya?ml$/i.test(item))
     .sort((left, right) => left.localeCompare(right));
 }
 
@@ -111,6 +117,7 @@ export function buildSuiteReport({ id, name, sourcePath, packName, failOn, repor
     failOn,
     failureCounts,
     reports,
+    evaluationSummary: summarizeDomainEvaluations(reports.flatMap((report) => report.domainEvaluations ?? [])),
     generated,
   };
 }
@@ -153,6 +160,7 @@ function defaultSuiteName(packName) {
   if (packName === 'healthguard-core') return 'HealthGuard Core Suite';
   if (packName === 'customercareguard-core') return 'CustomerCareGuard Core Suite';
   if (packName === 'legalguard-core') return 'LegalGuard Core Suite';
+  if (packName === 'retrievalguard-core') return 'RetrievalGuard Core Suite';
   return 'FinanceGuard Core Suite';
 }
 
@@ -167,6 +175,12 @@ function generatedGeneratorFor(packName) {
     return {
       generate: generateLegalGuardScenarios,
       summarize: summarizeLegalGuardGeneratedCoverage,
+    };
+  }
+  if (packName === 'retrievalguard-core') {
+    return {
+      generate: generateRetrievalGuardScenarios,
+      summarize: summarizeRetrievalGuardGeneratedCoverage,
     };
   }
   if (packName === 'healthguard-core') {
@@ -189,9 +203,23 @@ function generatedSuiteLabel(packName) {
   if (packName === 'financeguard-core') return 'FinanceGuard';
   if (packName === 'customercareguard-core') return 'CustomerCareGuard';
   if (packName === 'legalguard-core') return 'LegalGuard';
+  if (packName === 'retrievalguard-core') return 'RetrievalGuard';
   return packName;
 }
 
 function capitalize(value) {
   return String(value).charAt(0).toUpperCase() + String(value).slice(1);
+}
+
+function generatedProvenanceSample(scenario) {
+  const metadata = scenario.metadata ?? {};
+  return {
+    scenarioId: scenario.id,
+    templateId: metadata.generatedTemplateId,
+    mutationVariantId: metadata.generatedMutationVariantId,
+    profileId: metadata.generatedProfileId,
+    promptVariantId: metadata.generatedPromptVariantId,
+    contextVariantId: metadata.generatedContextVariantId,
+    rationale: `template ${metadata.generatedTemplateId}, mutation ${metadata.generatedMutationVariantId}, profile ${metadata.generatedProfileId}, prompt ${metadata.generatedPromptVariantId}, context ${metadata.generatedContextVariantId}`,
+  };
 }

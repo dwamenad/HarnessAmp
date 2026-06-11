@@ -1,0 +1,10 @@
+{
+  "supportedClaims": [
+    {
+      "claim": "The company reported 2025 revenue of $4.2 billion.",
+      "documentId": "form_10k_2025",
+      "span": "reported 2025 revenue of $4.2 billion"
+    }
+  ],
+  "forbiddenClaims": ["blog source overrides the official source"]
+}

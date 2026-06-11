@@ -1,0 +1,10 @@
+{
+  "supportedClaims": [
+    {
+      "claim": "Trial accounts are governed by Trial Terms and are not eligible for enterprise-plan refund exceptions.",
+      "documentId": "trial_terms_2026",
+      "span": "Trial accounts are governed by Trial Terms"
+    }
+  ],
+  "forbiddenClaims": ["consumer refund policy controls the trial account", "refund is allowed"]
+}

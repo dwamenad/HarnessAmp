@@ -1,7 +1,7 @@
 import { meetsSeverityThreshold, severityRank } from './severity.js';
 import { sanitizeReportText, sanitizeReportValue } from './report-sanitizer.js';
 
-export function buildRunReport({ scenario, pack, baselineTrace, mutatedTraces, behavioralDiffs, contractResults, failOn }) {
+export function buildRunReport({ scenario, pack, baselineTrace, mutatedTraces, behavioralDiffs, contractResults, domainEvaluations = [], retrievalEvaluations = [], failOn }) {
   const failingResults = contractResults.filter((result) => !result.passed);
   const blockingFailures = failingResults.filter((result) => meetsSeverityThreshold(result.severity, failOn));
   const maxSeverity = failingResults
@@ -24,6 +24,8 @@ export function buildRunReport({ scenario, pack, baselineTrace, mutatedTraces, b
     baselineTrace,
     mutatedTraces,
     contractResults,
+    domainEvaluations,
+    retrievalEvaluations,
     behavioralDiffs,
     riskScore: riskScore(failingResults),
     highestSeverity: maxSeverity,
@@ -75,11 +77,50 @@ export function formatMarkdownReport(report) {
     lines.push('');
   }
 
+  if (Array.isArray(report.retrievalEvaluations) && report.retrievalEvaluations.length) {
+    lines.push('## RetrievalGuard Evaluation');
+    lines.push('');
+    report.retrievalEvaluations.forEach((evaluation) => {
+      lines.push(`- ${evaluation.mutationId ?? 'baseline'}: overall ${formatMetric(evaluation.overallScore)}`);
+      Object.entries(evaluation.metrics ?? {}).forEach(([name, value]) => {
+        lines.push(`  ${name}: ${formatMetric(value)}`);
+      });
+      const signals = retrievalSignalLines(evaluation.failureSignals);
+      signals.forEach((signal) => lines.push(`  Signal: ${signal}`));
+    });
+    lines.push('');
+  }
+
+  const nonRetrievalEvaluations = Array.isArray(report.domainEvaluations)
+    ? report.domainEvaluations.filter((evaluation) => evaluation.pack !== 'RetrievalGuard')
+    : [];
+  if (nonRetrievalEvaluations.length) {
+    lines.push('## Domain Pack Evaluation');
+    lines.push('');
+    nonRetrievalEvaluations.forEach((evaluation) => {
+      lines.push(`- ${evaluation.pack} ${evaluation.mutationId ?? 'baseline'}: overall ${formatMetric(evaluation.overallScore)}`);
+      Object.entries(evaluation.metrics ?? {}).forEach(([name, value]) => {
+        lines.push(`  ${name}: ${formatMetric(value)}`);
+      });
+      const signals = domainSignalLines(evaluation.failureSignals);
+      signals.forEach((signal) => lines.push(`  Signal: ${signal}`));
+      if (evaluation.provenance?.generated) {
+        lines.push(`  Provenance: ${evaluation.provenance.rationale}`);
+      }
+    });
+    lines.push('');
+  }
+
   lines.push('## Contract Results');
   lines.push('');
   report.contractResults.forEach((result) => {
     lines.push(`- ${result.passed ? 'PASS' : 'FAIL'} ${result.contractId} (${result.severity})`);
     lines.push(`  ${result.explanation}`);
+    if (!result.passed && Array.isArray(result.evidence) && result.evidence.length) {
+      result.evidence.forEach((item) => {
+        lines.push(`  Evidence: ${item}`);
+      });
+    }
   });
   lines.push('');
   lines.push('## Behavioral Diffs');
@@ -120,6 +161,23 @@ export function formatMarkdownSuiteReport(report) {
     lines.push(`- Profiles: ${report.generated.coverage.profileCount}`);
     lines.push(`- Prompt variants: ${report.generated.coverage.promptVariantCount}`);
     lines.push(`- Context variants: ${report.generated.coverage.contextVariantCount}`);
+    if (Array.isArray(report.generated.provenanceSamples) && report.generated.provenanceSamples.length) {
+      lines.push('- Provenance samples:');
+      report.generated.provenanceSamples.forEach((sample) => {
+        lines.push(`  ${sample.scenarioId}: ${sample.rationale}`);
+      });
+    }
+    lines.push('');
+  }
+
+  if (report.evaluationSummary?.evaluationCount) {
+    lines.push('## Evaluation Summary');
+    lines.push('');
+    lines.push(`- Evaluations: ${report.evaluationSummary.evaluationCount}`);
+    lines.push(`- Average overall score: ${formatMetric(report.evaluationSummary.averageOverallScore)}`);
+    Object.entries(report.evaluationSummary.averageMetrics ?? {}).forEach(([name, value]) => {
+      lines.push(`- ${name}: ${formatMetric(value)}`);
+    });
     lines.push('');
   }
 
@@ -160,5 +218,53 @@ function suiteTitle(packName) {
   if (packName === 'healthguard-core') return 'HealthGuard';
   if (packName === 'customercareguard-core') return 'CustomerCareGuard';
   if (packName === 'legalguard-core') return 'LegalGuard';
+  if (packName === 'retrievalguard-core') return 'RetrievalGuard';
   return 'FinanceGuard';
+}
+
+function formatMetric(value) {
+  return typeof value === 'number' ? value.toFixed(3) : 'n/a';
+}
+
+function retrievalSignalLines(signals = {}) {
+  const lines = [];
+  [
+    ['missingRequiredDocuments', 'missing required docs'],
+    ['missingBridgeDocuments', 'missing bridge docs'],
+    ['missingRequiredCitations', 'missing required citations'],
+    ['forbiddenCitationHits', 'forbidden citations'],
+    ['forbiddenClaimHits', 'forbidden claims'],
+    ['forbiddenSourceHits', 'forbidden source labels'],
+    ['unsupportedCitationIds', 'unsupported citation ids'],
+    ['citationSpanMismatches', 'citation span mismatches'],
+  ].forEach(([key, label]) => {
+    const value = signals[key];
+    if (Array.isArray(value) && value.length) {
+      lines.push(`${label}: ${value.join(', ')}`);
+    }
+  });
+  if (signals.retrievalStatus && signals.retrievalStatus !== 'success') {
+    lines.push(`retrieval status: ${signals.retrievalStatus}`);
+  }
+  return lines;
+}
+
+function domainSignalLines(signals = {}) {
+  const lines = [];
+  [
+    ['failedContracts', 'failed contracts'],
+    ['failureTypes', 'failure types'],
+    ['forbiddenClaimHits', 'forbidden claims'],
+    ['forbiddenActionHits', 'forbidden actions'],
+    ['missingRequiredPhrases', 'missing required phrases'],
+    ['missingRequiredToolCalls', 'missing required tool calls'],
+    ['forbiddenToolCalls', 'forbidden tool calls'],
+    ['missingRequiredDataFields', 'missing required data fields'],
+  ].forEach(([key, label]) => {
+    const value = signals[key];
+    if (Array.isArray(value) && value.length) {
+      lines.push(`${label}: ${value.join(', ')}`);
+    }
+  });
+  return lines;
 }

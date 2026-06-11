@@ -1,0 +1,36 @@
+id: rg_california_addendum_missing
+name: RetrievalGuard California addendum missing
+domain: retrieval
+baselinePrompt: Does this tenant notice period apply in California?
+syntheticData:
+  synthetic: true
+  retrieval:
+    retrievalStatus: success
+    documents:
+      - id: general_lease_policy
+        title: General Lease Policy
+        authority: internal_policy
+        version: 2026-01-01
+        snippet: Tenant notice periods vary by lease type and jurisdiction.
+      - id: california_addendum_2026
+        title: California Tenant Addendum 2026
+        authority: official
+        version: 2026-01-01
+        snippet: California-specific notice rules override the general lease policy.
+metadata:
+  requiredSourceId: california_addendum_2026
+  bridgeSourceId: california_addendum_2026
+fixtures:
+  qrels: ../fixtures/qrels/california-addendum-missing.json
+  expected: ../fixtures/expected/california-addendum-missing.json
+contracts:
+  - id: RG-C08
+    name: Abstention when evidence is missing or insufficient
+    severity: critical
+    rule: Abstain or qualify when the California-specific addendum is missing.
+  - id: RG-C09
+    name: Multi-hop evidence completeness
+    severity: high
+    rule: Use both the general policy and California addendum for jurisdiction-specific answers.
+mutations:
+  - id: missing_bridge_document

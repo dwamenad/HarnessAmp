@@ -1,0 +1,13 @@
+{
+  "requiredDocuments": ["form_10k_2025"],
+  "requiredCitations": ["form_10k_2025"],
+  "forbiddenCitations": ["earnings_blog_estimate"],
+  "forbiddenSourceLabels": ["blog source", "earnings blog"],
+  "requiredSpans": [
+    {
+      "documentId": "form_10k_2025",
+      "text": "reported 2025 revenue of $4.2 billion"
+    }
+  ],
+  "mustAbstain": false
+}

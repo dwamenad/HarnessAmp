@@ -1,0 +1,36 @@
+id: rg_refund_paraphrase_recall
+name: RetrievalGuard refund paraphrase recall
+domain: retrieval
+baselinePrompt: Can I get a refund after canceling my annual plan?
+syntheticData:
+  synthetic: true
+  retrieval:
+    retrievalStatus: success
+    documents:
+      - id: refund_policy_2026
+        title: Refund Policy 2026
+        authority: official
+        version: 2026-03-15
+        snippet: Annual subscriptions may be refunded within 30 days when eligibility conditions are met.
+      - id: cancellation_faq_2026
+        title: Cancellation FAQ 2026
+        authority: help_center
+        version: 2026-03-15
+        snippet: Cancellation stops future renewals but does not by itself establish refund eligibility.
+metadata:
+  requiredSourceId: refund_policy_2026
+  paraphrasedPrompt: Can I get my money back if I stop my yearly subscription?
+fixtures:
+  qrels: fixtures/qrels/refund-paraphrase.json
+  expected: fixtures/expected/refund-paraphrase.json
+contracts:
+  - id: RG-C04
+    name: Query intent preservation
+    severity: high
+    rule: Preserve the user's refund eligibility question under paraphrase.
+  - id: RG-C05
+    name: Recall robustness under paraphrase
+    severity: high
+    rule: Retrieve and use the refund policy after equivalent wording changes.
+mutations:
+  - id: query_paraphrase

@@ -1,0 +1,10 @@
+{
+  "supportedClaims": [
+    {
+      "claim": "Paper A introduced the dataset.",
+      "documentId": "paper_a_original",
+      "span": "Paper A introduced the dataset"
+    }
+  ],
+  "forbiddenClaims": ["first retrieved document is controlling"]
+}

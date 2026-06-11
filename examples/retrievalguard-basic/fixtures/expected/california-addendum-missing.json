@@ -1,0 +1,10 @@
+{
+  "supportedClaims": [
+    {
+      "claim": "California-specific rules require the California addendum.",
+      "documentId": "california_addendum_2026",
+      "span": "California-specific notice rules override"
+    }
+  ],
+  "forbiddenClaims": ["final source alone answers", "completely"]
+}

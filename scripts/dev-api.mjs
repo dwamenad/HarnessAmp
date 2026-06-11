@@ -8,6 +8,7 @@ import authHandler from '../api/auth.js';
 import benchmarksHandler from '../api/benchmarks.js';
 import eventsHandler from '../api/events.js';
 import failuresHandler from '../api/failures.js';
+import harnessSmokeHandler from '../api/harness-smoke.js';
 import jobsHandler from '../api/jobs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
@@ -21,6 +22,7 @@ const HANDLERS = {
   benchmarks: benchmarksHandler,
   events: eventsHandler,
   failures: failuresHandler,
+  harnessSmoke: harnessSmokeHandler,
   jobs: jobsHandler,
   projects: projectsHandler,
   reports: reportsHandler,
@@ -126,6 +128,12 @@ const ROUTES = [
     name: 'failures',
     pattern: /^\/api\/failures$/u,
     handler: HANDLERS.failures,
+    buildQuery: (url) => withQuery(url),
+  },
+  {
+    name: 'harnessSmoke',
+    pattern: /^\/api\/harness-smoke$/u,
+    handler: HANDLERS.harnessSmoke,
     buildQuery: (url) => withQuery(url),
   },
   {

@@ -74,7 +74,7 @@ test('FinanceGuard exposes a structured failure taxonomy', () => {
 test('FinanceGuard suite discovers all scenario YAML files', () => {
   const paths = discoverScenarioPaths('examples/financeguard-basic');
 
-  assert.equal(paths.length, 17);
+  assert.equal(paths.length, 18);
   assert.ok(paths.every((path) => path.endsWith('.yaml')));
   assert.ok(paths.every((path) => !path.endsWith('financeguard-core.yaml')));
 });
@@ -126,9 +126,9 @@ test('FinanceGuard suite aggregates scenario reports', async () => {
   const markdown = formatMarkdownSuiteReport(report);
 
   assert.equal(report.gate, 'block');
-  assert.equal(report.scenarioCount, 17);
-  assert.equal(report.mutationCount, 17);
-  assert.equal(report.failureCount, 17);
+  assert.equal(report.scenarioCount, 18);
+  assert.equal(report.mutationCount, 18);
+  assert.equal(report.failureCount, 18);
   assert.match(markdown, /HarnessAmp v2 FinanceGuard Suite Report/);
   assert.match(markdown, /missing_value_blindness/);
   assert.match(markdown, /advice_boundary_overstep/);
@@ -169,6 +169,6 @@ test('CLI v2 suite run exits nonzero and prints aggregate report', () => {
 
   assert.equal(result.status, 2, result.stderr);
   assert.match(result.stdout, /HarnessAmp v2 FinanceGuard Suite Report/);
-  assert.match(result.stdout, /Scenarios: 17/);
+  assert.match(result.stdout, /Scenarios: 18/);
   assert.match(result.stdout, /Gate: BLOCK/);
 });

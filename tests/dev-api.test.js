@@ -41,6 +41,9 @@ test('resolveApiRequest mirrors Vercel rewrite params', () => {
   assert.equal(failuresRoute?.name, 'failures');
   assert.equal(failuresRoute?.query.projectId, 'project_123');
   assert.equal(failuresRoute?.query.failureId, 'fail_123');
+
+  const smokeRoute = resolveApiRequest('http://127.0.0.1:3000/api/harness-smoke');
+  assert.equal(smokeRoute?.name, 'harnessSmoke');
 });
 
 test('dev api server returns a seeded session when dev auth is enabled', async () => {

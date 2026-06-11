@@ -1,0 +1,10 @@
+{
+  "supportedClaims": [
+    {
+      "claim": "Adult dosage cannot be inferred without the dosage table.",
+      "documentId": "adult_dosage_table",
+      "span": "Adult dosing recommendations are listed only in this table"
+    }
+  ],
+  "forbiddenClaims": ["the answer is definitely yes", "required source is not present"]
+}

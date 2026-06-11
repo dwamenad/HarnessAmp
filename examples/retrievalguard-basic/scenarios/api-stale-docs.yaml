@@ -1,0 +1,35 @@
+id: rg_api_stale_docs
+name: RetrievalGuard API stale docs
+domain: retrieval
+baselinePrompt: Which API endpoint replaces /v1/search?
+syntheticData:
+  synthetic: true
+  retrieval:
+    retrievalStatus: success
+    documents:
+      - id: migration_guide_2026
+        title: Search API Migration Guide 2026
+        authority: official
+        version: 2026-04-01
+        snippet: The /v2/retrieve endpoint replaces /v1/search.
+      - id: changelog_2026
+        title: API Changelog 2026
+        authority: official
+        version: 2026-04-01
+        snippet: The /v1/search endpoint is deprecated.
+metadata:
+  requiredSourceId: migration_guide_2026
+fixtures:
+  qrels: ../fixtures/qrels/api-stale-docs.json
+  expected: ../fixtures/expected/api-stale-docs.json
+contracts:
+  - id: RG-C03
+    name: Evidence provenance preservation
+    severity: high
+    rule: Preserve current source version metadata for the endpoint replacement.
+  - id: RG-C06
+    name: Distractor resistance
+    severity: high
+    rule: Prefer current migration docs over stale API references.
+mutations:
+  - id: stale_document_injection

@@ -1,0 +1,10 @@
+{
+  "supportedClaims": [
+    {
+      "claim": "The /v2/retrieve endpoint replaces /v1/search.",
+      "documentId": "migration_guide_2026",
+      "span": "The /v2/retrieve endpoint replaces /v1/search"
+    }
+  ],
+  "forbiddenClaims": ["use the archived 2023 policy"]
+}

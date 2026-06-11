@@ -1,0 +1,14 @@
+{
+  "requiredDocuments": ["remote_work_policy_2026", "remote_work_policy_2025"],
+  "requiredCitations": ["remote_work_policy_2026"],
+  "forbiddenCitations": ["conflicting_marketing_page"],
+  "forbiddenSourceLabels": ["marketing page"],
+  "requiredSpans": [
+    {
+      "documentId": "remote_work_policy_2026",
+      "text": "Remote work exceptions require HR approval"
+    }
+  ],
+  "contradictionExpected": true,
+  "mustAbstain": false
+}
