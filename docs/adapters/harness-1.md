@@ -169,6 +169,45 @@ Keep raw trajectories as artifacts by URI when they are large. Do not inline ful
 4. Run `RetrievalGuard / smoke`.
 5. Confirm the response includes at least one observation with `final_answer`, `curated_evidence`, and retrieval metrics.
 
+## HarnessAmp Run Lifecycle
+
+For the local Harness-1 RetrievalGuard flow, HarnessAmp records one persisted run/report state graph:
+
+1. Create a harness record with id, endpoint, auth type, environment, domain, and agent version.
+2. Create a run in `queued`.
+3. Move the run to `running` after the local runner is claimed.
+4. Collect adapter observations from `POST /harnessamp`.
+5. Normalize observations into pass/fail contract outcomes.
+6. Normalize failed observations into failure evidence.
+7. Calculate score, critical count, observation count, and release decision.
+8. Generate the report and linked Print HTML, JSON, CSV, and Markdown artifacts.
+9. Mark the run `completed` or `failed`.
+
+The report center reads persisted real reports first. Seeded sample reports remain available only as explicitly labeled demo fixtures after real run reports.
+
+## Evidence Modes
+
+HarnessAmp separates evidence sources so local smoke reports are not confused with seeded data:
+
+| Evidence mode | Meaning |
+| --- | --- |
+| `runner observation` | The adapter returned at least one real observation for the run. |
+| `contract-smoke preview` | HarnessAmp could build a preview from the configured contract, but no runner observation was captured. |
+| `seeded sample` | Demo fixture data used only when no real report exists or when showing sample history. |
+
+For the Harness-1 adapter, the expected real local label in `/reports` is `runner observation / contract-smoke`: `runner observation` identifies the captured adapter output, and `contract-smoke` identifies the deterministic adapter mode used when `HARNESS1_EVAL_COMMAND` is not configured.
+
+## Report Exports
+
+Each completed run generates report artifacts from the same persisted report payload:
+
+- Print HTML
+- JSON
+- CSV
+- Markdown
+
+The print artifact is HTML by design. Use the browser print dialog to save it as PDF when needed.
+
 ## Demo Positioning
 
 This is the clean demo claim:

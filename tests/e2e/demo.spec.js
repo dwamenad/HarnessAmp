@@ -4,6 +4,33 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/app');
 });
 
+test('public site funnels into the console while keeping sandbox and docs reachable', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Open console' }).first()).toHaveAttribute('href', '/dashboard');
+  await expect(page.getByRole('link', { name: 'Run sample diagnosis' }).first()).toHaveAttribute('href', '/app#demo');
+  await expect(page.getByRole('link', { name: 'Read docs' }).first()).toHaveAttribute('href', '/docs');
+  await expect(page.getByText('Every run produces release evidence.')).toBeVisible();
+  await expect(page.getByText('How teams use it')).toHaveCount(0);
+});
+
+test('dashboard stays operational instead of explaining placeholder route states', async ({ page }) => {
+  await page.goto('/dashboard');
+  await expect(page.getByText('Release readiness')).toBeVisible();
+  await expect(page.getByText('Recent Runs')).toBeVisible();
+  await expect(page.getByText('Open Critical Failures')).toBeVisible();
+  await expect(page.getByText('CI Gate Status')).toBeVisible();
+  await expect(page.getByText('Governance')).toBeVisible();
+  await expect(page.getByText('Operational states')).toHaveCount(0);
+  await expect(page.getByText('Loading and error states')).toHaveCount(0);
+});
+
+test('reports keep seeded samples labeled after the route cleanup', async ({ page }) => {
+  await page.goto('/reports');
+  await expect(page.getByText('Reports')).toBeVisible();
+  await expect(page.getByText('Print HTML').first()).toBeVisible();
+  await expect(page.getByText('seeded sample').first()).toBeVisible();
+});
+
 test('runs the default diagnosis and shows schema validation', async ({ page }) => {
   await expect(page.getByText('Run a sample assessment and review the result.')).toBeVisible();
   await expect(page.locator('#demo-gate')).toContainText(/PASS|WARN|BLOCK/);

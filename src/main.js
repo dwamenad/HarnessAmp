@@ -11,6 +11,22 @@ import {
   reportPrintHtml,
   reportSlug as buildReportSlug,
 } from './console/report-export.js';
+import {
+  completeRun as completePersistedRun,
+  failurePayloadFromState,
+  failureRowsFromState,
+  getReportArtifact,
+  getReportPayload,
+  latestCompletedRealRun,
+  listRealReports,
+  loadRunReportState,
+  markRunRunning as markPersistedRunRunning,
+  persistRunReportState,
+  reportRowFromPersistedReport,
+  seededReportRowFromFixture,
+  syncConsoleStateToRunReportState,
+  upsertRun as upsertPersistedRun,
+} from './console/run-report-store.js';
 import { MUTATION_PACKS } from './mutations/registry.js';
 import { catalogCardRows, domainPackCatalog } from './v2/domain-pack-catalog.js';
 import supportProfile from '../examples/risk-profiles/support-agent.json';
@@ -351,12 +367,6 @@ const modules = [
   ['CI/CD Gates', 'Convert the Robustness Gap into pass, warn, or block status for pull requests and releases.'],
 ];
 
-const landingPaths = [
-  ['Open the app', 'Use `/app` for guided evaluations, saved reports, validation checks, and connected runner workflows.'],
-  ['Keep team features deeper', 'Sign-in, shared reports, and runner setup stay in the app so the product page can stay focused.'],
-  ['Keep setup in docs', 'Installation, sign-in setup, deployment steps, and reference material live under `/docs` for easier rollout.'],
-];
-
 const STORAGE_KEY = 'harnessamp.webDemoState';
 const REPORT_STORAGE_KEY = 'harnessamp.savedReports';
 const EVENT_STORAGE_KEY = 'harnessamp.telemetryEvents';
@@ -423,8 +433,11 @@ const defaultState = {
 
 const state = loadState();
 const consoleState = loadConsoleState();
+let runReportState = loadRunReportState();
 const app = document.querySelector('#app');
 let regressionSuitesHydrationKey = '';
+
+syncRunReportStateFromConsole({ persist: true });
 
 installErrorMonitoring();
 initializeApp().catch((error) => {
@@ -512,9 +525,8 @@ function renderHomeSurface(activeReportUrl) {
     ${renderWorkflowSection()}
     ${renderProductSection()}
     ${renderHomeReportPreview(activeReportUrl)}
-    ${renderLandingPathsSection()}
     ${renderDocsLandingSpotlight()}
-    ${renderClosingSection({ href: '/app#demo', label: 'Run a robustness diagnosis' })}
+    ${renderClosingSection({ href: '/dashboard', label: 'Open console' })}
   `;
 }
 
@@ -533,6 +545,8 @@ function renderSaasConsole(route, isAuthed) {
           <div class="ha-topbar__actions">
             <a href="/runs/new">Start Run</a>
             <a href="/harnesses/new">New Harness</a>
+            <a href="/">Public site</a>
+            <a href="/docs">Docs</a>
             ${isAuthed
               ? `<button id="logout-button" type="button">Log out ${escapeHtml(state.session.user.login)}</button>`
               : `<a href="${escapeHtml(authStartHref())}">Sign in with GitHub</a>`}
@@ -548,8 +562,8 @@ function renderSaasSidebar(route) {
   return `
     <aside class="ha-sidebar">
       <a class="ha-logo" href="/dashboard" aria-label="HarnessAmp dashboard">
-        <span>HA</span>
-        <div><strong>HarnessAmp</strong><small>Behavioral contracts</small></div>
+        <span class="ha-logo__mark"><img src="/logo.png" alt="" /></span>
+        <div><strong>HarnessAmp</strong><small>Reliability testing</small></div>
       </a>
       <nav class="ha-nav" aria-label="Console">
         ${saasNav.map(([href, label, icon]) => {
@@ -614,9 +628,9 @@ function renderSaasDashboard() {
         </article>
         <article class="ha-panel">
           <div class="ha-panel__head"><h3>Open Critical Failures</h3><a href="/failures/fail-redflag-017">Open evidence</a></div>
-          <div class="ha-stack">${saasFailures.filter(([severity]) => severity === 'Critical').map(renderFailureMini).join('')}</div>
+          <div class="ha-stack">${allFailureRows().filter(([severity]) => severity === 'Critical').map(renderFailureMini).join('')}</div>
         </article>
-        ${renderBreakdownPanel('Failures by Contract', [['Escalate red flags', 4], ['Avoid diagnosis', 3], ['Preserve facts', 2], ['Data minimization', 1]])}
+        ${renderBreakdownPanel('Failures by Contract', failureBreakdownRows())}
         ${renderBreakdownPanel('Failures by Mutation Family', [['Schema drift', 11], ['Prompt pressure', 8], ['Context omission', 6], ['Role confusion', 4]])}
         <article class="ha-panel">
           <div class="ha-panel__head"><h3>CI Gate Status</h3><span class="ha-badge ha-badge--passed">Passing</span></div>
@@ -630,19 +644,6 @@ function renderSaasDashboard() {
             ['Gate policy', 'Block on critical or high confidence regressions'],
             ['Audit trail', 'Workflow actions persisted per project'],
           ])}
-        </article>
-        <article class="ha-panel">
-          <div class="ha-panel__head"><h3>Operational states</h3><span class="ha-badge ha-badge--neutral">Ready</span></div>
-          ${renderGovernanceList([
-            ['No project', 'Prompt for project selection before run setup'],
-            ['No runs yet', 'Show start-run empty state'],
-            ['API unavailable', 'Fall back to local preview with visible data source'],
-            ['Unauthenticated', 'Keep browser-local reports and workflow actions'],
-          ])}
-        </article>
-        <article class="ha-panel ha-panel--wide">
-          <div class="ha-panel__head"><h3>Loading and error states</h3><span class="ha-badge ha-badge--neutral">Route-ready</span></div>
-          ${renderRouteStatePanels()}
         </article>
       </div>
     </section>
@@ -957,13 +958,14 @@ function renderSaasFailuresList() {
 }
 
 function renderSaasFailureDetail(failureId = 'fail-redflag-017') {
-  const [severity, contract, mutation, scenario, status, owner, reproducibility, id] = saasFailures.find((failure) => failure[7] === failureId) ?? saasFailures[0];
+  const [severity, contract, mutation, scenario, status, owner, reproducibility, id] = allFailureRows().find((failure) => failure[7] === failureId) ?? allFailureRows()[0];
   const savedWorkflow = readLocalFailureWorkflow(id);
   const currentSeverity = savedWorkflow?.severity ?? severity;
   const currentStatus = savedWorkflow?.status ?? status;
   const currentOwner = savedWorkflow?.owner ?? owner;
-  const detail = saasFailureDetails[id] ?? saasFailureDetails['fail-redflag-017'];
-  const guidance = failureFixGuidance(failurePayload(id));
+  const payload = failurePayload(id);
+  const detail = payload ?? saasFailureDetails[id] ?? saasFailureDetails['fail-redflag-017'];
+  const guidance = failureFixGuidance(payload);
   return `
     <section class="ha-page">
       <div class="ha-failure-header">
@@ -994,12 +996,12 @@ function renderSaasFailureDetail(failureId = 'fail-redflag-017') {
           <h3>Observed behavior</h3><p>${escapeHtml(detail.observed)}</p>
           <h3>Why this matters</h3><p>${escapeHtml(detail.why)}</p>
           <h3>Reproducibility</h3><p>${escapeHtml(reproducibility)} across recent reruns.</p>
-          <h3>Owner</h3><p>Safety Review</p>
+          <h3>Owner</h3><p>${escapeHtml(payload?.recommendedOwner ?? 'Safety Review')}</p>
         </article>
         <article class="ha-panel ha-evidence">
           <h3>Original scenario</h3><pre>${escapeHtml(detail.original)}</pre>
           <h3>Mutated scenario</h3><pre>${escapeHtml(detail.mutated)}</pre>
-          <h3>Agent input</h3><pre>${escapeHtml(JSON.stringify({ scenario_id: scenario, mutation_id: mutation, failure_id: id }, null, 2))}</pre>
+          <h3>Agent input</h3><pre>${escapeHtml(JSON.stringify({ scenario_id: scenario, mutation_id: mutation, failure_id: id, run_id: payload?.runId, report_id: payload?.reportId }, null, 2))}</pre>
           <h3>Agent output</h3><pre>${escapeHtml(detail.output)}</pre>
         </article>
         <article class="ha-panel ha-evidence">
@@ -1099,50 +1101,17 @@ function reportExportLabel(format) {
 
 function reportTableRows() {
   return [
-    ...localRunReportRows(),
+    ...listRealReports(runReportState).map(reportRowFromPersistedReport),
     ...saasReports.map((row, index) => reportRowFromSaasRow(row, index)),
   ];
 }
 
 function localRunReportRows() {
-  return consoleState.runs
-    .filter((run) => run.status === 'completed')
-    .map((run) => {
-      const critical = numericRunValue(run.critical);
-      const decision = releaseDecisionForRun(run);
-      const project = projectForRun(run);
-      const name = `${run.name} local report`;
-      return {
-        id: localRunReportId(run),
-        runId: run.id,
-        name,
-        cells: [
-          name,
-          project,
-          run.harness,
-          run.pack,
-          run.started,
-          run.score,
-          run.critical,
-          reportEvidenceLabelForRun(run),
-        ],
-        decision,
-        tone: critical > 0 ? 'critical' : 'passed',
-      };
-    });
+  return listRealReports(runReportState).map(reportRowFromPersistedReport);
 }
 
 function reportRowFromSaasRow(row, index) {
-  const critical = Number(row[6]);
-  const decision = critical > 0 ? 'Block release' : 'Safe to release';
-  return {
-    id: reportSlug(row[0], index),
-    runId: '',
-    name: row[0],
-    cells: [...row, 'seeded sample'],
-    decision,
-    tone: critical > 0 ? 'critical' : 'passed',
-  };
+  return seededReportRowFromFixture(row, index, reportSlug);
 }
 
 function reportEvidenceLabelForRun(run) {
@@ -1153,7 +1122,11 @@ function reportEvidenceLabelForRun(run) {
 }
 
 function latestCompletedLocalRun() {
-  return consoleState.runs.find((run) => run.status === 'completed') ?? null;
+  const persisted = latestCompletedRealRun(runReportState);
+  if (persisted) {
+    return consoleState.runs.find((run) => run.id === persisted.id) ?? runRecord(persisted.id);
+  }
+  return null;
 }
 
 function dashboardMetricsForRun(run) {
@@ -1398,16 +1371,6 @@ function renderDecisionBadge(label, tone = 'neutral') {
 
 function renderNextActions(actions) {
   return `<nav class="ha-next-actions" aria-label="Recommended next actions">${actions.map(([label, href, detail]) => `<a href="${escapeHtml(href)}"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(detail)}</span></a>`).join('')}</nav>`;
-}
-
-function renderRouteStatePanels() {
-  return `
-    <div class="ha-state-grid" aria-label="Route state coverage">
-      <div class="ha-state-panel"><span class="ha-skeleton"></span><strong>Loading state</strong><p>Show stable skeleton rows while runs, reports, or benchmark evidence hydrate.</p></div>
-      <div class="ha-state-panel"><span class="ha-badge ha-badge--critical">Error</span><strong>Error state</strong><p>Use fail-closed copy with a retry path when runners or APIs are unavailable.</p></div>
-      <div class="ha-state-panel"><span class="ha-badge ha-badge--neutral">Empty</span><strong>Empty state</strong><p>Offer the next action when no runs, failures, reports, or saved views exist.</p></div>
-    </div>
-  `;
 }
 
 function renderEnvironmentOverview() {
@@ -1837,6 +1800,8 @@ async function startConfiguredRun() {
   const run = createLocalRunRecord();
   consoleState.activeRunId = run.id;
   upsertConsoleRun(run);
+  runReportState = upsertPersistedRun(runReportState, run, { harnesses: getConsoleHarnesses() });
+  persistRunReportState(runReportState);
   updateHarnessLastRun(run);
   consoleState.runFeedback = `Queued ${run.name}`;
   persistConsoleState();
@@ -2015,6 +1980,8 @@ function scheduleActiveRunProgression() {
         observations: String(Math.max(120, Math.round(normalizePositiveIntegerInput(consoleState.runDraft.maxObservations, 2000) * 0.42))),
         timeline: [...updatedCurrent.timeline, 'Runner claimed job', 'Evaluating generated suite'],
       });
+      runReportState = markPersistedRunRunning(runReportState, updatedCurrent.id);
+      persistRunReportState(runReportState);
       persistConsoleState();
       render();
       return;
@@ -2032,6 +1999,8 @@ function scheduleActiveRunProgression() {
         timeline: [...updatedCurrent.timeline, 'Evaluation completed', 'Report and failure links generated'],
       };
       upsertConsoleRun(completedRun);
+      runReportState = completePersistedRun(runReportState, completedRun, reportExportContext());
+      persistRunReportState(runReportState);
       updateHarnessLastRun(completedRun);
       persistConsoleState();
       window.location.href = `/runs/${encodeURIComponent(updatedCurrent.id)}/summary`;
@@ -2044,6 +2013,7 @@ function upsertConsoleRun(run) {
     run,
     ...consoleState.runs.filter((item) => item.id !== run.id),
   ].slice(0, 12);
+  runReportState = upsertPersistedRun(runReportState, run, { harnesses: getConsoleHarnesses() });
 }
 
 function updateHarnessLastRun(run) {
@@ -2107,7 +2077,7 @@ function saveCurrentFailureView() {
 function filteredFailures() {
   const filters = consoleState.failureFilters;
   const search = filters.search.trim().toLowerCase();
-  return saasFailures.filter((failure) => {
+  return allFailureRows().filter((failure) => {
     const [severity, contract, mutation, scenario, status, owner] = failureRowWithWorkflow(failure);
     if (filters.severity !== 'All' && severity !== filters.severity) return false;
     if (filters.status !== 'All' && status !== filters.status) return false;
@@ -2115,6 +2085,22 @@ function filteredFailures() {
     if (!search) return true;
     return [severity, contract, mutation, scenario, status, owner].join(' ').toLowerCase().includes(search);
   });
+}
+
+function allFailureRows() {
+  return [
+    ...failureRowsFromState(runReportState),
+    ...saasFailures,
+  ];
+}
+
+function failureBreakdownRows() {
+  const counts = new Map();
+  allFailureRows().forEach((failure) => {
+    const [, contract] = failureRowWithWorkflow(failure);
+    counts.set(contract, (counts.get(contract) ?? 0) + 1);
+  });
+  return Array.from(counts.entries()).slice(0, 4);
 }
 
 function renderRegressionSuiteCard(suite) {
@@ -2357,12 +2343,12 @@ function renderHomeHero() {
   return `
     <section class="hero reveal">
       <div class="hero__copy">
-        <p class="eyebrow">Agent reliability diagnosis</p>
         <h1>Turn agent fragility into a failing PR check.</h1>
         <p class="hero__lede">HarnessAmp stress-tests agent workflows under changing conditions, then highlights the failures, regressions, and controls teams should address before release.</p>
         <div class="hero__actions">
-          <a class="button button--primary" href="/app#demo">Launch the app</a>
-          <a class="button button--secondary" href="#report">View sample report</a>
+          <a class="button button--primary" href="/dashboard">Open console</a>
+          <a class="button button--secondary" href="/app#demo">Run sample diagnosis</a>
+          <a class="button button--secondary" href="/docs">Read docs</a>
         </div>
       </div>
       ${renderDiagnosticBoard()}
@@ -2396,11 +2382,12 @@ function renderHomeReportPreview(activeReportUrl) {
   return `
     <section id="report" class="section section--split reveal">
       <div class="section__intro">
-        <p class="eyebrow">Diagnosis output</p>
-        <h2>See the Robustness Gap before it reaches production.</h2>
-        <p>The homepage keeps the report preview concise: baseline versus stressed performance, overall risk band, highest-risk surface, recommended next step, and a link you can share with the team.</p>
+        <p class="eyebrow">Report outputs</p>
+        <h2>Every run produces release evidence.</h2>
+        <p>HarnessAmp turns a completed run into a release decision, failure evidence, source-fidelity notes when available, and export artifacts for review.</p>
         <div class="hero__actions">
-          <a class="button button--primary" href="/app#report">Open full report</a>
+          <a class="button button--primary" href="/reports">Open reports</a>
+          <a class="button button--secondary" href="/app#demo">Run sample diagnosis</a>
           <a class="button button--secondary" href="/docs/usage">Read usage docs</a>
         </div>
       </div>
@@ -2413,24 +2400,6 @@ function renderHomeReportPreview(activeReportUrl) {
         <div><span>Recommended next step</span><strong id="report-control">--</strong></div>
         <div><span>Release status</span><strong class="danger" id="report-gate">--</strong></div>
         <div><span>Share link</span><strong id="report-path">${activeReportUrl ? escapeHtml(activeReportUrl) : '--'}</strong></div>
-      </div>
-    </section>
-  `;
-}
-
-function renderLandingPathsSection() {
-  return `
-    <section id="demo" class="section reveal">
-      <div class="section__intro">
-        <p class="eyebrow">How teams use it</p>
-        <h2>Start with the product story here, then go deeper in the app.</h2>
-        <p>The homepage explains the workflow. The interactive evaluation tools, team features, and setup guides are split between <code class="docs-inline-code">/app</code> and <code class="docs-inline-code">/docs</code> so the experience stays focused.</p>
-      </div>
-      <div class="module-grid">${landingPaths.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
-      <div class="hero__actions">
-        <a class="button button--primary" href="/app#demo">Open app</a>
-        <a class="button button--secondary" href="/docs/install">Install path</a>
-        <a class="button button--secondary" href="/docs/github-oauth">Sign-in setup</a>
       </div>
     </section>
   `;
@@ -2687,11 +2656,10 @@ function renderTopbar(route, isAuthed) {
       </a>
       <nav class="topbar__nav" aria-label="Primary navigation">
         <a href="/" ${route.kind === 'home' ? 'aria-current="page"' : ''}>Product</a>
-        <a href="/app" ${route.kind === 'app' || route.kind === 'report' || route.kind === 'project-report' ? 'aria-current="page"' : ''}>App</a>
+        <a href="/#workflow">Workflow</a>
         <a href="/docs" ${route.kind === 'docs' ? 'aria-current="page"' : ''}>Docs</a>
-        <a href="/app#demo">Demo</a>
-        <a href="/app#report">Reports</a>
-        <a href="/dashboard" ${route.kind === 'console' && route.pathname === '/dashboard' ? 'aria-current="page"' : ''}>Dashboard</a>
+        <a href="/app#demo" ${route.kind === 'app' || route.kind === 'report' || route.kind === 'project-report' ? 'aria-current="page"' : ''}>Sample diagnosis</a>
+        <a href="/dashboard" ${route.kind === 'console' && route.pathname === '/dashboard' ? 'aria-current="page"' : ''}>Open console</a>
       </nav>
       ${isAuthed
         ? '<button class="nav-cta nav-cta--button" id="logout-button" type="button">Log out</button>'
@@ -5119,15 +5087,16 @@ function bindReportExportEvents() {
 function exportSaasReport(reportId, format) {
   const report = reportPayload(reportId);
   if (!report) return;
+  const persistedArtifact = getReportArtifact(runReportState, reportId, format);
 
   if (format === 'json') {
-    downloadText(`${report.id}.json`, JSON.stringify(report, null, 2), 'Downloaded report JSON');
+    downloadText(`${report.id}.json`, persistedArtifact?.content ?? JSON.stringify(report, null, 2), 'Downloaded report JSON');
   } else if (format === 'csv') {
-    downloadText(`${report.id}.csv`, reportCsv(report), 'Downloaded report CSV');
+    downloadText(`${report.id}.csv`, persistedArtifact?.content ?? reportCsv(report), 'Downloaded report CSV');
   } else if (format === 'markdown') {
-    downloadText(`${report.id}.md`, reportMarkdown(report), 'Downloaded report Markdown');
+    downloadText(`${report.id}.md`, persistedArtifact?.content ?? reportMarkdown(report), 'Downloaded report Markdown');
   } else if (format === 'print') {
-    downloadText(`${report.id}-print.html`, reportPrintHtml(report), 'Downloaded print-ready PDF report');
+    downloadText(`${report.id}-print.html`, persistedArtifact?.content ?? reportPrintHtml(report), 'Downloaded Print HTML report');
   }
 
   showReportExportStatus('Report exported', `${report.name} exported as ${format === 'print' ? 'print-ready HTML' : format.toUpperCase()}.`);
@@ -5140,7 +5109,7 @@ function showReportExportStatus(title, message) {
 }
 
 function reportPayload(reportId) {
-  return buildReportPayload(reportId, reportExportContext());
+  return getReportPayload(runReportState, reportId) ?? buildReportPayload(reportId, reportExportContext());
 }
 
 function reportExportContext() {
@@ -5451,6 +5420,8 @@ function updateFailureSeverity(severity) {
 }
 
 function failurePayload(failureId) {
+  const persisted = failurePayloadFromState(runReportState, failureId);
+  if (persisted) return persisted;
   const failure = saasFailures.find((candidate) => candidate[7] === failureId) ?? saasFailures[0];
   if (!failure) return null;
   const [severity, contract, mutation, scenario, status, owner, reproducibility, id] = failure;
@@ -5922,6 +5893,7 @@ function loadConsoleState() {
 }
 
 function persistConsoleState() {
+  syncRunReportStateFromConsole({ persist: true });
   localStorage.setItem(CONSOLE_STORAGE_KEY, JSON.stringify({
     harnesses: consoleState.harnesses,
     selectedHarnessId: consoleState.selectedHarnessId,
@@ -5938,6 +5910,16 @@ function persistConsoleState() {
     newHarnessDraft: consoleState.newHarnessDraft,
     smokeResult: consoleState.smokeResult,
   }));
+}
+
+function syncRunReportStateFromConsole({ persist = false } = {}) {
+  runReportState = syncConsoleStateToRunReportState(runReportState, {
+    harnesses: getConsoleHarnesses(),
+    runs: consoleState.runs,
+    reportContext: reportExportContext(),
+  });
+  if (persist) runReportState = persistRunReportState(runReportState);
+  return runReportState;
 }
 
 function defaultRunDraft(harnesses = defaultConsoleHarnesses()) {

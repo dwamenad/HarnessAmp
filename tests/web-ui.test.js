@@ -92,6 +92,8 @@ test('web report exposes export and persistence actions', () => {
     'reportEvidenceLabelForRun',
     'ensureRunnerObservationCaptured',
     'shouldCaptureRunnerObservation',
+    'syncRunReportStateFromConsole',
+    'runReportState',
     'Print HTML',
   ].forEach((text) => assert.match(source, new RegExp(text)));
   [
@@ -117,15 +119,15 @@ test('web app splits the product landing page from the operator surface', () => 
     'benchmark-case-list',
     'renderHomeSurface',
     'renderAppSurface',
-    'renderLandingPathsSection',
     'renderDocsLandingSpotlight',
     'renderDocsExperience',
     'renderDocsOverview',
     'rawMarkdownDocs',
     '/report/',
     'href="/dashboard"',
-    '>Dashboard</a>',
-    'Launch the app',
+    '>Open console</a>',
+    'Run sample diagnosis',
+    'Every run produces release evidence.',
     'Manage saved reports and connected runners.',
     'Project command center',
     'Operational focus',
@@ -158,19 +160,22 @@ test('web app splits the product landing page from the operator surface', () => 
     'Release decision',
     'Block release',
     'Review critical failures',
-    'Operational states',
-    'API unavailable',
     'runLifecycleLabel',
     'failed quality gate',
     'Release gate configuration',
     'Release gate policy editor',
     'Harness-1 search adapter',
     '/docs/adapters/harness-1',
-    'Loading and error states',
     'Environment separation',
     'ha-skip-link',
     'Governance ownership',
   ].forEach((text) => assert.match(source, new RegExp(text)));
+  [
+    'Launch the app',
+    'Operational states',
+    'Loading and error states',
+    'renderRouteStatePanels',
+  ].forEach((text) => assert.doesNotMatch(source, new RegExp(text)));
 });
 
 test('web demo persists workspace and report snapshots locally', () => {
@@ -316,7 +321,7 @@ test('saas reports page exposes working export controls', () => {
     'reportMarkdown',
     'reportPrintHtml',
     'Downloaded report CSV',
-    'Downloaded print-ready PDF report',
+    'Downloaded Print HTML report',
   ].forEach((text) => assert.match(source, new RegExp(text)));
 });
 
@@ -366,10 +371,6 @@ test('saas console exposes strengthened operator controls', () => {
     'policy-min-score',
     'policy-max-gap',
     'releasePolicyDecisionLabel',
-    'renderRouteStatePanels',
-    'Loading state',
-    'Error state',
-    'Empty state',
     'renderEnvironmentOverview',
     'production blocking',
   ].forEach((text) => assert.match(source, new RegExp(text)));
@@ -380,11 +381,9 @@ test('saas console includes keyboard and motion accessibility styles', () => {
     'focus-visible',
     'ha-skip-link',
     'prefers-reduced-motion',
-    'ha-state-grid',
     'ha-env-grid',
     'ha-audit-trail',
     'ha-policy-form',
-    'ha-skeleton',
   ].forEach((text) => assert.match(styleSource, new RegExp(text)));
 });
 
