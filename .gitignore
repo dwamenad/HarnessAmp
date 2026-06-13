@@ -7,3 +7,5 @@ dist
 test-results
 .vercel
 .env*.local
+.Rhistory
+outputs/
