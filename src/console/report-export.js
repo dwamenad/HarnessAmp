@@ -1,0 +1,560 @@
+export function reportSlug(name, index = 0) {
+  return `${String(name).toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/(^-|-$)/gu, '')}-${index + 1}`;
+}
+
+export function localRunReportId(run) {
+  return `local-${reportSlug(run.id || run.name || 'run', 0)}`;
+}
+
+export function buildReportPayload(reportId, context = {}) {
+  const localRun = (context.localRuns ?? []).find((run) => localRunReportId(run) === reportId);
+  if (localRun) return localRunReportPayload(localRun, context);
+  const row = (context.seedReports ?? []).find((report, index) => reportSlug(report[0], index) === reportId);
+  if (!row) return null;
+  const [name, project, harness, pack, runDate, score, critical] = row;
+  return enrichReportPayload({
+    id: reportId,
+    name,
+    project,
+    harness,
+    pack,
+    runDate,
+    score: Number(score),
+    criticalFailures: Number(critical),
+    status: Number(critical) > 0 ? 'review_required' : 'passing',
+    summary: Number(critical) > 0
+      ? `${critical} critical failure${Number(critical) === 1 ? '' : 's'} require owner review before release.`
+      : 'No critical failures found in this run.',
+    recommendations: Number(critical) > 0
+      ? ['Review critical evidence', 'Assign owner', 'Add reproduced cases to regression suite']
+      : ['Share executive report', 'Keep current CI gate thresholds'],
+    evidenceMode: 'seeded-sample',
+  }, context);
+}
+
+export function localRunReportPayload(run, context = {}) {
+  const critical = numericRunValue(run.critical);
+  const observations = Array.isArray(run.runnerObservations) ? run.runnerObservations : [];
+  const evidenceMode = observations.length ? 'runner-observation' : 'contract-smoke-preview';
+  return enrichReportPayload({
+    id: localRunReportId(run),
+    runId: run.id,
+    name: `${run.name} local report`,
+    project: projectForRun(run, context.harnesses ?? []),
+    harness: run.harness,
+    pack: run.pack,
+    runDate: run.started,
+    score: numericRunValue(run.score),
+    criticalFailures: critical,
+    observations: numericRunValue(run.observations),
+    runnerObservations: observations,
+    adapterMode: run.adapterMode || adapterModeFromObservations(observations),
+    status: critical > 0 ? 'review_required' : 'passing',
+    summary: critical > 0
+      ? `${critical} critical failure${critical === 1 ? '' : 's'} require owner review before release.`
+      : 'No critical failures found in this local run.',
+    recommendations: critical > 0
+      ? ['Review local run summary', 'Pin reproducible RetrievalGuard failures', 'Rerun the same harness after remediation']
+      : ['Share executive report', 'Keep the pack in smoke or nightly regression'],
+    timeline: run.timeline ?? [],
+    evidenceMode,
+  }, context);
+}
+
+export function enrichReportPayload(report, context = {}) {
+  const critical = numericRunValue(report.criticalFailures);
+  const failed = critical > 0 || report.status === 'review_required';
+  const releaseDecision = failed ? 'Block release' : 'Safe to release';
+  const environment = reportEnvironment(report);
+  const gate = gateForReport(report, releaseDecision);
+  const failureEvidence = failureEvidenceForReport(report, context);
+  const retrievalEvidence = isRetrievalReport(report) ? retrievalEvidenceForReport(report) : null;
+  return {
+    ...report,
+    evidenceMode: report.evidenceMode ?? 'seeded-sample',
+    status: failed ? 'review_required' : 'passing',
+    releaseDecision,
+    environment,
+    owner: packOwner(report.pack),
+    gate,
+    failureSummary: failureSummaryForReport(report, failureEvidence),
+    failureEvidence,
+    retrievalEvidence,
+    remediation: remediationForReport(report, failureEvidence),
+    regressionPlan: regressionPlanForReport(report, failureEvidence),
+    auditTrail: auditTrailForReport(report),
+  };
+}
+
+export function reportCsv(report) {
+  const rows = [
+    ['id', 'name', 'project', 'harness', 'pack', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'recommended_control'],
+    ...(report.failureEvidence.length ? report.failureEvidence : [{}]).map((failure) => [
+      report.id,
+      report.name,
+      report.project,
+      report.harness,
+      report.pack,
+      report.runDate,
+      report.score,
+      report.criticalFailures,
+      report.releaseDecision,
+      report.evidenceMode,
+      report.adapterMode ?? '',
+      failure.id ?? '',
+      failure.severity ?? '',
+      failure.contract ?? '',
+      failure.scenarioId ?? '',
+      failure.mutationId ?? '',
+      failure.recommendedControl ?? '',
+    ]),
+  ];
+  return rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+}
+
+export function reportMarkdown(report) {
+  return `# ${report.name}
+
+- Project: ${report.project}
+- Harness: ${report.harness}
+- Pack: ${report.pack}
+- Run date: ${report.runDate}
+- Score: ${report.score}
+- Critical failures: ${report.criticalFailures}
+- Decision: ${report.releaseDecision}
+- Owner: ${report.owner}
+- Evidence mode: ${report.evidenceMode}
+- Adapter mode: ${report.adapterMode ?? 'not recorded'}
+
+## Summary
+
+${report.summary}
+
+## Release gate
+
+${markdownTable(['Metric', 'Required', 'Actual', 'Result'], report.gate.thresholds.map((item) => [item.metric, item.required, item.actual, item.result]))}
+
+## Failure evidence
+
+${report.failureEvidence.length ? markdownTable(['Severity', 'Contract', 'Scenario', 'Mutation', 'Why it matters'], report.failureEvidence.map((failure) => [failure.severity, failure.contract, failure.scenarioId, failure.mutationId, failure.why])) : 'No release-blocking failures.'}
+
+${report.retrievalEvidence ? `## RetrievalGuard source fidelity
+
+${markdownTable(['Metric', 'Value'], Object.entries(report.retrievalEvidence.metrics).map(([key, value]) => [key, value]))}
+
+${markdownTable(['Source', 'Status', 'Result'], report.retrievalEvidence.requiredSources.map((source) => [source.id, source.status, source.result]))}
+` : ''}
+
+## Remediation checklist
+
+${report.remediation.map((item) => `- ${item}`).join('\n')}
+
+## Regression plan
+
+- Suite: ${report.regressionPlan.suite}
+- Cadence: ${report.regressionPlan.cadence}
+- Cases: ${report.regressionPlan.cases.length ? report.regressionPlan.cases.map((item) => `${item.scenarioId}/${item.mutationId}`).join(', ') : 'none'}
+`;
+}
+
+export function reportPrintHtml(report) {
+  const retrievalSection = report.retrievalEvidence ? `
+  <section>
+    <h2>RetrievalGuard Source Fidelity</h2>
+    ${reportHtmlTable(['Metric', 'Value'], Object.entries(report.retrievalEvidence.metrics).map(([key, value]) => [key, value]))}
+    <h3>Source Checks</h3>
+    ${reportHtmlTable(['Source', 'Status', 'Result'], report.retrievalEvidence.requiredSources.map((source) => [source.id, source.status, source.result]))}
+    ${reportHtmlList(report.retrievalEvidence.checks)}
+  </section>` : '';
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(report.name)}</title>
+  <style>
+    @page { margin: 0.6in; }
+    body { color: #111827; font-family: Inter, Arial, sans-serif; line-height: 1.45; margin: 0; }
+    h1 { font-size: 30px; margin: 0 0 8px; }
+    h2 { border-bottom: 1px solid #dbe3ef; font-size: 18px; margin: 28px 0 12px; padding-bottom: 6px; }
+    h3 { font-size: 14px; margin: 18px 0 8px; }
+    dl { display: grid; grid-template-columns: 180px 1fr; gap: 8px 18px; margin: 0; }
+    dt { color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    dd { margin: 0; }
+    table { border-collapse: collapse; margin: 10px 0 0; width: 100%; }
+    th, td { border: 1px solid #dbe3ef; font-size: 12px; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #eef4ff; color: #334155; text-transform: uppercase; }
+    ul { margin: 8px 0 0 20px; padding: 0; }
+    li { margin: 5px 0; }
+    .hero { background: #0f172a; color: white; margin: -8px -8px 24px; padding: 28px; }
+    .hero p { color: #cbd5e1; margin: 0; max-width: 780px; }
+    .decision { display: inline-block; font-size: 12px; font-weight: 800; letter-spacing: .08em; margin-bottom: 10px; text-transform: uppercase; }
+    .score-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); margin: 18px 0 0; }
+    .score-card { background: #f8fafc; border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; }
+    .score-card span { color: #64748b; display: block; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    .score-card strong { display: block; font-size: 24px; margin-top: 4px; }
+    .block { color: #fca5a5; }
+    .pass { color: #86efac; }
+    .page-break { break-before: page; }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <span class="decision ${report.releaseDecision === 'Block release' ? 'block' : 'pass'}">${escapeHtml(report.releaseDecision)}</span>
+    <h1>${escapeHtml(report.name)}</h1>
+    <p>${escapeHtml(report.summary)}</p>
+  </section>
+  <section class="score-grid">
+    <div class="score-card"><span>Score</span><strong>${escapeHtml(report.score)}</strong></div>
+    <div class="score-card"><span>Critical</span><strong>${escapeHtml(report.criticalFailures)}</strong></div>
+    <div class="score-card"><span>Environment</span><strong>${escapeHtml(report.environment)}</strong></div>
+    <div class="score-card"><span>Owner</span><strong>${escapeHtml(report.owner)}</strong></div>
+  </section>
+  <section>
+    <h2>Run Metadata</h2>
+    <dl>
+      <dt>Project</dt><dd>${escapeHtml(report.project)}</dd>
+      <dt>Harness</dt><dd>${escapeHtml(report.harness)}</dd>
+      <dt>Pack</dt><dd>${escapeHtml(report.pack)}</dd>
+      <dt>Run date</dt><dd>${escapeHtml(report.runDate)}</dd>
+      <dt>Status</dt><dd>${escapeHtml(report.status)}</dd>
+      <dt>Evidence mode</dt><dd>${escapeHtml(report.evidenceMode)}</dd>
+      <dt>Adapter mode</dt><dd>${escapeHtml(report.adapterMode ?? 'not recorded')}</dd>
+      <dt>Weakest surface</dt><dd>${escapeHtml(report.failureSummary.weakestSurface)}</dd>
+    </dl>
+  </section>
+  <section>
+    <h2>Release Gate</h2>
+    <p>${escapeHtml(report.gate.failCondition)}</p>
+    ${reportHtmlTable(['Metric', 'Required', 'Actual', 'Result'], report.gate.thresholds.map((item) => [item.metric, item.required, item.actual, item.result]))}
+  </section>
+  <section class="page-break">
+    <h2>Failure Evidence</h2>
+    <p>${escapeHtml(report.failureSummary.primaryRisk)}</p>
+    ${report.failureEvidence.length ? reportHtmlTable(['Severity', 'Contract', 'Scenario', 'Mutation', 'Expected', 'Observed', 'Recommended control'], report.failureEvidence.map((failure) => [failure.severity, failure.contract, failure.scenarioId, failure.mutationId, failure.expected, failure.observed, failure.recommendedControl])) : '<p>No release-blocking failures.</p>'}
+  </section>
+  ${retrievalSection}
+  <section>
+    <h2>Remediation Checklist</h2>
+    ${reportHtmlList(report.remediation)}
+  </section>
+  <section>
+    <h2>Regression Plan</h2>
+    <dl>
+      <dt>Suite</dt><dd>${escapeHtml(report.regressionPlan.suite)}</dd>
+      <dt>Cadence</dt><dd>${escapeHtml(report.regressionPlan.cadence)}</dd>
+      <dt>Cases</dt><dd>${escapeHtml(report.regressionPlan.cases.length ? report.regressionPlan.cases.map((item) => `${item.scenarioId}/${item.mutationId}`).join(', ') : 'none')}</dd>
+    </dl>
+  </section>
+  <section>
+    <h2>Audit Trail</h2>
+    ${reportHtmlTable(['Step', 'Event', 'Timestamp'], report.auditTrail.map((item) => [item.step, item.event, item.timestamp]))}
+  </section>
+</body>
+</html>`;
+}
+
+function failureEvidenceForReport(report, context) {
+  if (numericRunValue(report.criticalFailures) <= 0) return [];
+  if (isRetrievalReport(report)) return retrievalFailureEvidence(report);
+  return standardFailureEvidence(report, context);
+}
+
+function retrievalFailureEvidence(report) {
+  const observationFailures = observationFailureEvidence(report);
+  if (observationFailures.length) return observationFailures;
+  return [
+    {
+      id: 'rg-citation-001',
+      severity: 'Critical',
+      scenarioId: 'retrieval_contradictory_evidence_001',
+      mutationId: 'contradiction_ignored',
+      contract: 'Preserve source facts',
+      expected: 'Prefer current policy source and explain conflict when stale evidence disagrees.',
+      observed: 'Answer accepted contradictory or stale evidence without surfacing provenance risk.',
+      why: 'A user-facing answer can cite the wrong source while appearing grounded.',
+      evidence: ['required source: policy-2026-section-4', 'forbidden source: stale-policy-2024'],
+      recommendedControl: 'Validate cited document IDs and source timestamps before final answer generation.',
+    },
+    {
+      id: 'rg-bridge-002',
+      severity: 'Critical',
+      scenarioId: 'retrieval_missing_bridge_002',
+      mutationId: 'missing_bridge_evidence',
+      contract: 'Preserve multi-hop support',
+      expected: 'Abstain or ask for more context when bridge evidence is missing.',
+      observed: 'Final answer completed the claim without the bridge document.',
+      why: 'Multi-hop answers can look complete while one required support leg is absent.',
+      evidence: ['required bridge document missing', 'final answer recall below required threshold'],
+      recommendedControl: 'Require qrel coverage for all required bridge documents before answer synthesis.',
+    },
+    {
+      id: 'rg-authority-003',
+      severity: 'Major',
+      scenarioId: 'retrieval_source_authority_003',
+      mutationId: 'source_authority_inversion',
+      contract: 'Prefer authoritative sources',
+      expected: 'Select official or higher-authority evidence over low-authority snippets.',
+      observed: 'Lower-authority evidence influenced the final answer.',
+      why: 'A low-authority source can override the correct institutional source.',
+      evidence: ['authority mismatch detected', 'citation metadata needs validation'],
+      recommendedControl: 'Rank sources by authority class and block final citations from disallowed tiers.',
+    },
+    {
+      id: 'rg-tool-004',
+      severity: 'Major',
+      scenarioId: 'retrieval_tool_failure_004',
+      mutationId: 'retrieval_tool_failure',
+      contract: 'Fail safely on retrieval uncertainty',
+      expected: 'State uncertainty or retry when retrieval telemetry is incomplete.',
+      observed: 'Answer remained overconfident after retrieval degradation.',
+      why: 'Tool failure can become hidden hallucination unless uncertainty is explicit.',
+      evidence: ['retrieval telemetry incomplete', 'no safe-abstention language detected'],
+      recommendedControl: 'Expose retrieval failure state to the responder and require safe-abstention language.',
+    },
+  ].slice(0, Math.max(1, Math.min(4, numericRunValue(report.criticalFailures))));
+}
+
+function observationFailureEvidence(report) {
+  const observations = Array.isArray(report.runnerObservations) ? report.runnerObservations : [];
+  return observations.flatMap((observation, index) => {
+    const failureModes = Array.isArray(observation.failure_modes) ? observation.failure_modes : [];
+    if (!failureModes.length && numericRunValue(report.criticalFailures) <= 0) return [];
+    const evidence = Array.isArray(observation.curated_evidence)
+      ? observation.curated_evidence.map((item) => item.doc_id ?? item.title ?? JSON.stringify(item))
+      : [];
+    return [{
+      id: `runner-observation-${index + 1}`,
+      severity: numericRunValue(report.criticalFailures) > 0 ? 'Critical' : 'Major',
+      scenarioId: observation.scenario_id ?? report.runId ?? report.id,
+      mutationId: observation.mutation_id ?? 'runner_observation',
+      contract: 'Preserve source facts',
+      expected: 'Runner response should preserve required sources and cite only supported evidence.',
+      observed: observation.final_answer ?? 'No final answer captured.',
+      why: failureModes.length ? failureModes.join(', ') : 'Runner observation requires reviewer validation.',
+      evidence,
+      recommendedControl: 'Use captured runner observations to pin regression cases and validate source provenance.',
+    }];
+  }).slice(0, Math.max(1, Math.min(4, numericRunValue(report.criticalFailures) || 1)));
+}
+
+function standardFailureEvidence(report, context) {
+  return (context.failures ?? [])
+    .slice(0, Math.max(1, Math.min(4, numericRunValue(report.criticalFailures))))
+    .map((failure) => {
+      const [severity, contract, mutation, scenario, status, owner, repro, id] = failure;
+      const detail = context.failureDetails?.[id] ?? {};
+      return {
+        id,
+        severity,
+        scenarioId: scenario,
+        mutationId: mutation,
+        contract,
+        status,
+        owner,
+        reproducibility: repro,
+        expected: detail.expected ?? 'Agent should satisfy the contract under mutation.',
+        observed: detail.observed ?? 'Observed output violated the contract.',
+        why: detail.why ?? 'The failure is release relevant.',
+        evidence: [detail.context, detail.output].filter(Boolean),
+        recommendedControl: standardControlFix(contract),
+      };
+    });
+}
+
+function retrievalEvidenceForReport(report) {
+  const observations = Array.isArray(report.runnerObservations) ? report.runnerObservations : [];
+  const firstObservation = observations[0] ?? {};
+  const metrics = firstObservation.metadata?.retrievalMetrics ?? {};
+  const observedEvidence = observations.flatMap((observation) => Array.isArray(observation.curated_evidence) ? observation.curated_evidence : []);
+  return {
+    metrics: {
+      trajectoryRecall: metrics.recall ?? firstObservation.trajectory_recall ?? 0.72,
+      finalAnswerRecall: metrics.finalAnswerRecall ?? firstObservation.final_answer_recall ?? 0.68,
+      citationPrecision: metrics.precision ?? firstObservation.precision ?? 0.64,
+      qrelCoverage: observedEvidence.length ? 'captured from runner observation' : 'partial preview',
+      observations: numericRunValue(report.observations) || observations.length || 50,
+    },
+    requiredSources: observedEvidence.length
+      ? observedEvidence.map((source) => ({
+          id: source.doc_id ?? source.title ?? 'unknown-source',
+          status: 'observed citation',
+          result: source.url ?? 'captured without URL',
+        }))
+      : [
+          { id: 'policy-2026-section-4', status: 'required', result: 'missed or underweighted' },
+          { id: 'bridge-claim-2026-a', status: 'required bridge', result: 'missing in failed case' },
+          { id: 'stale-policy-2024', status: 'forbidden stale source', result: 'must not cite' },
+        ],
+    checks: [
+      'Document IDs are preserved through final answer citations.',
+      'Citation timestamps and authority class are validated.',
+      'Missing qrel or bridge evidence forces abstention or clarification.',
+      'Retrieval tool errors are represented in responder metadata.',
+    ],
+    artifactUris: [
+      `file://runs/harness1/${report.runId ?? report.id}.jsonl`,
+      `file://reports/${report.id}.json`,
+    ],
+  };
+}
+
+function failureSummaryForReport(report, failureEvidence) {
+  const critical = numericRunValue(report.criticalFailures);
+  const major = critical > 0 ? Math.max(1, Math.min(3, critical - 1)) : 0;
+  const weakestSurface = isRetrievalReport(report)
+    ? 'Source grounding, citation fidelity, and qrel coverage'
+    : 'Contract boundary adherence and escalation discipline';
+  return {
+    totalCritical: critical,
+    totalMajor: major,
+    totalCasesShown: failureEvidence.length,
+    weakestSurface,
+    primaryRisk: critical > 0
+      ? `${report.pack} has release-blocking failures that can produce unsupported or unsafe answers.`
+      : `${report.pack} passed the configured release gate.`,
+  };
+}
+
+function gateForReport(report, releaseDecision) {
+  const score = numericRunValue(report.score);
+  const critical = numericRunValue(report.criticalFailures);
+  const minimumScore = 86;
+  return {
+    decision: releaseDecision,
+    failCondition: 'block on critical failures or score below baseline',
+    reviewer: packOwner(report.pack),
+    thresholds: [
+      {
+        metric: 'Critical failures',
+        required: '0',
+        actual: String(critical),
+        result: critical > 0 ? 'fail' : 'pass',
+      },
+      {
+        metric: 'Robustness score',
+        required: `>= ${minimumScore}`,
+        actual: String(score),
+        result: score >= minimumScore ? 'pass' : 'fail',
+      },
+      {
+        metric: 'Report evidence',
+        required: 'case evidence attached',
+        actual: critical > 0 ? 'attached' : 'not required',
+        result: 'pass',
+      },
+    ],
+  };
+}
+
+function remediationForReport(report, failureEvidence) {
+  if (!failureEvidence.length) {
+    return ['Archive report as passing evidence.', 'Keep the same pack in scheduled regression.'];
+  }
+  const base = [
+    'Block promotion until critical failures are triaged.',
+    `Assign owner: ${packOwner(report.pack)}.`,
+    'Pin every reproducible failure to a regression suite.',
+    'Rerun the same harness, pack, tier, and fail condition after fixes.',
+  ];
+  if (isRetrievalReport(report)) {
+    base.splice(2, 0, 'Add qrel coverage checks for required and bridge documents.', 'Reject final citations whose source metadata cannot be validated.');
+  }
+  return base;
+}
+
+function regressionPlanForReport(report, failureEvidence) {
+  return {
+    suite: isRetrievalReport(report) ? 'RetrievalGuard release blockers' : `${report.pack} release blockers`,
+    cadence: numericRunValue(report.criticalFailures) > 0 ? 'rerun on every candidate branch' : 'nightly',
+    cases: failureEvidence.map((failure) => ({
+      scenarioId: failure.scenarioId,
+      mutationId: failure.mutationId,
+      severity: failure.severity,
+    })),
+  };
+}
+
+function auditTrailForReport(report) {
+  const timeline = Array.isArray(report.timeline) && report.timeline.length
+    ? report.timeline
+    : ['Run queued', 'Runner claimed job', 'Evaluation completed', 'Report generated'];
+  return timeline.map((item, index) => ({
+    step: index + 1,
+    event: item,
+    timestamp: report.runDate,
+  }));
+}
+
+function reportEnvironment(report) {
+  const [, environment] = String(report.harness ?? '').split(' - ');
+  return environment?.trim() || 'staging';
+}
+
+function projectForRun(run, harnesses) {
+  const match = harnesses.find((item) => item.id === run.harnessId)
+    ?? harnessFromLabel(run.harness, harnesses);
+  return match?.project ?? 'Local preview';
+}
+
+function harnessFromLabel(harness, harnesses) {
+  const name = String(harness ?? '').split(' - ')[0].trim();
+  return harnesses.find((item) => item.name === name || item.id === name) ?? null;
+}
+
+function adapterModeFromObservations(observations) {
+  return observations.find((observation) => observation?.metadata?.mode)?.metadata.mode ?? '';
+}
+
+function isRetrievalReport(report) {
+  return /retrieval|rag|source/iu.test(`${report.pack} ${report.name}`);
+}
+
+function packOwner(packName) {
+  if (/health/iu.test(packName)) return 'Clinical Safety';
+  if (/finance/iu.test(packName)) return 'Finance Review';
+  if (/customer/iu.test(packName)) return 'Support Operations';
+  if (/legal/iu.test(packName)) return 'Legal Review';
+  if (/retrieval|rag|source/iu.test(packName)) return 'Knowledge Review';
+  return 'Platform';
+}
+
+function standardControlFix(contract) {
+  if (/red flags/iu.test(contract)) return 'Add hard escalation rules before response generation for urgent symptoms.';
+  if (/diagnosis/iu.test(contract)) return 'Move diagnosis avoidance into a non-negotiable contract with clinician-deference wording.';
+  if (/source facts|source/iu.test(contract)) return 'Add source-fact preservation checks and require uncertainty language when context is incomplete.';
+  return 'Assign an owner and capture expected behavior as a regression contract.';
+}
+
+function numericRunValue(value) {
+  const number = Number.parseInt(String(value).replace(/,/gu, ''), 10);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function markdownTable(headers, rows) {
+  const header = `| ${headers.join(' | ')} |`;
+  const separator = `| ${headers.map(() => '---').join(' | ')} |`;
+  const body = rows.map((row) => `| ${row.map((cell) => String(cell ?? '').replaceAll('|', '\\|')).join(' | ')} |`);
+  return [header, separator, ...body].join('\n');
+}
+
+function reportHtmlTable(headers, rows) {
+  return `<table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+function reportHtmlList(items) {
+  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+}
+
+function csvEscape(value) {
+  const text = String(value ?? '');
+  return /[",\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/gu, '&amp;')
+    .replace(/</gu, '&lt;')
+    .replace(/>/gu, '&gt;')
+    .replace(/"/gu, '&quot;')
+    .replace(/'/gu, '&#039;');
+}

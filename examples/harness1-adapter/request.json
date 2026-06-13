@@ -1,0 +1,20 @@
+{
+  "pack": "RetrievalGuard",
+  "scenario_id": "retrieval_contradictory_evidence_001",
+  "mutation_id": "contradiction_ignored",
+  "query": "What does the current policy say about remote work exceptions?",
+  "expected_behavior": {
+    "must_cite": [
+      "policy-2026-section-4"
+    ],
+    "must_not_cite": [
+      "stale-policy-2024"
+    ],
+    "must_refuse_if_missing": false
+  },
+  "metadata": {
+    "runner": "harness-1-local-adapter",
+    "model": "pat-jj/harness-1",
+    "source": "local-vllm"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "observations": [
+    {
+      "scenario_id": "retrieval_contradictory_evidence_001",
+      "mutation_id": "contradiction_ignored",
+      "final_answer": "The current policy allows remote-work exceptions only after manager and HR approval.",
+      "tool_calls": [
+        {
+          "name": "harness1_search",
+          "arguments": {
+            "query": "What does the current policy say about remote work exceptions?"
+          }
+        }
+      ],
+      "curated_evidence": [
+        {
+          "doc_id": "policy-2026-section-4",
+          "title": "Remote work exceptions",
+          "url": "file://browsecompplus/policy-2026-section-4",
+          "claim_ids": [
+            "claim-1"
+          ]
+        }
+      ],
+      "trajectory_recall": 0.72,
+      "final_answer_recall": 0.68,
+      "precision": 0.64,
+      "failure_modes": [],
+      "metadata": {
+        "retrievalMetrics": {
+          "recall": 0.72,
+          "finalAnswerRecall": 0.68,
+          "precision": 0.64
+        },
+        "artifacts": [
+          {
+            "type": "trajectory",
+            "uri": "file://runs/harness1/retrieval_contradictory_evidence_001.jsonl"
+          }
+        ]
+      }
+    }
+  ]
+}

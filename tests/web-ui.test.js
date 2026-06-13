@@ -5,6 +5,10 @@ import { test } from 'node:test';
 const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const packCatalogSource = await readFile(new URL('../src/v2/domain-pack-catalog.js', import.meta.url), 'utf8');
 const styleSource = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
+const reportExportSource = await readFile(new URL('../src/console/report-export.js', import.meta.url), 'utf8');
+const harness1DocSource = await readFile(new URL('../docs/adapters/harness-1.md', import.meta.url), 'utf8');
+const harness1RequestSource = await readFile(new URL('../examples/harness1-adapter/request.json', import.meta.url), 'utf8');
+const harness1ResponseSource = await readFile(new URL('../examples/harness1-adapter/response.json', import.meta.url), 'utf8');
 
 test('web demo exposes production demo controls', () => {
   [
@@ -76,7 +80,34 @@ test('web report exposes export and persistence actions', () => {
     'Release decision',
     'Create CI gate',
     'Compare latest run',
+    'reportTableRows',
+    'localRunReportRows',
+    'localRunReportId',
+    'latestCompletedLocalRun',
+    'dashboardMetricsForRun',
+    'latestCommandCenterReport',
+    'localRunCommandCenterReport',
+    'updateHarnessLastRun',
+    'harnessId',
+    'reportEvidenceLabelForRun',
+    'ensureRunnerObservationCaptured',
+    'shouldCaptureRunnerObservation',
+    'Print HTML',
   ].forEach((text) => assert.match(source, new RegExp(text)));
+  [
+    'Failure Evidence',
+    'localRunReportPayload',
+    'RetrievalGuard Source Fidelity',
+    'Remediation Checklist',
+    'Regression Plan',
+    'Release Gate',
+    'failureEvidenceForReport',
+    'retrievalEvidenceForReport',
+    'gateForReport',
+    'auditTrailForReport',
+    'runner-observation',
+    'contract-smoke-preview',
+  ].forEach((text) => assert.match(reportExportSource, new RegExp(text)));
 });
 
 test('web app splits the product landing page from the operator surface', () => {
@@ -133,6 +164,8 @@ test('web app splits the product landing page from the operator surface', () => 
     'failed quality gate',
     'Release gate configuration',
     'Release gate policy editor',
+    'Harness-1 search adapter',
+    '/docs/adapters/harness-1',
     'Loading and error states',
     'Environment separation',
     'ha-skip-link',
@@ -162,6 +195,9 @@ test('saas console persists harnesses and exposes smoke-test controls', () => {
     'copy-smoke-payload',
     'customer care',
     'legal',
+    'knowledge / RAG',
+    'retrieval agent',
+    'search harness',
     'inferHarnessDomain',
     'Expected runner contract',
     'Run a passing smoke test before saving this harness.',
@@ -265,7 +301,7 @@ test('saas start run supports end-to-end queued run flow', () => {
     'failure queue',
     '/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs',
     'window.location.href = `/runs/${encodeURIComponent(run.id)}`',
-    'window.location.href = `/runs/${encodeURIComponent(current.id)}/summary`',
+    'window.location.href = `/runs/${encodeURIComponent(updatedCurrent.id)}/summary`',
   ].forEach((text) => assert.match(source, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 });
 
@@ -350,4 +386,25 @@ test('saas console includes keyboard and motion accessibility styles', () => {
     'ha-policy-form',
     'ha-skeleton',
   ].forEach((text) => assert.match(styleSource, new RegExp(text)));
+});
+
+test('Harness-1 adapter docs map local search harnesses to RetrievalGuard', () => {
+  [
+    'Harness-1 Search Adapter',
+    'POST /harnessamp',
+    'npm run harness1:adapter',
+    'HARNESS1_EVAL_COMMAND',
+    'RetrievalGuard',
+    'local Harness-1 vLLM server',
+    'final_answer',
+    'tool_calls',
+    'metadata',
+    'trajectory_recall',
+    'precision',
+    'pat-jj/harness-1',
+  ].forEach((text) => assert.match(harness1DocSource, new RegExp(text)));
+  assert.match(harness1RequestSource, /retrieval_contradictory_evidence_001/);
+  assert.match(harness1ResponseSource, /curated_evidence/);
+  assert.match(harness1ResponseSource, /tool_calls/);
+  assert.match(harness1ResponseSource, /retrievalMetrics/);
 });
