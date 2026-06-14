@@ -543,13 +543,24 @@ function renderSaasConsole(route, isAuthed) {
             <h1>${escapeHtml(title)}</h1>
           </div>
           <div class="ha-topbar__actions">
-            <a href="/runs/new">Start Run</a>
-            <a href="/harnesses/new">New Harness</a>
-            <a href="/">Public site</a>
-            <a href="/docs">Docs</a>
+            <a class="ha-action-primary" href="/runs/new">Start Run</a>
+            <a class="ha-action-secondary" href="/harnesses/new">New Harness</a>
+            <a class="ha-action-secondary" href="/">Public site</a>
+            <a class="ha-action-secondary" href="/docs">Docs</a>
             ${isAuthed
-              ? `<button id="logout-button" type="button">Log out ${escapeHtml(state.session.user.login)}</button>`
-              : `<a href="${escapeHtml(authStartHref())}">Sign in with GitHub</a>`}
+              ? `<button class="ha-action-secondary" id="logout-button" type="button">Log out ${escapeHtml(state.session.user.login)}</button>`
+              : `<a class="ha-action-secondary" href="${escapeHtml(authStartHref())}">Sign in with GitHub</a>`}
+            <details class="ha-action-menu">
+              <summary>More</summary>
+              <div>
+                <a href="/harnesses/new">New Harness</a>
+                <a href="/">Public site</a>
+                <a href="/docs">Docs</a>
+                ${isAuthed
+                  ? `<button id="logout-button-menu" type="button">Log out ${escapeHtml(state.session.user.login)}</button>`
+                  : `<a href="${escapeHtml(authStartHref())}">Sign in with GitHub</a>`}
+              </div>
+            </details>
           </div>
         </header>
         ${renderSaasRoute(route)}
@@ -610,17 +621,20 @@ function renderSaasDashboard() {
     tone: 'critical',
   };
   return `
-    <section class="ha-page">
+    <section class="ha-page ha-page--dashboard">
       <div class="ha-intro">
         <div>
           <h2>Release readiness</h2>
-          <p>Track robustness score, open failures, usage, and CI gate state.</p>
+          <p>Review the current release gate, identify blockers, and move to the next operator action.</p>
         </div>
         ${renderDataSourceStrip('Local preview', 'Seeded console state plus persisted browser actions.')}
       </div>
-      ${renderReleaseDecision(dashboardDecision.label, dashboardDecision.detail, dashboardDecision.tone)}
-      ${renderNextActions(operatorNextActions)}
-      <div class="ha-metrics">${dashboardMetrics.map(([label, value, meta, tone]) => renderSaasMetric(label, value, meta, tone)).join('')}</div>
+      ${renderReleaseDecision(dashboardDecision.label, dashboardDecision.detail, dashboardDecision.tone, [
+        ['Review top failure', '/failures/fail-redflag-017'],
+        ['Compare regression', '/compare'],
+      ])}
+      ${renderDashboardNextAction()}
+      <div class="ha-metrics ha-metrics--priority">${dashboardMetrics.slice(0, 3).map(([label, value, meta, tone]) => renderSaasMetric(label, value, meta, tone)).join('')}</div>
       <div class="ha-grid ha-grid--dashboard">
         <article class="ha-panel ha-panel--wide">
           <div class="ha-panel__head"><h3>Recent Runs</h3><a href="/runs/run-healthguard-2419">View active</a></div>
@@ -1067,7 +1081,7 @@ function renderSaasReports() {
   const reportRows = reportTableRows();
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Reports</h2><p>Export run reports.</p></div>${renderDataSourceStrip('Local preview', 'Exports are generated from current browser report state.')}</div>
+      <div class="ha-section-head"><div><h2>Run reports</h2><p>Export release evidence from completed runs. Real local reports appear before seeded samples.</p></div>${renderDataSourceStrip('Local preview', 'Exports are generated from current browser report state.')}</div>
       ${renderNextActions([
         ['Export executive report', '#reports-table', 'Share release decision and failure evidence'],
         ['Create CI gate', '/ci', 'Use report thresholds in pull requests'],
@@ -1077,8 +1091,24 @@ function renderSaasReports() {
         <strong>Exports ready</strong>
         <span>Choose a format.</span>
       </article>
-      <article class="ha-panel" id="reports-table"><table class="ha-table"><thead><tr><th>Name</th><th>Project</th><th>Harness</th><th>Pack</th><th>Run date</th><th>Score</th><th>Critical</th><th>Evidence</th><th>Release decision</th><th>Export</th></tr></thead><tbody>${reportRows.map((report) => `<tr>${report.cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}<td>${renderDecisionBadge(report.decision, report.tone)}</td><td>${renderReportExportButtons(report)}</td></tr>`).join('')}</tbody></table></article>
+      <article class="ha-panel" id="reports-table">${renderReportsTable(reportRows)}</article>
     </section>
+  `;
+}
+
+function renderReportsTable(reportRows) {
+  const headers = ['Name', 'Project', 'Harness', 'Pack', 'Run date', 'Score', 'Critical', 'Evidence'];
+  return `
+    <table class="ha-table ha-report-table">
+      <thead><tr>${headers.map((header) => `<th>${header}</th>`).join('')}<th>Decision</th><th>Export</th></tr></thead>
+      <tbody>${reportRows.map((report) => `
+        <tr>
+          ${report.cells.map((cell, index) => `<td data-label="${escapeHtml(headers[index])}">${escapeHtml(cell)}</td>`).join('')}
+          <td data-label="Decision">${renderDecisionBadge(report.decision, report.tone)}</td>
+          <td data-label="Export">${renderReportExportButtons(report)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
   `;
 }
 
@@ -1088,7 +1118,16 @@ function renderReportExportButtons(report) {
   return `
     <div class="ha-report-export" aria-label="Export ${escapeHtml(report.name)}">
       ${summaryLink}
-      ${['print', 'json', 'csv', 'markdown'].map((format) => `<button data-report-export="${format}" data-report-id="${escapeHtml(id)}" type="button">${reportExportLabel(format)}</button>`).join('')}
+      <details>
+        <summary>Export</summary>
+        <div>
+          ${['print', 'json', 'csv', 'markdown'].map((format) => `
+            <button data-report-export="${format}" data-report-id="${escapeHtml(id)}" type="button">
+              <span>${reportExportLabel(format)}</span>
+              <small>${reportExportDetail(format)}</small>
+            </button>`).join('')}
+        </div>
+      </details>
     </div>
   `;
 }
@@ -1097,6 +1136,13 @@ function reportExportLabel(format) {
   if (format === 'markdown') return 'Markdown';
   if (format === 'print') return 'Print HTML';
   return format.toUpperCase();
+}
+
+function reportExportDetail(format) {
+  if (format === 'print') return 'Browser-ready review copy';
+  if (format === 'json') return 'Machine-readable payload';
+  if (format === 'csv') return 'Spreadsheet summary';
+  return 'Reviewer handoff';
 }
 
 function reportTableRows() {
@@ -1334,7 +1380,25 @@ function renderSaasRunsTable() {
 }
 
 function renderSaasRunsTableFor(runs) {
-  return `<table class="ha-table"><thead><tr><th>Run</th><th>Harness</th><th>Pack</th><th>Status</th><th>Decision</th><th>Score</th><th>Critical</th><th>Observations</th><th>Started</th></tr></thead><tbody>${runs.map((run) => `<tr><td><a href="/runs/${escapeHtml(run.id)}">${escapeHtml(run.name)}</a></td><td>${escapeHtml(run.harness)}</td><td>${escapeHtml(run.pack)}</td><td><span class="ha-badge ${statusClass(run.status)}">${escapeHtml(runLifecycleLabel(run))}</span></td><td>${renderDecisionBadge(releaseDecisionForRun(run), Number(run.critical) > 0 || run.status === 'failed' ? 'critical' : 'passed')}</td><td>${escapeHtml(run.score)}</td><td>${escapeHtml(run.critical)}</td><td>${escapeHtml(run.observations)}</td><td>${escapeHtml(run.started)}</td></tr>`).join('')}</tbody></table>`;
+  const headers = ['Run', 'Harness', 'Pack', 'Status', 'Decision', 'Score', 'Critical', 'Observations', 'Started'];
+  return `
+    <table class="ha-table ha-run-table">
+      <thead><tr>${headers.map((header) => `<th>${header}</th>`).join('')}</tr></thead>
+      <tbody>${runs.map((run) => `
+        <tr>
+          <td data-label="Run"><a href="/runs/${escapeHtml(run.id)}">${escapeHtml(run.name)}</a></td>
+          <td data-label="Harness">${escapeHtml(run.harness)}</td>
+          <td data-label="Pack">${escapeHtml(run.pack)}</td>
+          <td data-label="Status"><span class="ha-badge ${statusClass(run.status)}">${escapeHtml(runLifecycleLabel(run))}</span></td>
+          <td data-label="Decision">${renderDecisionBadge(releaseDecisionForRun(run), Number(run.critical) > 0 || run.status === 'failed' ? 'critical' : 'passed')}</td>
+          <td data-label="Score">${escapeHtml(run.score)}</td>
+          <td data-label="Critical">${escapeHtml(run.critical)}</td>
+          <td data-label="Observations">${escapeHtml(run.observations)}</td>
+          <td data-label="Started">${escapeHtml(run.started)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  `;
 }
 
 function renderHarnessTable() {
@@ -1361,12 +1425,37 @@ function renderDataSourceStrip(label, detail) {
   return `<div class="ha-data-source"><span>${escapeHtml(label)}</span><small>${escapeHtml(detail)}</small></div>`;
 }
 
-function renderReleaseDecision(label, detail, tone = 'neutral') {
-  return `<article class="ha-release-decision ha-release-decision--${escapeHtml(tone)}"><div>${renderDecisionBadge(label, tone)}<p>${escapeHtml(detail)}</p></div><div class="ha-run-links"><a href="/failures">Review failures</a><a href="/compare">Compare baseline</a><a href="/reports">Open report</a></div></article>`;
+function renderReleaseDecision(label, detail, tone = 'neutral', actions = [
+  ['Review failures', '/failures'],
+  ['Compare baseline', '/compare'],
+  ['Open report', '/reports'],
+]) {
+  return `<article class="ha-release-decision ha-release-decision--${escapeHtml(tone)}"><div>${renderDecisionBadge(label, tone)}<p>${escapeHtml(detail)}</p></div><div class="ha-run-links">${actions.map(([actionLabel, href]) => `<a href="${escapeHtml(href)}">${escapeHtml(actionLabel)}</a>`).join('')}</div></article>`;
 }
 
 function renderDecisionBadge(label, tone = 'neutral') {
   return `<span class="ha-badge ${statusClass(tone)}">${escapeHtml(label)}</span>`;
+}
+
+function renderDashboardNextAction() {
+  const topFailure = allFailureRows().find(([severity]) => severity === 'Critical') ?? allFailureRows()[0];
+  if (!topFailure) return '';
+  const [severity, contract, mutation, scenario, status, owner, , id] = topFailure;
+  return `
+    <article class="ha-next-focus">
+      <div>
+        <span>Top blocker</span>
+        <strong>${escapeHtml(contract)}</strong>
+        <small>${escapeHtml(severity)} / ${escapeHtml(mutation)} / ${escapeHtml(scenario)}</small>
+      </div>
+      <div>
+        <span>Owner</span>
+        <strong>${escapeHtml(owner)}</strong>
+        <small>${escapeHtml(status)}</small>
+      </div>
+      <a href="/failures/${escapeHtml(id)}">Open evidence</a>
+    </article>
+  `;
 }
 
 function renderNextActions(actions) {
@@ -2328,14 +2417,11 @@ function renderAppSurface({
   profile,
   profileLocked,
   activeReportUrl,
-  isAuthed,
 }) {
   return `
     ${renderDemoSection({ preset, profile, profileLocked })}
     ${renderReportSection(activeReportUrl)}
-    ${renderWorkspaceSection(isAuthed)}
-    ${renderDocsOverview()}
-    ${renderClosingSection({ href: '/docs', label: 'Open docs' })}
+    ${renderSandboxHandoff()}
   `;
 }
 
@@ -2409,14 +2495,13 @@ function renderDemoSection({ preset, profile, profileLocked }) {
   return `
     <section id="demo" class="section demo-section reveal">
       <div class="section__intro">
-        <p class="eyebrow">Interactive evaluation</p>
+        <p class="eyebrow">Sample diagnosis</p>
         <h2>Run a sample assessment and review the result.</h2>
-        <p>Use the guided app to test a sample workflow, review the resulting scorecard, and compare baseline performance with stressed conditions.</p>
+        <p>Use this sandbox to test a preset workflow, inspect the scorecard, and then continue in the operator console.</p>
         <div class="try-path">
-          <span>01 Choose a starting point</span>
-          <span>02 Review inputs</span>
-          <span>03 Run evaluation</span>
-          <span>04 Save or share</span>
+          <span>01 Configure sample</span>
+          <span>02 Run evaluation</span>
+          <span>03 Review report</span>
         </div>
       </div>
       <div class="demo-console">
@@ -2425,41 +2510,44 @@ function renderDemoSection({ preset, profile, profileLocked }) {
           <label><span>Risk profile</span><select id="profile-select" ${profileLocked ? 'disabled' : ''}>${Object.entries(riskProfiles).map(([id, item]) => `<option value="${id}" ${id === profile.id ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
           <label><span>Stress level</span><select id="intensity-select">${[1, 2, 3, 4].map((value) => `<option value="${value}" ${value === state.intensity ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
           <label class="check-control"><input id="observed-toggle" type="checkbox" ${state.useObservedRuns ? 'checked' : ''} /><span>Include sample outcomes</span></label>
-          <label class="check-control"><input id="custom-toggle" type="checkbox" ${state.useCustomInput ? 'checked' : ''} /><span>Edit source data</span></label>
           <button class="button button--primary" id="run-demo" type="button">Run evaluation</button>
         </div>
         <div class="preset-note">
           <strong>${escapeHtml(preset.label)}</strong>
           <span>${escapeHtml(preset.description)}${profileLocked ? ` Locked to ${profile.label.toLowerCase()}.` : ''}</span>
         </div>
-        <div class="threshold-controls">
-          <label><span>Minimum overall score</span><input id="min-overall-score" type="number" min="0" max="100" value="${state.thresholds.minOverallScore}" /></label>
-          <label><span>Minimum stressed score</span><input id="min-holdout-pass" type="number" min="0" max="100" value="${state.thresholds.minHoldoutPass}" /></label>
-          <label><span>Maximum performance drop</span><input id="max-gap" type="number" min="0" max="100" value="${state.thresholds.maxGap}" /></label>
-        </div>
-        <div class="runner-controls">
-          <label><span>Connected runner endpoint</span><input id="runner-endpoint" type="url" placeholder="https://runner.example.com/harnessamp" value="${escapeHtml(state.runnerEndpoint)}" /></label>
-          <button class="button button--secondary" id="run-http-runner" type="button">Test connected runner</button>
-          <span id="runner-status">${escapeHtml(state.runnerStatus)}</span>
-        </div>
-        <div class="input-workbench-shell ${state.useCustomInput ? 'is-active' : ''}">
-          <p class="input-workbench-note">${state.useCustomInput
-    ? 'Paste or upload source workflow data and run results when you want to test a custom scenario.'
-    : 'Turn on Edit source data when you want to paste a workflow JSON or real run results.'}</p>
-          <div class="input-workbench" id="input-workbench" ${state.useCustomInput ? '' : 'hidden'}>
-          <label>
-            <span>Source workflow JSON</span>
-            <input id="bundle-file" type="file" accept="application/json,.json" />
-            <textarea id="bundle-json" spellcheck="false">${escapeHtml(state.customBundleText)}</textarea>
-          </label>
-          <label>
-            <span>Outcome data JSON</span>
-            <input id="runs-file" type="file" accept="application/json,.json" />
-            <textarea id="runs-json" spellcheck="false">${escapeHtml(state.customRunsText)}</textarea>
-          </label>
-          <p id="input-error" class="input-error">${escapeHtml(state.inputError)}</p>
-        </div>
-        </div>
+        <details class="demo-advanced" ${state.useCustomInput ? 'open' : ''}>
+          <summary><span>Advanced setup</span><small>${escapeHtml(advancedSetupStatus())}</small></summary>
+          <div class="threshold-controls">
+            <label><span>Minimum overall score</span><input id="min-overall-score" type="number" min="0" max="100" value="${state.thresholds.minOverallScore}" /></label>
+            <label><span>Minimum stressed score</span><input id="min-holdout-pass" type="number" min="0" max="100" value="${state.thresholds.minHoldoutPass}" /></label>
+            <label><span>Maximum performance drop</span><input id="max-gap" type="number" min="0" max="100" value="${state.thresholds.maxGap}" /></label>
+          </div>
+          <div class="runner-controls">
+            <label><span>Connected runner endpoint</span><input id="runner-endpoint" type="url" placeholder="https://runner.example.com/harnessamp" value="${escapeHtml(state.runnerEndpoint)}" /></label>
+            <button class="button button--secondary" id="run-http-runner" type="button">Test connected runner</button>
+            <span id="runner-status">${escapeHtml(state.runnerStatus)}</span>
+          </div>
+          <div class="input-workbench-shell ${state.useCustomInput ? 'is-active' : ''}">
+            <label class="check-control"><input id="custom-toggle" type="checkbox" ${state.useCustomInput ? 'checked' : ''} /><span>Edit source data</span></label>
+            <p class="input-workbench-note">${state.useCustomInput
+      ? 'Paste or upload source workflow data and run results when you want to test a custom scenario.'
+      : 'Turn on Edit source data when you want to paste a workflow JSON or real run results.'}</p>
+            <div class="input-workbench" id="input-workbench" ${state.useCustomInput ? '' : 'hidden'}>
+            <label>
+              <span>Source workflow JSON</span>
+              <input id="bundle-file" type="file" accept="application/json,.json" />
+              <textarea id="bundle-json" spellcheck="false">${escapeHtml(state.customBundleText)}</textarea>
+            </label>
+            <label>
+              <span>Outcome data JSON</span>
+              <input id="runs-file" type="file" accept="application/json,.json" />
+              <textarea id="runs-json" spellcheck="false">${escapeHtml(state.customRunsText)}</textarea>
+            </label>
+            <p id="input-error" class="input-error">${escapeHtml(state.inputError)}</p>
+          </div>
+          </div>
+        </details>
         <div class="demo-result">
           <div><span>Profile</span><strong id="demo-profile">--</strong></div>
           <div><span>Coverage</span><strong id="demo-variants">--</strong></div>
@@ -2493,10 +2581,16 @@ function renderDemoSection({ preset, profile, profileLocked }) {
   `;
 }
 
+function advancedSetupStatus() {
+  if (state.useCustomInput) return 'Custom source data enabled';
+  const { minOverallScore, minHoldoutPass, maxGap } = state.thresholds;
+  return `Default thresholds: ${minOverallScore}/${minHoldoutPass}/${maxGap}`;
+}
+
 function renderReportSection(activeReportUrl) {
   return `
     <section id="report" class="section report-section reveal">
-      <div class="report-copy"><p class="eyebrow">Report</p><h2>Turn results into a clear next action.</h2><p>Review baseline versus stressed performance, the highest-risk surface, and the specific follow-up needed before rollout.</p></div>
+      <div class="report-copy"><p class="eyebrow">Sample report</p><h2>Turn results into a clear next action.</h2><p>Review baseline versus stressed performance, the highest-risk surface, and the specific follow-up needed before rollout.</p></div>
       <div class="report">
         <div><span>Baseline</span><strong id="report-baseline">--</strong></div>
         <div><span>Stressed</span><strong id="report-mutated">--</strong></div>
@@ -2547,6 +2641,22 @@ function renderReportSection(activeReportUrl) {
         <summary>View raw report</summary>
         <pre class="report-text" id="report-text"></pre>
       </details>
+    </section>
+  `;
+}
+
+function renderSandboxHandoff() {
+  return `
+    <section class="section sandbox-handoff reveal">
+      <div>
+        <h2>Ready to operate real runs?</h2>
+        <p>Use the console for harness registration, run history, reports, failures, release gates, and persisted run state.</p>
+      </div>
+      <div class="hero__actions">
+        <a class="button button--primary" href="/dashboard">Open console</a>
+        <a class="button button--secondary" href="/reports">Open reports</a>
+        <a class="button button--secondary" href="/docs">Read docs</a>
+      </div>
     </section>
   `;
 }
@@ -2889,6 +2999,7 @@ function bindEvents() {
   });
   bindIfPresent('#download-ci-yaml', 'click', () => downloadText('harnessamp-release-gate.yml', githubActionsSnippet, 'Downloaded CI YAML'));
   bindIfPresent('#logout-button', 'click', logout);
+  bindIfPresent('#logout-button-menu', 'click', logout);
   bindIfPresent('#workspace-select', 'change', async (event) => {
     state.selectedWorkspaceId = event.target.value;
     persistState();
