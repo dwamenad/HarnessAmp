@@ -20,14 +20,18 @@ test('dashboard stays operational instead of explaining placeholder route states
   await expect(page.getByText('Open Critical Failures')).toBeVisible();
   await expect(page.getByText('CI Gate Status')).toBeVisible();
   await expect(page.getByText('Governance')).toBeVisible();
+  await expect(page.getByText('Top blocker')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open evidence' }).first()).toHaveAttribute('href', /\/failures\//);
   await expect(page.getByText('Operational states')).toHaveCount(0);
   await expect(page.getByText('Loading and error states')).toHaveCount(0);
 });
 
 test('reports keep seeded samples labeled after the route cleanup', async ({ page }) => {
   await page.goto('/reports');
-  await expect(page.getByText('Reports')).toBeVisible();
-  await expect(page.getByText('Print HTML').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Run reports' })).toBeVisible();
+  await page.locator('.ha-report-export summary').first().click();
+  await expect(page.getByRole('button', { name: 'Print HTML' }).first()).toBeVisible();
   await expect(page.getByText('seeded sample').first()).toBeVisible();
 });
 
@@ -54,12 +58,15 @@ test('switches to the browser benchmark preset and shows browser cases', async (
 });
 
 test('changes thresholds and persists them', async ({ page }) => {
+  await page.getByText('Advanced setup').click();
   await page.locator('#min-overall-score').fill('90');
   await page.reload();
+  await page.getByText('Advanced setup').click();
   await expect(page.locator('#min-overall-score')).toHaveValue('90');
 });
 
 test('shows invalid JSON errors for pasted bundles', async ({ page }) => {
+  await page.getByText('Advanced setup').click();
   await page.locator('#custom-toggle').check();
   await page.locator('#bundle-json').fill('{bad json');
   await page.getByRole('button', { name: 'Run evaluation' }).click();
@@ -72,52 +79,20 @@ test('supports report export actions and local snapshot save', async ({ page }) 
   await expect(page.locator('#action-feedback')).toContainText('Saved to this browser');
 });
 
-test('shows the signed-in project command center', async ({ page }) => {
-  await page.locator('#workspace').scrollIntoViewIfNeeded();
-  await expect(page.locator('#project-command-center')).toContainText('Project command center');
-  await expect(page.locator('#project-command-center')).toContainText('Latest gate');
-  await expect(page.locator('#project-command-center')).toContainText('Runner jobs');
-  await expect(page.locator('#project-command-center')).toContainText('Operational focus');
+test('keeps the sandbox focused and hands off to the console', async ({ page }) => {
+  await expect(page.locator('#demo .eyebrow')).toHaveText('Sample diagnosis');
+  await expect(page.getByText(/Default thresholds:/)).toBeVisible();
+  await expect(page.getByText('Ready to operate real runs?')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open console' }).last()).toHaveAttribute('href', '/dashboard');
+  await expect(page.locator('#workspace')).toHaveCount(0);
+  await expect(page.locator('#docs-preview')).toHaveCount(0);
 });
 
-test('creates and promotes a benchmark golden from the console', async ({ page }) => {
-  await page.locator('#bundle-preset-select').selectOption('support-mvp-benchmark');
-  await page.locator('#workspace').scrollIntoViewIfNeeded();
-  await expect(page.getByText('Benchmark truth')).toBeVisible();
-
-  await page.getByRole('button', { name: 'Create draft' }).click();
-  await expect(page.locator('#action-feedback')).toContainText('Created benchmark draft');
-  await expect(page.locator('#benchmark-version-select')).toContainText('draft');
-
-  await page.locator('#benchmark-edit-mission').fill('Resolve customer-support requests with edited release-review guardrails.');
-  await page.locator('#benchmark-edit-thresholds').fill('baselinePassGate: 91\nvisibleMutatedPassGate: 82\nhiddenHoldoutPassGate: 77\nmaxRobustnessGap: 12');
-  await page.locator('#benchmark-edit-tags').fill('support\nrelease-gate');
-  await page.locator('#save-benchmark-edits').scrollIntoViewIfNeeded();
-  await page.locator('#save-benchmark-edits').click();
-  await expect(page.locator('#action-feedback')).toContainText('Saved edited draft');
-  await expect(page.locator('#benchmark-version-select')).toContainText('v2');
-  await expect(page.locator('#benchmark-version-diff')).toContainText('intent.mission');
-
-  await page.locator('#benchmark-review-decision').selectOption('approve');
-  await page.locator('#benchmark-review-comments').fill('Approved with updated benchmark editor metadata.');
-  await page.locator('#benchmark-reviewer-id').fill('qa-reviewer@example.com');
-  await page.getByRole('button', { name: 'Assign reviewer' }).click();
-  await expect(page.locator('#action-feedback')).toContainText('Assigned qa-reviewer@example.com');
-  await expect(page.locator('#benchmark-truth-list')).toContainText('qa-reviewer@example.com');
-  await page.locator('#benchmark-review-decision').selectOption('approve');
-  await page.locator('#benchmark-review-comments').fill('Approved with updated benchmark editor metadata.');
-  await page.getByRole('button', { name: 'Record review' }).click();
-  await expect(page.locator('#action-feedback')).toContainText('Approved benchmark');
-  await expect(page.locator('#benchmark-version-select')).toContainText('approved');
-  await expect(page.locator('#benchmark-truth-list')).toContainText('Approved with updated benchmark editor metadata.');
-
-  await page.getByRole('button', { name: 'Propose holdout' }).click();
-  await expect(page.locator('#action-feedback')).toContainText('Proposed holdout golden case');
-  await expect(page.locator('#promotion-candidate-select')).not.toContainText('No proposed cases');
-
-  await page.getByRole('button', { name: 'Promote case' }).click();
-  await expect(page.locator('#action-feedback')).toContainText('golden case promoted');
-  await expect(page.locator('#benchmark-truth-list')).toContainText('holdout golden');
+test('console exposes operational destinations after the sandbox handoff', async ({ page }) => {
+  await page.goto('/dashboard');
+  await expect(page.getByRole('link', { name: 'Start Run' })).toHaveAttribute('href', '/runs/new');
+  await expect(page.locator('.ha-nav').getByRole('link', { name: /Reports/ })).toHaveAttribute('href', '/reports');
+  await expect(page.locator('.ha-nav').getByRole('link', { name: /Failures/ })).toHaveAttribute('href', '/failures');
 });
 
 test('docs routes resolve to the install section', async ({ page }) => {
@@ -134,5 +109,6 @@ test('report pathname routes still render the shared report section', async ({ p
 test('renders mobile demo controls without hiding the primary action', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'mobile-only coverage');
   await expect(page.getByRole('button', { name: 'Run evaluation' })).toBeVisible();
+  await page.getByText('Advanced setup').click();
   await expect(page.locator('#runner-endpoint')).toBeVisible();
 });
