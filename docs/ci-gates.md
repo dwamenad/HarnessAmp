@@ -65,9 +65,13 @@ Generated artifacts:
 
 Exit policy:
 
-- `pass` exits successfully
-- `warn` exits successfully unless `fail-on-warn` is `true`
-- `block` exits non-zero
+- `0` = pass
+- `1` = warn when strict mode treats warnings as failure
+- `2` = block
+- `3` = infrastructure or runtime failure
+- `4` = invalid config or invalid benchmark slug
+
+Benchmark CI output uses the machine-readable schema `harnessamp.ci.v0.1`. The output includes benchmark id, slug, version, run type, run id, harness id, agent version, score, gate result, release decision, failure counts, failed contracts, failed mutation families, baseline deltas when available, and artifact availability. CI consumers should parse this contract instead of scraping Markdown or Print HTML.
 
 The Robustness Gap is defined as:
 

@@ -1,3 +1,6 @@
+import { benchmarkForRun, classifyBenchmarkRun, createBenchmarkSnapshot, evaluateBenchmarkGate, releaseDecisionForGate, scoreBenchmark } from '../benchmarks/registry.js';
+import { extractBenchmarkMetrics } from '../benchmarks/results.js';
+
 export function reportSlug(name, index = 0) {
   return `${String(name).toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/(^-|-$)/gu, '')}-${index + 1}`;
 }
@@ -29,6 +32,27 @@ export function buildReportPayload(reportId, context = {}) {
       ? ['Review critical evidence', 'Assign owner', 'Add reproduced cases to regression suite']
       : ['Share executive report', 'Keep current CI gate thresholds'],
     evidenceMode: 'seeded-sample',
+    benchmark: {
+      id: 'seeded-sample',
+      slug: 'seeded-sample',
+      name: 'Seeded sample',
+      version: 'sample',
+      tier: 'sample',
+      runType: 'sample',
+      benchmarkRunType: 'sample',
+      scoringProfileId: 'sample',
+      scoringProfileVersion: 'sample',
+      gateProfileId: 'sample',
+      gateProfileVersion: 'sample',
+      scenarioSetVersion: 'sample',
+      score: Number(score),
+      gateResult: Number(critical) > 0 ? 'block' : 'pass',
+      releaseDecision: Number(critical) > 0 ? 'Block release' : 'Safe to release',
+      failedContracts: [],
+      failedMutationFamilies: [],
+      benchmarkSnapshot: sampleBenchmarkSnapshot({ name, pack, score, critical }),
+      seeded: true,
+    },
   }, context);
 }
 
@@ -36,6 +60,7 @@ export function localRunReportPayload(run, context = {}) {
   const critical = numericRunValue(run.critical);
   const observations = Array.isArray(run.runnerObservations) ? run.runnerObservations : [];
   const evidenceMode = observations.length ? 'runner-observation' : 'contract-smoke-preview';
+  const benchmark = benchmarkPayloadForRun(run);
   return enrichReportPayload({
     id: localRunReportId(run),
     runId: run.id,
@@ -58,13 +83,15 @@ export function localRunReportPayload(run, context = {}) {
       : ['Share executive report', 'Keep the pack in smoke or nightly regression'],
     timeline: run.timeline ?? [],
     evidenceMode,
+    benchmark,
   }, context);
 }
 
 export function enrichReportPayload(report, context = {}) {
   const critical = numericRunValue(report.criticalFailures);
   const failed = critical > 0 || report.status === 'review_required';
-  const releaseDecision = failed ? 'Block release' : 'Safe to release';
+  const benchmark = report.benchmark ?? null;
+  const releaseDecision = benchmark?.releaseDecision ?? (failed ? 'Block release' : 'Safe to release');
   const environment = reportEnvironment(report);
   const gate = gateForReport(report, releaseDecision);
   const failureEvidence = failureEvidenceForReport(report, context);
@@ -77,6 +104,26 @@ export function enrichReportPayload(report, context = {}) {
     environment,
     owner: packOwner(report.pack),
     gate,
+    benchmark,
+    benchmarkResult: benchmark ? {
+      benchmarkId: benchmark.id ?? '',
+      benchmarkSlug: benchmark.slug ?? '',
+      benchmarkName: benchmark.name,
+      benchmarkVersion: benchmark.version,
+      benchmarkRunType: benchmark.benchmarkRunType ?? benchmark.runType ?? 'official',
+      benchmarkSnapshot: benchmark.benchmarkSnapshot ?? benchmark.snapshot ?? null,
+      scoringProfileId: benchmark.scoringProfileId ?? '',
+      scoringProfileVersion: benchmark.scoringProfileVersion ?? '',
+      gateProfileId: benchmark.gateProfileId ?? '',
+      gateProfileVersion: benchmark.gateProfileVersion ?? '',
+      scenarioSetVersion: benchmark.scenarioSetVersion ?? '',
+      score: benchmark.score,
+      gateResult: benchmark.gateResult,
+      releaseDecision: benchmark.releaseDecision,
+      failedContracts: benchmark.failedContracts ?? [],
+      failedMutationFamilies: benchmark.failedMutationFamilies ?? [],
+      seeded: Boolean(benchmark.seeded),
+    } : null,
     failureSummary: failureSummaryForReport(report, failureEvidence),
     failureEvidence,
     retrievalEvidence,
@@ -88,19 +135,31 @@ export function enrichReportPayload(report, context = {}) {
 
 export function reportCsv(report) {
   const rows = [
-    ['id', 'name', 'project', 'harness', 'pack', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'recommended_control'],
+    ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'recommended_control'],
     ...(report.failureEvidence.length ? report.failureEvidence : [{}]).map((failure) => [
       report.id,
       report.name,
       report.project,
       report.harness,
       report.pack,
+      report.benchmark?.name ?? '',
+      report.benchmark?.slug ?? '',
+      report.benchmark?.version ?? '',
+      report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? '',
+      report.benchmark?.scoringProfileVersion ?? '',
+      report.benchmark?.gateProfileVersion ?? '',
+      report.benchmark?.scenarioSetVersion ?? '',
+      report.benchmark?.tier ?? '',
+      report.benchmark?.score ?? '',
+      report.benchmark?.gateResult ?? '',
       report.runDate,
       report.score,
       report.criticalFailures,
       report.releaseDecision,
       report.evidenceMode,
       report.adapterMode ?? '',
+      (report.benchmark?.failedContracts ?? []).join('; '),
+      (report.benchmark?.failedMutationFamilies ?? []).join('; '),
       failure.id ?? '',
       failure.severity ?? '',
       failure.contract ?? '',
@@ -118,6 +177,17 @@ export function reportMarkdown(report) {
 - Project: ${report.project}
 - Harness: ${report.harness}
 - Pack: ${report.pack}
+- Benchmark: ${benchmarkLabel(report)}
+- Benchmark slug: ${report.benchmark?.slug ?? 'not recorded'}
+- Benchmark run type: ${report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? 'not recorded'}
+- Benchmark tier: ${report.benchmark?.tier ?? 'not recorded'}
+- Scenario set version: ${report.benchmark?.scenarioSetVersion ?? 'not recorded'}
+- Scoring profile version: ${report.benchmark?.scoringProfileVersion ?? 'not recorded'}
+- Gate profile version: ${report.benchmark?.gateProfileVersion ?? 'not recorded'}
+- Benchmark score: ${report.benchmark?.score ?? report.score}
+- Gate result: ${report.benchmark?.gateResult ?? report.gate?.decision ?? 'not recorded'}
+- Failed contracts: ${(report.benchmark?.failedContracts ?? []).join(', ') || 'none'}
+- Failed mutation families: ${(report.benchmark?.failedMutationFamilies ?? []).join(', ') || 'none'}
 - Run date: ${report.runDate}
 - Score: ${report.score}
 - Critical failures: ${report.criticalFailures}
@@ -205,6 +275,7 @@ export function reportPrintHtml(report) {
   </section>
   <section class="score-grid">
     <div class="score-card"><span>Score</span><strong>${escapeHtml(report.score)}</strong></div>
+    <div class="score-card"><span>Benchmark</span><strong>${escapeHtml(report.benchmark?.score ?? report.score)}</strong></div>
     <div class="score-card"><span>Critical</span><strong>${escapeHtml(report.criticalFailures)}</strong></div>
     <div class="score-card"><span>Environment</span><strong>${escapeHtml(report.environment)}</strong></div>
     <div class="score-card"><span>Owner</span><strong>${escapeHtml(report.owner)}</strong></div>
@@ -215,6 +286,16 @@ export function reportPrintHtml(report) {
       <dt>Project</dt><dd>${escapeHtml(report.project)}</dd>
       <dt>Harness</dt><dd>${escapeHtml(report.harness)}</dd>
       <dt>Pack</dt><dd>${escapeHtml(report.pack)}</dd>
+      <dt>Benchmark</dt><dd>${escapeHtml(benchmarkLabel(report))}</dd>
+      <dt>Benchmark slug</dt><dd>${escapeHtml(report.benchmark?.slug ?? 'not recorded')}</dd>
+      <dt>Benchmark run type</dt><dd>${escapeHtml(report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? 'not recorded')}</dd>
+      <dt>Benchmark tier</dt><dd>${escapeHtml(report.benchmark?.tier ?? 'not recorded')}</dd>
+      <dt>Scenario set version</dt><dd>${escapeHtml(report.benchmark?.scenarioSetVersion ?? 'not recorded')}</dd>
+      <dt>Scoring profile version</dt><dd>${escapeHtml(report.benchmark?.scoringProfileVersion ?? 'not recorded')}</dd>
+      <dt>Gate profile version</dt><dd>${escapeHtml(report.benchmark?.gateProfileVersion ?? 'not recorded')}</dd>
+      <dt>Benchmark gate</dt><dd>${escapeHtml(report.benchmark?.gateResult ?? 'not recorded')}</dd>
+      <dt>Failed contracts</dt><dd>${escapeHtml((report.benchmark?.failedContracts ?? []).join(', ') || 'none')}</dd>
+      <dt>Failed mutation families</dt><dd>${escapeHtml((report.benchmark?.failedMutationFamilies ?? []).join(', ') || 'none')}</dd>
       <dt>Run date</dt><dd>${escapeHtml(report.runDate)}</dd>
       <dt>Status</dt><dd>${escapeHtml(report.status)}</dd>
       <dt>Evidence mode</dt><dd>${escapeHtml(report.evidenceMode)}</dd>
@@ -257,6 +338,103 @@ function failureEvidenceForReport(report, context) {
   if (numericRunValue(report.criticalFailures) <= 0) return [];
   if (isRetrievalReport(report)) return retrievalFailureEvidence(report);
   return standardFailureEvidence(report, context);
+}
+
+function benchmarkPayloadForRun(run) {
+  const benchmark = benchmarkForRun(run);
+  if (!benchmark) return null;
+  const benchmarkSnapshot = run.benchmarkSnapshot ?? createBenchmarkSnapshot(benchmark, run.completedAt ?? new Date().toISOString());
+  const observations = Array.isArray(run.runnerObservations) ? run.runnerObservations : [];
+  const failureObservations = observations.filter((observation) => {
+    const failureModes = Array.isArray(observation.failure_modes) ? observation.failure_modes : [];
+    return failureModes.length || numericRunValue(run.critical) > 0;
+  });
+  const failures = failureObservations.map((observation) => ({
+    severity: numericRunValue(run.critical) > 0 ? 'critical' : 'major',
+    contractId: String(observation.contract_id ?? observation.metadata?.contractId ?? (benchmark.packId === 'retrievalguard-core' ? 'source fidelity' : `${benchmark.packName} contract`)),
+  }));
+  if (!failures.length && numericRunValue(run.critical) > 0) {
+    failures.push({ severity: 'critical', contractId: benchmark.contractIds[0] ?? `${benchmark.packName} contract` });
+  }
+  const scored = scoreBenchmark({ benchmark, failures });
+  const score = numericRunValue(run.score) || scored.score;
+  const runType = classifyBenchmarkRun({ run, benchmark, scenarioCount: numericRunValue(run.observations) });
+  const metrics = extractBenchmarkMetrics(run);
+  const gate = evaluateBenchmarkGate({
+    benchmark,
+    score,
+    criticalCount: numericRunValue(run.critical),
+    metrics,
+  });
+  const failedContracts = Array.from(new Set(failures.map((failure) => failure.contractId).filter(Boolean)));
+  const failedMutationFamilies = Array.from(new Set(failureObservations.map((observation) => (
+    String(observation.mutation_id ?? observation.metadata?.mutationId ?? 'runner_observation')
+      .replace(/\.[^.]+$/u, '')
+      .replace(/_[0-9]+$/u, '')
+  ))));
+  return {
+    id: benchmark.id,
+    slug: benchmark.slug,
+    name: benchmark.name,
+    version: benchmark.version,
+    packId: benchmark.packId,
+    packName: benchmark.packName,
+    packVersion: benchmark.packVersion ?? '0.1',
+    tier: benchmark.tier,
+    scenarioSetVersion: benchmark.scenarioSetVersion ?? '0.1',
+    scoringProfileId: benchmark.scoringProfileId,
+    scoringProfileVersion: benchmarkSnapshot.scoringProfileVersion,
+    gateProfileId: benchmark.gateProfileId,
+    gateProfileVersion: benchmarkSnapshot.gateProfileVersion,
+    benchmarkRunType: runType.benchmarkRunType,
+    runType: runType.benchmarkRunType,
+    baseBenchmarkId: runType.baseBenchmarkId,
+    baseBenchmarkSlug: runType.baseBenchmarkSlug,
+    overridesApplied: runType.overridesApplied,
+    customizationReason: runType.customizationReason,
+    benchmarkSnapshot,
+    score,
+    gateResult: gate.result,
+    gateReason: gate.reason,
+    releaseDecision: releaseDecisionForGate(gate.result),
+    failedContracts,
+    failedMutationFamilies,
+    metrics,
+  };
+}
+
+function sampleBenchmarkSnapshot({ name, pack, score, critical }) {
+  const capturedAt = new Date().toISOString();
+  return {
+    schemaVersion: 'harnessamp.benchmark.v0.1',
+    id: 'seeded-sample',
+    slug: 'seeded-sample',
+    name,
+    version: 'sample',
+    packId: 'seeded-sample',
+    packName: pack,
+    packVersion: 'sample',
+    domain: 'sample data',
+    tier: 'sample',
+    scenarioCount: 0,
+    scenarioSetVersion: 'sample',
+    contractIds: [],
+    mutationFamilyIds: [],
+    scoringProfile: { id: 'sample', version: 'sample', score },
+    gateProfile: { id: 'sample', version: 'sample', criticalFailures: critical },
+    scoringProfileId: 'sample',
+    scoringProfileVersion: 'sample',
+    gateProfileId: 'sample',
+    gateProfileVersion: 'sample',
+    description: 'Seeded sample report. Not real benchmark evidence.',
+    capturedAt,
+  };
+}
+
+function benchmarkLabel(report) {
+  if (!report.benchmark) return 'not recorded';
+  if (report.benchmark.seeded) return 'Seeded sample - not a real benchmark result';
+  return `${report.benchmark.name} v${report.benchmark.version}`;
 }
 
 function retrievalFailureEvidence(report) {

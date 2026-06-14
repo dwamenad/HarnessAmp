@@ -5,6 +5,8 @@ import {
   reportMarkdown,
   reportPrintHtml,
 } from './report-export.js';
+import { benchmarkForRun } from '../benchmarks/registry.js';
+import { benchmarkMetadataForResult, generateBenchmarkResult } from '../benchmarks/results.js';
 
 export const RUN_REPORT_STORAGE_KEY = 'harnessamp.runReportState.v1';
 
@@ -18,6 +20,7 @@ export function emptyRunReportState() {
     runs: [],
     observations: [],
     failures: [],
+    benchmarkResults: [],
     reports: [],
     artifacts: [],
     updatedAt: '',
@@ -89,6 +92,7 @@ export function upsertRun(state, value, { harnesses = [] } = {}) {
     ...existing,
     id: value.id,
     harnessId: value.harnessId,
+    benchmarkId: value.benchmarkId,
     packId: value.packId,
     packName: value.packName ?? value.pack,
     tier: value.tier,
@@ -129,7 +133,16 @@ export function completeRun(state, run, context = {}) {
 
   const observations = normalizeObservationsForRun(run, persistedRun);
   const rawFailures = normalizeFailuresForRun(run, observations);
-  const report = buildPersistedReport(run, persistedRun, rawFailures, context);
+  const harness = existingState.harnesses.find((item) => item.id === persistedRun.harnessId);
+  const benchmarkResult = generateBenchmarkResult({
+    run,
+    persistedRun,
+    harness,
+    observations,
+    failures: rawFailures,
+    createdAt: persistedRun.completedAt,
+  });
+  const report = buildPersistedReport(run, persistedRun, rawFailures, context, benchmarkResult);
   const failures = rawFailures.map((failure) => ({ ...failure, reportId: report.id }));
   const artifacts = buildReportArtifacts(report);
 
@@ -142,6 +155,10 @@ export function completeRun(state, run, context = {}) {
     failures: [
       ...failures,
       ...existingState.failures.filter((item) => item.runId !== run.id),
+    ],
+    benchmarkResults: [
+      ...(benchmarkResult ? [benchmarkResult] : []),
+      ...existingState.benchmarkResults.filter((item) => item.runId !== run.id),
     ],
     reports: [
       report,
@@ -187,13 +204,15 @@ export function reportRowFromPersistedReport(report) {
       report.project,
       report.harnessName,
       report.packName,
+      report.benchmark ? `${report.benchmark.name} v${report.benchmark.version}` : 'No benchmark',
+      report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? 'unknown',
       report.createdAt,
       String(report.score),
       String(report.criticalCount),
       report.adapterMode ? `${displayEvidenceMode(report.evidenceMode)} / ${report.adapterMode}` : displayEvidenceMode(report.evidenceMode),
     ],
     decision: report.releaseDecision,
-    tone: report.criticalCount > 0 || report.gateResult === 'fail' ? 'critical' : 'passed',
+    tone: report.criticalCount > 0 || ['fail', 'block'].includes(report.gateResult) ? 'critical' : report.gateResult === 'warn' ? 'major' : 'passed',
   };
 }
 
@@ -205,7 +224,7 @@ export function seededReportRowFromFixture(row, index, reportSlug) {
     runId: '',
     name: row[0],
     seeded: true,
-    cells: [...row, 'seeded sample'],
+    cells: [row[0], row[1], row[2], row[3], 'Seeded sample - not a real benchmark result', 'sample', row[4], row[5], row[6], 'seeded sample'],
     decision,
     tone: critical > 0 ? 'critical' : 'passed',
   };
@@ -260,6 +279,7 @@ function normalizeRunReportState(value) {
     runs: Array.isArray(value?.runs) ? value.runs.map(normalizeRun).filter(Boolean) : [],
     observations: Array.isArray(value?.observations) ? value.observations.map(normalizeObservation).filter(Boolean) : [],
     failures: Array.isArray(value?.failures) ? value.failures.map(normalizeFailure).filter(Boolean) : [],
+    benchmarkResults: Array.isArray(value?.benchmarkResults) ? value.benchmarkResults.map(normalizeBenchmarkResult).filter(Boolean) : [],
     reports: Array.isArray(value?.reports) ? value.reports.map(normalizeReport).filter(Boolean) : [],
     artifacts: Array.isArray(value?.artifacts) ? value.artifacts.map(normalizeArtifact).filter(Boolean) : [],
     updatedAt: typeof value?.updatedAt === 'string' ? value.updatedAt : '',
@@ -295,6 +315,7 @@ function normalizeRun(value) {
   return {
     id,
     harnessId: String(value.harnessId ?? ''),
+    benchmarkId: String(value.benchmarkId ?? ''),
     packId: String(value.packId ?? ''),
     packName: String(value.packName ?? value.pack ?? 'Custom Pack'),
     tier: String(value.tier ?? 'smoke'),
@@ -375,6 +396,7 @@ function normalizeReport(value) {
     evidenceMode: normalizeEvidenceMode(value.evidenceMode),
     adapterMode: String(value.adapterMode ?? ''),
     sourceFidelity: String(value.sourceFidelity ?? displayEvidenceMode(value.evidenceMode)),
+    benchmark: value.benchmark && typeof value.benchmark === 'object' ? value.benchmark : null,
     failureEvidence: Array.isArray(value.failureEvidence) ? value.failureEvidence : [],
     remediationChecklist: Array.isArray(value.remediationChecklist) ? value.remediationChecklist.map(String) : [],
     regressionPlan: value.regressionPlan ?? {},
@@ -385,6 +407,52 @@ function normalizeReport(value) {
     exportPayload: value.exportPayload ?? null,
     createdAt: String(value.createdAt ?? now),
     updatedAt: String(value.updatedAt ?? value.createdAt ?? now),
+  };
+}
+
+function normalizeBenchmarkResult(value) {
+  if (!value || typeof value !== 'object') return null;
+  const id = String(value.id ?? '').trim();
+  const runId = String(value.runId ?? '').trim();
+  const benchmarkId = String(value.benchmarkId ?? '').trim();
+  if (!id || !runId || !benchmarkId) return null;
+  return {
+    id,
+    benchmarkId,
+    benchmarkSlug: String(value.benchmarkSlug ?? ''),
+    benchmarkName: String(value.benchmarkName ?? 'Benchmark'),
+    benchmarkVersion: String(value.benchmarkVersion ?? '0.1'),
+    packId: String(value.packId ?? ''),
+    packName: String(value.packName ?? ''),
+    packVersion: String(value.packVersion ?? '0.1'),
+    tier: String(value.tier ?? ''),
+    scenarioSetVersion: String(value.scenarioSetVersion ?? '0.1'),
+    scoringProfileId: String(value.scoringProfileId ?? ''),
+    scoringProfileVersion: String(value.scoringProfileVersion ?? '0.1'),
+    gateProfileId: String(value.gateProfileId ?? ''),
+    gateProfileVersion: String(value.gateProfileVersion ?? '0.1'),
+    benchmarkRunType: String(value.benchmarkRunType ?? 'official'),
+    baseBenchmarkId: String(value.baseBenchmarkId ?? ''),
+    baseBenchmarkSlug: String(value.baseBenchmarkSlug ?? ''),
+    overridesApplied: Array.isArray(value.overridesApplied) ? value.overridesApplied.map(String) : [],
+    customizationReason: String(value.customizationReason ?? ''),
+    benchmarkSnapshot: value.benchmarkSnapshot && typeof value.benchmarkSnapshot === 'object' ? value.benchmarkSnapshot : null,
+    runId,
+    harnessId: String(value.harnessId ?? ''),
+    agentVersion: String(value.agentVersion ?? 'unknown'),
+    score: normalizeNumber(value.score, 0),
+    gateResult: String(value.gateResult ?? 'warn'),
+    gateReason: String(value.gateReason ?? ''),
+    releaseDecision: String(value.releaseDecision ?? 'Release with review'),
+    criticalCount: normalizeNumber(value.criticalCount, 0),
+    majorCount: normalizeNumber(value.majorCount, 0),
+    minorCount: normalizeNumber(value.minorCount, 0),
+    observationCount: normalizeNumber(value.observationCount, 0),
+    passedContracts: Array.isArray(value.passedContracts) ? value.passedContracts.map(String) : [],
+    failedContracts: Array.isArray(value.failedContracts) ? value.failedContracts.map(String) : [],
+    failedMutationFamilies: Array.isArray(value.failedMutationFamilies) ? value.failedMutationFamilies.map(String) : [],
+    metrics: value.metrics && typeof value.metrics === 'object' ? value.metrics : {},
+    createdAt: String(value.createdAt ?? new Date().toISOString()),
   };
 }
 
@@ -475,19 +543,21 @@ function normalizeFailuresForRun(run, observations) {
     }));
 }
 
-function buildPersistedReport(run, persistedRun, failures, context) {
+function buildPersistedReport(run, persistedRun, failures, context, benchmarkResult = null) {
   const payload = buildReportPayload(localRunReportId(run), {
     ...context,
     localRuns: [run],
   });
   const now = new Date().toISOString();
+  const benchmark = benchmarkForRun(run);
+  const benchmarkMetadata = benchmarkMetadataForResult(benchmarkResult, benchmark) ?? payload.benchmark ?? null;
   return normalizeReport({
     id: payload.id,
     runId: run.id,
     title: payload.name,
-    releaseDecision: payload.releaseDecision,
-    gateResult: payload.gate?.thresholds?.some((item) => item.result === 'fail') ? 'fail' : 'pass',
-    score: persistedRun.score ?? payload.score,
+    releaseDecision: benchmarkResult?.releaseDecision ?? payload.releaseDecision,
+    gateResult: benchmarkResult?.gateResult ?? (payload.gate?.thresholds?.some((item) => item.result === 'fail') ? 'fail' : 'pass'),
+    score: benchmarkResult?.score ?? persistedRun.score ?? payload.score,
     criticalCount: persistedRun.criticalCount,
     observationCount: persistedRun.observationCount,
     environment: payload.environment,
@@ -501,8 +571,11 @@ function buildPersistedReport(run, persistedRun, failures, context) {
     project: payload.project,
     harnessName: payload.harness,
     packName: payload.pack,
+    benchmark: benchmarkMetadata,
     exportPayload: {
       ...payload,
+      benchmark: benchmarkMetadata,
+      benchmarkResult,
       failureIds: failures.map((failure) => failure.id),
     },
     createdAt: persistedRun.completedAt || now,

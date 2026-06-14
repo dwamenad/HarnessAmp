@@ -3429,6 +3429,202 @@ section[id] {
   cursor: not-allowed;
 }
 
+.ha-benchmark-authority,
+.ha-benchmark-contents,
+.ha-run-gate-preview,
+.ha-ci-slug,
+.ha-preflight,
+.ha-advanced-run {
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface-2);
+  padding: 13px;
+}
+
+.ha-benchmark-authority {
+  display: grid;
+  gap: 6px;
+}
+
+.ha-benchmark-authority strong {
+  color: var(--ha-text);
+  font-size: 17px;
+}
+
+.ha-benchmark-authority small,
+.ha-benchmark-contents small {
+  color: var(--ha-muted);
+  font-size: 12px;
+}
+
+.ha-benchmark-authority p,
+.ha-benchmark-contents p {
+  margin: 0;
+  color: var(--ha-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ha-benchmark-content-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.ha-benchmark-content-grid > div {
+  display: grid;
+  gap: 5px;
+}
+
+.ha-benchmark-content-grid > div > span,
+.ha-ci-slug span {
+  color: #475569;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ha-advanced-run {
+  display: grid;
+  gap: 10px;
+}
+
+.ha-run-mode {
+  padding: 12px;
+}
+
+.ha-run-mode > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ha-run-mode label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 4px 8px;
+  border: 1px solid var(--ha-line);
+  border-radius: 7px;
+  background: var(--ha-surface);
+  padding: 9px;
+  cursor: pointer;
+}
+
+.ha-run-mode label:has(input:checked) {
+  border-color: rgba(37, 99, 235, 0.45);
+  background: #eff6ff;
+}
+
+.ha-run-mode input {
+  width: auto;
+  margin-top: 2px;
+}
+
+.ha-run-mode label span,
+.ha-run-mode label small {
+  grid-column: 2;
+}
+
+.ha-run-mode label span {
+  color: var(--ha-text);
+  font-size: 13px;
+}
+
+.ha-run-mode label small {
+  color: var(--ha-muted);
+  font-size: 11px;
+}
+
+.ha-advanced-run summary {
+  color: var(--ha-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ha-preflight {
+  display: grid;
+  gap: 10px;
+}
+
+.ha-preflight ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ha-preflight li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border-bottom: 1px solid var(--ha-line);
+  padding-bottom: 8px;
+}
+
+.ha-preflight li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.ha-preflight strong {
+  display: block;
+  color: var(--ha-text);
+  font-size: 13px;
+}
+
+.ha-preflight small {
+  color: var(--ha-muted);
+  font-size: 12px;
+}
+
+.ha-artifact-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ha-artifact-list span {
+  border: 1px solid var(--ha-line);
+  border-radius: 999px;
+  background: var(--ha-surface);
+  color: #334155;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.ha-ci-slug {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ha-ci-slug div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ha-ci-slug code {
+  overflow-wrap: anywhere;
+  color: var(--ha-text);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+}
+
+.ha-ci-slug button {
+  flex: 0 0 auto;
+}
+
+.ha-ci-slug button:disabled {
+  opacity: 0.55;
+}
+
 .ha-form-feedback,
 .ha-smoke-message {
   margin: 0;
@@ -4562,6 +4758,7 @@ section[id] {
   .benchmark-review-panel,
   .benchmark-diff-summary,
   .benchmark-truth-list,
+  .ha-run-mode > div,
   .docs-meta {
     grid-template-columns: 1fr;
   }

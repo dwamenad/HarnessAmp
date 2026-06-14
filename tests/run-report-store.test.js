@@ -75,6 +75,14 @@ describe('run/report persistence store', () => {
     assert.equal(state.failures[0].runId, retrievalRun.id);
     assert.equal(state.reports[0].runId, retrievalRun.id);
     assert.equal(state.reports[0].releaseDecision, 'Block release');
+    assert.equal(state.reports[0].benchmark.name, 'RetrievalGuard Smoke');
+    assert.equal(state.reports[0].benchmark.version, '0.1');
+    assert.equal(state.benchmarkResults[0].benchmarkId, 'retrievalguard-smoke-v0.1');
+    assert.equal(state.benchmarkResults[0].benchmarkSlug, 'retrievalguard-smoke');
+    assert.equal(state.benchmarkResults[0].benchmarkRunType, 'official');
+    assert.equal(state.benchmarkResults[0].benchmarkSnapshot.slug, 'retrievalguard-smoke');
+    assert.equal(state.benchmarkResults[0].scoringProfileVersion, '0.1');
+    assert.equal(state.benchmarkResults[0].gateResult, 'block');
     assert.equal(state.reports[0].sourceFidelity, 'retrieval source fidelity attached');
     assert.equal(state.artifacts.length, 4);
     assert.deepEqual(state.artifacts.map((item) => item.format).sort(), ['csv', 'json', 'markdown', 'print_html']);
@@ -84,6 +92,11 @@ describe('run/report persistence store', () => {
     const state = completeRun({ harnesses }, retrievalRun, { harnesses });
     const report = getReportPayload(state, state.reports[0].id);
 
+    assert.equal(report.benchmark.name, 'RetrievalGuard Smoke');
+    assert.equal(report.benchmark.version, '0.1');
+    assert.equal(report.benchmark.benchmarkRunType, 'official');
+    assert.equal(report.benchmark.benchmarkSnapshot.slug, 'retrievalguard-smoke');
+    assert.equal(report.benchmarkResult.gateResult, 'block');
     assert.equal(getReportArtifact(state, report.id, 'print').content, reportPrintHtml(report));
     assert.equal(getReportArtifact(state, report.id, 'csv').content, reportCsv(report));
     assert.equal(getReportArtifact(state, report.id, 'markdown').content, reportMarkdown(report));
@@ -98,10 +111,27 @@ describe('run/report persistence store', () => {
     ];
 
     assert.equal(rows[0].runId, retrievalRun.id);
+    assert.match(rows[0].cells[4], /RetrievalGuard Smoke v0\.1/);
     assert.match(rows[0].cells.at(-1), /runner observation \/ contract-smoke/);
     assert.equal(rows[1].seeded, true);
+    assert.match(rows[1].cells[4], /Seeded sample/);
     assert.equal(rows[1].cells.at(-1), 'seeded sample');
     assert.equal(latestCompletedRealRun(state).id, retrievalRun.id);
+  });
+
+  test('advanced benchmark overrides mark reports as customized', () => {
+    const customizedRun = {
+      ...retrievalRun,
+      id: 'run-retrievalguard-customized',
+      benchmarkId: 'retrievalguard-smoke-v0.1',
+      tier: 'core',
+      tierLabel: 'Core',
+    };
+    const state = completeRun({ harnesses }, customizedRun, { harnesses });
+
+    assert.equal(state.benchmarkResults[0].benchmarkRunType, 'customized');
+    assert.deepEqual(state.benchmarkResults[0].overridesApplied, ['tier']);
+    assert.equal(getReportPayload(state, state.reports[0].id).benchmark.benchmarkRunType, 'customized');
   });
 
   test('failure rows link persisted failure evidence back to run and report', () => {
