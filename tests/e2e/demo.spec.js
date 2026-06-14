@@ -95,6 +95,28 @@ test('console exposes operational destinations after the sandbox handoff', async
   await expect(page.locator('.ha-nav').getByRole('link', { name: /Failures/ })).toHaveAttribute('href', '/failures');
 });
 
+test('new run page treats benchmarks as the release-gate source', async ({ page }) => {
+  await page.goto('/runs/new');
+  await expect(page.locator('#run-benchmark-select')).toBeVisible();
+  await expect(page.getByText('Versioned benchmark', { exact: true })).toBeVisible();
+  await expect(page.getByText('Gate preview')).toBeVisible();
+  await expect(page.getByText('Harness readiness')).toBeVisible();
+  await expect(page.getByText('read-only registry')).toBeVisible();
+  await expect(page.getByText('Preflight')).toBeVisible();
+  await expect(page.getByText('Expected artifacts')).toBeVisible();
+  await expect(page.getByText('BenchmarkResult')).toBeVisible();
+  await expect(page.getByText('Sample run')).toBeVisible();
+  await expect(page.getByLabel('Full benchmark')).toBeVisible();
+  await expect(page.locator('#run-agent-version')).toBeVisible();
+  await expect(page.getByText('CI slug')).toBeVisible();
+  await expect(page.locator('#copy-benchmark-slug')).toBeEnabled();
+});
+
+test('compare page exposes benchmark-aware baseline context', async ({ page }) => {
+  await page.goto('/compare');
+  await expect(page.getByText('Benchmark result baseline')).toBeVisible();
+});
+
 test('docs routes resolve to the install section', async ({ page }) => {
   await page.goto('/docs/install');
   await expect(page.locator('.docs-article')).toContainText('Clone the repository');

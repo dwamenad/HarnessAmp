@@ -29,6 +29,9 @@ import {
 } from './console/run-report-store.js';
 import { MUTATION_PACKS } from './mutations/registry.js';
 import { catalogCardRows, domainPackCatalog } from './v2/domain-pack-catalog.js';
+import { benchmarkForRun, getBenchmarkById, getGateProfile, getScoringProfile, listBenchmarks } from './benchmarks/registry.js';
+import { compareBenchmarkResults, findBenchmarkBaseline } from './benchmarks/baseline-comparison.js';
+import { CI_EXIT_CODES, benchmarkCiOutput } from './benchmarks/ci-output.js';
 import supportProfile from '../examples/risk-profiles/support-agent.json';
 import browserProfile from '../examples/risk-profiles/browser-agent.json';
 import quickstartBundle from '../examples/cli/quickstart-bundle.json';
@@ -840,20 +843,29 @@ function renderSaasNewRun() {
   const packOptions = runnablePackOptions();
   const selectedPack = packOptions.find((pack) => pack.id === draft.packId) ?? packOptions[0];
   const selectedTier = runTierOptions().find((tier) => tier.id === draft.tier) ?? runTierOptions()[0];
+  const selectedBenchmark = selectedBenchmarkForDraft(draft);
   const estimated = estimateRunSelection(selectedPack, selectedTier);
   const selectedHarness = harnesses.find((harness) => harness.id === draft.harnessId) ?? harnesses[0];
+  const eligibility = runEligibilityForBenchmark(selectedBenchmark, estimated);
+  const preflight = runPreflightItems({ benchmark: selectedBenchmark, harness: selectedHarness, eligibility, draft });
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Configure Run</h2><p>Select a harness, pack, tier, and gate condition.</p></div>${renderDataSourceStrip(state.sessionStatus === 'authenticated' ? 'Live project data' : 'Local preview', state.sessionStatus === 'authenticated' ? 'Uses API-backed job queue.' : 'Persists run draft and preview runs in this browser.')}</div>
+      <div class="ha-section-head"><div><h2>Configure Run</h2><p>Select a versioned benchmark, confirm the runner, and start a comparable result.</p></div>${renderDataSourceStrip(state.sessionStatus === 'authenticated' ? 'Live project data' : 'Local preview', state.sessionStatus === 'authenticated' ? 'Uses API-backed job queue.' : 'Persists run draft and preview runs in this browser.')}</div>
       <div class="ha-grid ha-grid--split">
         <form class="ha-panel ha-form" id="run-config-form">
           ${renderSelectFromObjects('Harness', harnesses.map((harness) => ({ value: harness.id, label: `${harness.name} / ${harness.environment}` })), selectedHarness?.id, 'run-harness-select')}
-          ${renderSelectFromObjects('Mutation Pack', packOptions.map((pack) => ({ value: pack.id, label: pack.name })), selectedPack?.id, 'run-pack-select')}
-          ${renderSelectFromObjects('Tier', runTierOptions().map((tier) => ({ value: tier.id, label: tier.label })), selectedTier.id, 'run-tier-select')}
-          ${renderSelect('Fail condition', ['block on critical failures', 'block on high severity', 'block on score below threshold', 'never block'], draft.failCondition, 'run-fail-condition')}
+          ${renderSelectFromObjects('Benchmark', benchmarkRunOptions(), selectedBenchmark?.id ?? '', 'run-benchmark-select')}
+          ${renderRunModeControl(draft.runMode)}
+          ${renderBenchmarkAuthority(selectedBenchmark, selectedPack, selectedTier)}
           ${renderField('Max observations', String(draft.maxObservations), 'run-max-observations', 'number')}
-          <fieldset><legend>Contracts to include</legend>${saasContracts.slice(0, 5).map(([name]) => `<label><input type="checkbox" checked /> ${escapeHtml(name)}</label>`).join('')}</fieldset>
-          <fieldset><legend>Mutation families</legend>${['prompt pressure', 'context omission', 'schema drift', 'tool timeout', 'role confusion', 'workflow interruption'].map((item) => `<label><input type="checkbox" checked /> ${item}</label>`).join('')}</fieldset>
+          ${renderField('Agent version', draft.agentVersion || selectedHarness?.agentVersion || 'unknown', 'run-agent-version')}
+          ${renderBenchmarkContents(selectedBenchmark)}
+          <details class="ha-advanced-run">
+            <summary>Advanced overrides</summary>
+            ${renderSelectFromObjects('Mutation Pack', packOptions.map((pack) => ({ value: pack.id, label: pack.name })), selectedPack?.id, 'run-pack-select')}
+            ${renderSelectFromObjects('Tier', runTierOptions().map((tier) => ({ value: tier.id, label: tier.label })), selectedTier.id, 'run-tier-select')}
+            ${renderSelect('Fail condition', ['block on critical failures', 'block on high severity', 'block on score below threshold', 'never block'], draft.failCondition, 'run-fail-condition')}
+          </details>
           <div class="ha-form-actions">
             <button class="ha-primary" id="start-configured-run" type="button">Start Run</button>
             <a class="ha-secondary" href="/runs/${escapeHtml(consoleState.activeRunId || 'run-healthguard-2419')}">View active run</a>
@@ -861,16 +873,16 @@ function renderSaasNewRun() {
           <p class="ha-form-feedback" id="run-config-feedback">${escapeHtml(consoleState.runFeedback)}</p>
         </form>
         <article class="ha-panel ha-estimate">
-          <h3>Usage Estimate</h3>
+          <h3>Run Readiness</h3>
+          ${renderSaasMetric('Benchmark', selectedBenchmark ? `${selectedBenchmark.name} v${selectedBenchmark.version}` : 'Mapped from pack/tier', selectedBenchmark ? selectedBenchmark.slug : `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
+          ${renderSaasMetric('Release eligibility', eligibility.label, eligibility.detail, eligibility.tone)}
           ${renderSaasMetric('Estimated scenarios', estimated.scenarios, `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
           ${renderSaasMetric('Estimated evaluated observations', estimated.observations, 'response x contract checks', 'neutral')}
-          ${renderSaasMetric('Queued job path', state.sessionStatus === 'authenticated' ? 'API-backed' : 'Local preview', state.sessionStatus === 'authenticated' ? 'uses project runner queue' : 'persists in this browser', state.sessionStatus === 'authenticated' ? 'passed' : 'major')}
-          ${renderSaasMetric('Remaining monthly allowance', '36,580', 'Team plan', 'passed')}
-          ${renderGovernanceList([
-            ['Release decision', selectedTier.id === 'smoke' ? 'Review signal only' : 'Eligible for release gate'],
-            ['Execution state', 'Queued -> running -> completed or failed'],
-            ['Audit trail', 'Run config and report artifacts retained'],
-          ])}
+          ${renderPreflightChecklist(preflight)}
+          ${renderGatePreview(selectedBenchmark)}
+          ${renderHarnessReadiness(selectedHarness)}
+          ${renderExpectedArtifacts()}
+          ${renderCiSlug(selectedBenchmark)}
           <div class="ha-run-links">
             <a href="/failures">Open failure queue</a>
             <a href="/reports">Open reports</a>
@@ -879,6 +891,216 @@ function renderSaasNewRun() {
       </div>
     </section>
   `;
+}
+
+function renderBenchmarkAuthority(benchmark, pack, tier) {
+  if (!benchmark) {
+    return `
+      <div class="ha-benchmark-authority">
+        <span class="ha-badge ha-badge--major">Mapped run</span>
+        <strong>${escapeHtml(pack.name)} / ${escapeHtml(tier.label)}</strong>
+        <small>Select a benchmark to lock pack, tier, scoring, and gate semantics.</small>
+      </div>
+    `;
+  }
+  return `
+    <div class="ha-benchmark-authority">
+      <span class="ha-badge ha-badge--passed">Versioned benchmark</span>
+      <strong>${escapeHtml(benchmark.name)} v${escapeHtml(benchmark.version)}</strong>
+      <small>${escapeHtml(benchmark.packName)} / ${escapeHtml(benchmark.tier)} / ${formatNumber(benchmark.scenarioCount)} scenarios</small>
+      <p>${escapeHtml(benchmark.description)}</p>
+    </div>
+  `;
+}
+
+function renderBenchmarkContents(benchmark) {
+  if (!benchmark) {
+    return `
+      <div class="ha-benchmark-contents">
+        <h3>Benchmark contents</h3>
+        <p class="ha-section-note">Pack and tier are mapped at run time. Select a benchmark to review fixed contracts and mutation families.</p>
+      </div>
+    `;
+  }
+  return `
+    <div class="ha-benchmark-contents">
+      <div class="ha-panel__head"><h3>Benchmark contents</h3><span>read-only registry</span></div>
+      <div class="ha-benchmark-content-grid">
+        <div>
+          <span>Contracts</span>
+          <div class="ha-chip-row">${benchmark.contractIds.slice(0, 8).map((id) => `<span>${escapeHtml(id)}</span>`).join('')}</div>
+          <small>${benchmark.contractIds.length > 8 ? `+${benchmark.contractIds.length - 8} more contracts` : `${benchmark.contractIds.length} contracts included`}</small>
+        </div>
+        <div>
+          <span>Mutation families</span>
+          <div class="ha-chip-row">${benchmark.mutationFamilyIds.slice(0, 8).map((id) => `<span>${escapeHtml(humanizeDocSegment(id))}</span>`).join('')}</div>
+          <small>${benchmark.mutationFamilyIds.length > 8 ? `+${benchmark.mutationFamilyIds.length - 8} more families` : `${benchmark.mutationFamilyIds.length} families included`}</small>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderRunModeControl(selectedMode = 'sample') {
+  const modes = [
+    ['sample', 'Sample', 'fast check'],
+    ['full', 'Full benchmark', 'comparable result'],
+    ['ci', 'CI gate', 'release check'],
+  ];
+  return `
+    <fieldset class="ha-run-mode">
+      <legend>Run mode</legend>
+      <div>
+        ${modes.map(([value, label, detail]) => `
+          <label>
+            <input type="radio" name="run-mode" value="${escapeHtml(value)}" ${selectedMode === value ? 'checked' : ''} />
+            <span>${escapeHtml(label)}</span>
+            <small>${escapeHtml(detail)}</small>
+          </label>
+        `).join('')}
+      </div>
+    </fieldset>
+  `;
+}
+
+function renderPreflightChecklist(items) {
+  return `
+    <div class="ha-preflight">
+      <div class="ha-panel__head"><h3>Preflight</h3><span>${items.filter((item) => item.ok).length}/${items.length} ready</span></div>
+      <ol>
+        ${items.map((item) => `
+          <li class="${item.ok ? 'is-ready' : 'needs-attention'}">
+            <span class="ha-status-dot ${item.ok ? '' : 'ha-status-dot--warn'}"></span>
+            <div><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.detail)}</small></div>
+          </li>
+        `).join('')}
+      </ol>
+    </div>
+  `;
+}
+
+function renderExpectedArtifacts() {
+  return `
+    <div class="ha-run-gate-preview">
+      <div class="ha-panel__head"><h3>Expected artifacts</h3><span>after completion</span></div>
+      <div class="ha-artifact-list">
+        ${['BenchmarkResult', 'Run report', 'JSON', 'CSV', 'Markdown', 'Print HTML'].map((item) => `<span>${escapeHtml(item)}</span>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderGatePreview(benchmark) {
+  if (!benchmark) {
+    return renderGovernanceList([
+      ['Gate profile', 'Mapped after pack and tier selection'],
+      ['Block', 'critical failures or score below threshold'],
+      ['Warn', 'review threshold applies when available'],
+    ]);
+  }
+  const scoring = getScoringProfile(benchmark.scoringProfileId);
+  const gate = getGateProfile(benchmark.gateProfileId);
+  const rows = [
+    ['Gate profile', benchmark.gateProfileId],
+    ['Block', `critical > ${gate?.blockCriticalCountAbove ?? 0} or score < ${gate?.blockScoreBelow ?? scoring?.minimumPassingScore ?? 75}`],
+    ['Warn', `score < ${gate?.warnScoreBelow ?? 85}${gate?.warnCitationPrecisionBelow ? ` or citation precision < ${gate.warnCitationPrecisionBelow}` : ''}`],
+    ['Passing score', `${scoring?.minimumPassingScore ?? 75} / ${scoring?.maxScore ?? 100}`],
+  ];
+  return `
+    <div class="ha-run-gate-preview">
+      <div class="ha-panel__head"><h3>Gate preview</h3><span>${escapeHtml(benchmark.slug)}</span></div>
+      ${renderGovernanceList(rows)}
+    </div>
+  `;
+}
+
+function renderHarnessReadiness(harness) {
+  const smoke = String(harness?.lastSmokeTest ?? 'not run');
+  const smokeReady = !/not run|failing/iu.test(smoke) && harness?.status !== 'failing';
+  return `
+    <div class="ha-run-gate-preview">
+      <div class="ha-panel__head"><h3>Harness readiness</h3><span class="ha-badge ${statusClass(smokeReady ? 'passed' : 'major')}">${escapeHtml(smokeReady ? 'Ready' : 'Check')}</span></div>
+      ${renderGovernanceList([
+        ['Harness', harness?.name ?? 'No harness selected'],
+        ['Agent version', harness?.agentVersion ?? 'unknown'],
+        ['Endpoint mode', `${harness?.environment ?? 'local'} / ${harness?.authType ?? 'none'}`],
+        ['Last smoke', smoke],
+      ])}
+    </div>
+  `;
+}
+
+function renderCiSlug(benchmark) {
+  const slug = benchmark?.slug ?? 'select-a-benchmark';
+  return `
+    <div class="ha-ci-slug">
+      <div><span>CI slug</span><code>${escapeHtml(slug)}</code></div>
+      <button id="copy-benchmark-slug" data-benchmark-slug="${escapeHtml(slug)}" type="button" ${benchmark ? '' : 'disabled'}>Copy</button>
+    </div>
+  `;
+}
+
+function runEligibilityForBenchmark(benchmark, estimated) {
+  if (!benchmark) {
+    return {
+      label: 'Mapped run',
+      detail: 'select a registry benchmark for comparable results',
+      tone: 'major',
+    };
+  }
+  const observations = numericRunValue(estimated.observations);
+  const fullScenarioCount = Number(benchmark.scenarioCount);
+  if (observations >= fullScenarioCount) {
+    return {
+      label: 'Release-gate eligible',
+      detail: `${formatNumber(observations)} / ${formatNumber(fullScenarioCount)} scenarios`,
+      tone: 'passed',
+    };
+  }
+  return {
+    label: 'Sample run',
+    detail: `${formatNumber(observations)} / ${formatNumber(fullScenarioCount)} scenarios`,
+    tone: 'major',
+  };
+}
+
+function runPreflightItems({ benchmark, harness, eligibility, draft }) {
+  const agentVersion = String(draft.agentVersion || harness?.agentVersion || '').trim();
+  const smoke = String(harness?.lastSmokeTest ?? 'not run');
+  const smokeReady = !/not run|failing/iu.test(smoke) && harness?.status !== 'failing';
+  const gateResolved = Boolean(benchmark?.gateProfileId && benchmark?.scoringProfileId);
+  return [
+    {
+      label: 'Benchmark selected',
+      ok: Boolean(benchmark),
+      detail: benchmark ? `${benchmark.slug} v${benchmark.version}` : 'Choose a registry benchmark.',
+    },
+    {
+      label: 'Harness reachable',
+      ok: Boolean(harness) && harness?.status !== 'failing',
+      detail: harness ? `${harness.name} / ${harness.environment}` : 'No harness selected.',
+    },
+    {
+      label: 'Smoke test passed',
+      ok: smokeReady,
+      detail: smokeReady ? smoke : 'Run or refresh the harness smoke test before relying on this gate.',
+    },
+    {
+      label: 'Scenario coverage',
+      ok: draft.runMode === 'sample' || eligibility.tone === 'passed',
+      detail: draft.runMode === 'sample' ? 'Sample mode is not release-gate eligible.' : eligibility.detail,
+    },
+    {
+      label: 'Gate profile resolved',
+      ok: gateResolved,
+      detail: benchmark?.gateProfileId ?? 'No gate profile selected.',
+    },
+    {
+      label: 'Agent version captured',
+      ok: Boolean(agentVersion) && agentVersion !== 'unknown',
+      detail: agentVersion || 'Add an agent version for comparison.',
+    },
+  ];
 }
 
 function renderSaasRunProgress(runId = 'run-healthguard-2419') {
@@ -914,15 +1136,23 @@ function renderSaasRunProgress(runId = 'run-healthguard-2419') {
 
 function renderSaasRunSummary(runId = 'run-healthguard-2419') {
   const run = runRecord(runId);
+  const benchmark = benchmarkForRun(run);
+  const report = listRealReports(runReportState).find((item) => item.runId === run.id);
+  const benchmarkScore = report?.benchmark?.score ?? run.score;
+  const gateResult = report?.benchmark?.gateResult ?? benchmarkGateForRun(run);
+  const runType = report?.benchmark?.benchmarkRunType ?? report?.benchmark?.runType ?? run.runMode ?? 'seeded sample';
+  const snapshot = report?.benchmark?.benchmarkSnapshot ?? report?.benchmark?.snapshot ?? null;
   const majorFailures = Number(run.critical) > 0 ? '7' : run.status === 'failed' ? '3' : '2';
   const passRate = run.score === '--' ? '--' : `${Math.max(0, Math.min(100, Number(run.score) + 6))}%`;
   const scoreTone = Number(run.critical) > 0 ? 'major' : 'passed';
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)} Summary</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(run.pack)} / ${escapeHtml(run.tierLabel)}</p></div><div class="ha-topbar__actions"><a class="ha-primary" href="/failures/fail-redflag-017">View Top Failure</a><a href="/reports">Open Report Center</a></div></div>
+      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)} Summary</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(benchmark ? `${benchmark.name} v${benchmark.version}` : run.pack)} / ${escapeHtml(run.tierLabel)}</p></div><div class="ha-topbar__actions"><a class="ha-primary" href="/failures/fail-redflag-017">View Top Failure</a><a href="/reports">Open Report Center</a></div></div>
       ${renderReleaseDecision(Number(run.critical) > 0 ? 'Block release' : 'Safe to release', Number(run.critical) > 0 ? `${run.critical} critical failure(s) must be triaged and pinned before release.` : 'No critical release blockers in this run.', Number(run.critical) > 0 ? 'critical' : 'passed')}
       <div class="ha-metrics">
-        ${renderSaasMetric('Robustness Score', run.score, 'baseline 86', scoreTone)}
+        ${renderSaasMetric('Benchmark Score', String(benchmarkScore), benchmark ? `${benchmark.slug} gate ${gateResult}` : 'mapped from run', scoreTone)}
+        ${renderSaasMetric('Gate Result', String(gateResult).toUpperCase(), benchmark ? `${benchmark.name} v${benchmark.version}` : 'not recorded', gateResult === 'block' ? 'critical' : gateResult === 'warn' ? 'major' : 'passed')}
+        ${renderSaasMetric('Run Type', runType, snapshot ? `snapshot ${snapshot.scenarioSetVersion}` : 'sample or seeded context', runType === 'official' ? 'passed' : 'major')}
         ${renderSaasMetric('Critical Failures', run.critical, 'review required when nonzero', Number(run.critical) > 0 ? 'critical' : 'passed')}
         ${renderSaasMetric('Major Failures', majorFailures, 'owners assigned', Number(majorFailures) > 3 ? 'major' : 'neutral')}
         ${renderSaasMetric('Pass Rate', passRate, 'versus previous baseline', scoreTone)}
@@ -1058,15 +1288,23 @@ function renderSaasFailureDetail(failureId = 'fail-redflag-017') {
 
 function renderSaasCompare() {
   const comparison = selectedRunComparison();
+  const benchmarkComparison = latestBenchmarkComparison();
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Compare Runs</h2><p>Compare two run results.</p></div>${renderDataSourceStrip('Generated sample', 'Comparison values come from seeded run history in local preview.')}</div>
+      <div class="ha-section-head"><div><h2>Compare Runs</h2><p>Compare benchmark results across agent versions when run metadata is available.</p></div>${renderDataSourceStrip('Mixed data', 'Real local benchmark results appear when completed runs exist; seeded rows stay labeled.')}</div>
       ${renderReleaseDecision(comparison.releaseDecision, comparison.releaseDetail, comparison.releaseTone)}
       <div class="ha-grid ha-grid--split">
         <article class="ha-panel ha-form">
           ${renderSelectFromObjects('Baseline run', runSelectOptions(), comparison.baseline.id, 'compare-baseline-run')}
           ${renderSelectFromObjects('Latest run', runSelectOptions(), comparison.latest.id, 'compare-latest-run')}
         </article>
+        <article class="ha-panel"><h3>Benchmark versions</h3>${renderGovernanceList([
+          ['Baseline benchmark', `${comparison.baselineBenchmark?.name ?? comparison.baseline.pack} ${comparison.baselineBenchmark?.version ? `v${comparison.baselineBenchmark.version}` : ''}`],
+          ['Baseline agent', agentVersionForRun(comparison.baseline)],
+          ['Latest benchmark', `${comparison.latestBenchmark?.name ?? comparison.latest.pack} ${comparison.latestBenchmark?.version ? `v${comparison.latestBenchmark.version}` : ''}`],
+          ['Latest agent', agentVersionForRun(comparison.latest)],
+        ])}</article>
+        <article class="ha-panel"><h3>Benchmark result baseline</h3>${renderBenchmarkComparisonPanel(benchmarkComparison)}</article>
         <article class="ha-panel"><h3>Score Changes</h3>${comparison.deltas.map(([label, before, after]) => `<div class="ha-delta"><strong>${escapeHtml(before)} -> ${escapeHtml(after)}</strong><span>${escapeHtml(label)}</span></div>`).join('')}</article>
         <article class="ha-panel"><h3>New failures</h3>${comparison.newFailures.length ? comparison.newFailures.map(renderFailureMini).join('') : renderEmptyState('No new failures.', 'This comparison did not introduce additional known failures.', '/reports', 'Open reports')}</article>
         <article class="ha-panel"><h3>Decision workflow</h3>${renderGovernanceList([['Primary action', 'Investigate regression'], ['Owner', 'Safety Review'], ['Gate', 'Block release until critical cases pass'], ['Next check', 'Rerun after remediation']])}<div class="ha-run-links"><a href="/failures">Open failed cases</a><a href="/runs/run-healthguard-2419/summary">Run summary</a></div></article>
@@ -1089,7 +1327,7 @@ function renderSaasReports() {
       ])}
       <article class="ha-panel ha-report-status" id="report-export-status" aria-live="polite">
         <strong>Exports ready</strong>
-        <span>Choose a format.</span>
+        <span>Choose a format. Seeded sample - not a real benchmark result rows stay labeled.</span>
       </article>
       <article class="ha-panel" id="reports-table">${renderReportsTable(reportRows)}</article>
     </section>
@@ -1097,7 +1335,7 @@ function renderSaasReports() {
 }
 
 function renderReportsTable(reportRows) {
-  const headers = ['Name', 'Project', 'Harness', 'Pack', 'Run date', 'Score', 'Critical', 'Evidence'];
+  const headers = ['Name', 'Project', 'Harness', 'Pack', 'Benchmark', 'Run type', 'Run date', 'Score', 'Critical', 'Evidence'];
   return `
     <table class="ha-table ha-report-table">
       <thead><tr>${headers.map((header) => `<th>${header}</th>`).join('')}<th>Decision</th><th>Export</th></tr></thead>
@@ -1208,20 +1446,29 @@ function projectForRun(run) {
   return match?.project ?? 'Local preview';
 }
 
+function agentVersionForRun(run) {
+  const report = listRealReports(runReportState).find((item) => item.runId === run.id);
+  if (report?.exportPayload?.benchmarkResult?.agentVersion) return report.exportPayload.benchmarkResult.agentVersion;
+  const match = getConsoleHarnesses().find((item) => item.id === run.harnessId)
+    ?? harnessFromLabel(run.harness);
+  return match?.agentVersion ?? 'seeded sample';
+}
+
 function harnessFromLabel(harness) {
   const name = String(harness ?? '').split(' - ')[0].trim();
   return getConsoleHarnesses().find((item) => item.name === name || item.id === name) ?? null;
 }
 
 function renderSaasCi() {
-  const cli = `harnessamp run \\\n  --pack HealthGuard \\\n  --harness healthcare-agent-staging \\\n  --baseline main \\\n  --fail-on critical`;
+  const benchmarkCli = `harnessamp run \\\n  --benchmark retrievalguard-smoke \\\n  --harness harness-1 \\\n  --baseline main \\\n  --fail-on critical`;
   const policy = consoleState.releasePolicy;
+  const ciPreview = benchmarkCiPreview();
   return `
     <section class="ha-page">
       <div class="ha-section-head"><div><h2>CI / Runners</h2><p>Connect release gates.</p></div></div>
       <div class="ha-grid ha-grid--split">
-        <article class="ha-panel"><h3>CLI</h3><pre class="ha-code">${escapeHtml(cli)}</pre></article>
-        <article class="ha-panel"><h3>GitHub Action</h3><pre class="ha-code">${escapeHtml('- name: Run HarnessAmp\n  run: harnessamp run --pack HealthGuard --fail-on critical')}</pre></article>
+        <article class="ha-panel"><h3>CLI</h3><pre class="ha-code">${escapeHtml(benchmarkCli)}</pre><p class="ha-section-note">Benchmark slugs are stable CI gate identifiers.</p></article>
+        <article class="ha-panel"><h3>GitHub Action</h3><pre class="ha-code">${escapeHtml('- name: Run HarnessAmp\n  run: harnessamp run --benchmark retrievalguard-smoke --fail-on critical')}</pre></article>
         <article class="ha-panel"><h3>Private runner</h3><p>Register a runner endpoint with bearer auth.</p>${renderGovernanceList([['Runner auth', 'Bearer token required'], ['Timeout policy', 'Fail closed on missing observations'], ['Retry policy', 'Bounded retries with audit log']])}</article>
         <article class="ha-panel"><h3>Harness-1 search adapter</h3><p>Wrap a local Harness-1 vLLM/evaluation deployment behind <code>POST /harnessamp</code>, then run RetrievalGuard.</p><div class="ha-run-links"><a href="/docs/adapters/harness-1">Read adapter guide</a><a href="/packs/retrievalguard">Open RetrievalGuard</a></div></article>
         <article class="ha-panel"><h3>CI gate status</h3><div class="ha-ci-card"><span class="ha-badge ha-badge--passed">Passing</span><p>Main is passing. Latest candidate is blocked.</p></div></article>
@@ -1239,9 +1486,48 @@ function renderSaasCi() {
           </form>
           ${renderGovernanceList([['Required artifacts', 'Markdown report, JSON report, failure corpus'], ['Status checks', 'Required before protected branch merge'], ['Risk model', 'Govern, map, measure, manage'], ['Current decision', releasePolicyDecisionLabel(policy)]])}
         </article>
+        <article class="ha-panel"><h3>Benchmark slugs</h3>${renderGovernanceList(listBenchmarks().map((benchmark) => [benchmark.slug, `${benchmark.name} v${benchmark.version}`]))}</article>
+        <article class="ha-panel ha-panel--wide"><div class="ha-panel__head"><h3>Deterministic CI output</h3><span>${escapeHtml(ciPreview.schemaVersion)}</span></div><pre class="ha-code">${escapeHtml(JSON.stringify(ciPreview, null, 2))}</pre></article>
+        <article class="ha-panel"><h3>CI exit codes</h3>${renderGovernanceList([
+          ['0', 'pass'],
+          ['1', 'warn when strict mode treats warnings as failure'],
+          ['2', 'block'],
+          ['3', 'infrastructure or runtime failure'],
+          ['4', 'invalid config or benchmark slug'],
+        ])}</article>
       </div>
     </section>
   `;
+}
+
+function benchmarkCiPreview() {
+  const latest = [...runReportState.benchmarkResults]
+    .sort((left, right) => String(right.createdAt ?? '').localeCompare(String(left.createdAt ?? '')))[0];
+  if (latest) {
+    const run = runReportState.runs.find((item) => item.id === latest.runId) ?? {};
+    return benchmarkCiOutput({
+      benchmarkResult: latest,
+      run,
+      baselineComparison: latestBenchmarkComparison(),
+      artifacts: {
+        reportUrl: `/reports#${latest.runId}`,
+        jsonExportAvailable: true,
+        markdownExportAvailable: true,
+        csvExportAvailable: true,
+        printHtmlExportAvailable: true,
+      },
+    });
+  }
+  return {
+    schemaVersion: 'harnessamp.ci.v0.1',
+    benchmark: { id: '', slug: 'retrievalguard-smoke', name: 'RetrievalGuard Smoke', version: '0.1', runType: 'official' },
+    run: { id: '', harnessId: 'harness-1', agentVersion: 'unknown', environment: 'local' },
+    result: { score: 0, gateResult: 'pending', releaseDecision: 'pending', criticalCount: 0, majorCount: 0, minorCount: 0, observationCount: 0 },
+    failures: { failedContracts: [], failedMutationFamilies: [], topFailures: [] },
+    baseline: null,
+    artifacts: { reportUrl: '', jsonExportAvailable: true, markdownExportAvailable: true, csvExportAvailable: true, printHtmlExportAvailable: true },
+    exitCodes: CI_EXIT_CODES,
+  };
 }
 
 function renderSaasUsage() {
@@ -1636,10 +1922,19 @@ function releaseDecisionForRun(run) {
   return 'Safe to release';
 }
 
+function benchmarkGateForRun(run) {
+  if (run.status === 'queued' || run.status === 'running') return 'pending';
+  if (Number(run.critical) > 0) return 'block';
+  const score = numericRunValue(run.score);
+  if (score && score < 75) return 'block';
+  if (score && score < 85) return 'warn';
+  return 'pass';
+}
+
 function runSelectOptions() {
   return allRunRecords().map((run) => ({
     value: run.id,
-    label: `${run.name} - ${run.score}`,
+    label: `${run.name} - ${benchmarkForRun(run)?.slug ?? run.pack} - ${run.score}`,
   }));
 }
 
@@ -1664,6 +1959,8 @@ function selectedRunComparison() {
   return {
     baseline,
     latest,
+    baselineBenchmark: benchmarkForRun(baseline),
+    latestBenchmark: benchmarkForRun(latest),
     releaseDecision,
     releaseTone,
     releaseDetail: `${latest.name} changed score by ${formatSigned(latestScore - baselineScore)} and critical failures by ${formatSigned(latestCritical - baselineCritical)} versus ${baseline.name}.`,
@@ -1675,7 +1972,8 @@ function selectedRunComparison() {
       ['Source preservation', '94%', latestCritical > 0 ? '91%' : '96%'],
     ],
     metricChanges: [
-      ['Pack', `${baseline.pack} -> ${latest.pack}`],
+      ['Benchmark', `${benchmarkForRun(baseline)?.slug ?? baseline.pack} -> ${benchmarkForRun(latest)?.slug ?? latest.pack}`],
+      ['Agent version', `${agentVersionForRun(baseline)} -> ${agentVersionForRun(latest)}`],
       ['Score delta', formatSigned(latestScore - baselineScore)],
       ['Critical delta', formatSigned(latestCritical - baselineCritical)],
       ['Decision', releaseDecision],
@@ -1683,6 +1981,35 @@ function selectedRunComparison() {
     newFailures,
     resolvedFailures,
   };
+}
+
+function latestBenchmarkComparison() {
+  const results = [...runReportState.benchmarkResults].sort((left, right) => String(right.createdAt ?? '').localeCompare(String(left.createdAt ?? '')));
+  const current = results[0];
+  const baseline = findBenchmarkBaseline(current, results.slice(1));
+  if (!current || !baseline) return null;
+  return compareBenchmarkResults(current, baseline, {
+    currentFailures: runReportState.failures.filter((failure) => failure.runId === current.runId),
+    baselineFailures: runReportState.failures.filter((failure) => failure.runId === baseline.runId),
+  });
+}
+
+function renderBenchmarkComparisonPanel(comparison) {
+  if (!comparison) {
+    return renderEmptyState('No matching benchmark baseline yet.', 'Complete the same benchmark twice with different agent versions to populate this comparison.', '/runs/new', 'Start run');
+  }
+  return renderGovernanceList([
+    ['Benchmark', `${comparison.benchmarkSlug} v${comparison.benchmarkVersion}`],
+    ['Agents', `${comparison.baselineAgentVersion} -> ${comparison.currentAgentVersion}`],
+    ['Score delta', formatSigned(comparison.scoreDelta)],
+    ['Gate changed', comparison.gateResultChanged ? 'yes' : 'no'],
+    ['Release changed', comparison.releaseDecisionChanged ? 'yes' : 'no'],
+    ['Critical delta', `+${comparison.newCriticalFailures} / -${comparison.resolvedCriticalFailures}`],
+    ['New contracts', comparison.newFailedContracts.join(', ') || 'none'],
+    ['Resolved contracts', comparison.resolvedFailedContracts.join(', ') || 'none'],
+    ['New families', comparison.newFailedMutationFamilies.join(', ') || 'none'],
+    ['Resolved families', comparison.resolvedFailedMutationFamilies.join(', ') || 'none'],
+  ]);
 }
 
 function updateCompareDraft(key, value) {
@@ -1825,6 +2152,24 @@ function runnablePackOptions() {
   ];
 }
 
+function benchmarkRunOptions() {
+  return [
+    { value: '', label: 'Map from pack + tier' },
+    ...listBenchmarks().map((benchmark) => ({
+      value: benchmark.id,
+      label: `${benchmark.name} v${benchmark.version} - ${benchmark.slug}`,
+    })),
+  ];
+}
+
+function selectedBenchmarkForDraft(draft) {
+  return getBenchmarkById(draft.benchmarkId) ?? benchmarkForRun(draft);
+}
+
+function tierForBenchmark(benchmark) {
+  return benchmark?.tier === 'standard' ? 'core' : benchmark?.tier ?? 'smoke';
+}
+
 function runTierOptions() {
   return [
     { id: 'smoke', label: 'Smoke' },
@@ -1883,6 +2228,40 @@ function updateRunDraft(key, value) {
   };
   persistConsoleState();
   if (['packId', 'tier', 'maxObservations'].includes(key)) render();
+}
+
+function updateRunMode(mode) {
+  const benchmark = selectedBenchmarkForDraft(consoleState.runDraft);
+  const scenarioCount = benchmark?.scenarioCount ?? 400;
+  const maxObservations = mode === 'sample'
+    ? Math.min(120, scenarioCount)
+    : scenarioCount;
+  consoleState.runDraft = {
+    ...consoleState.runDraft,
+    runMode: mode,
+    maxObservations,
+    failCondition: mode === 'sample' ? 'block on critical failures' : 'block on score below threshold',
+  };
+  persistConsoleState();
+  render();
+}
+
+function updateRunBenchmark(benchmarkId) {
+  const benchmark = getBenchmarkById(benchmarkId);
+  const mode = consoleState.runDraft.runMode ?? 'sample';
+  consoleState.runDraft = {
+    ...consoleState.runDraft,
+    benchmarkId: benchmark?.id ?? '',
+    ...(benchmark ? {
+      packId: benchmark.packId,
+      tier: tierForBenchmark(benchmark),
+      maxObservations: mode === 'sample'
+        ? Math.min(Number(consoleState.runDraft.maxObservations) || 120, benchmark.scenarioCount)
+        : benchmark.scenarioCount,
+    } : {}),
+  };
+  persistConsoleState();
+  render();
 }
 
 async function startConfiguredRun() {
@@ -1963,8 +2342,10 @@ function createLocalRunRecord() {
     name: `${pack.name} ${tier.label}`,
     harness: `${harness.name} - ${harness.environment}`,
     harnessId: harness.id,
+    agentVersion: draft.agentVersion || harness.agentVersion || 'unknown',
     pack: pack.name,
     packId: pack.id,
+    benchmarkId: selectedBenchmarkForDraft(draft)?.id ?? '',
     tier: tier.id,
     tierLabel: tier.label,
     status: 'queued',
@@ -3047,10 +3428,16 @@ function bindEvents() {
 
 function bindRunExecutionEvents() {
   bindIfPresent('#run-harness-select', 'change', (event) => updateRunDraft('harnessId', event.target.value));
+  bindIfPresent('#run-benchmark-select', 'change', (event) => updateRunBenchmark(event.target.value));
+  document.querySelectorAll('input[name="run-mode"]').forEach((input) => {
+    input.addEventListener('change', (event) => updateRunMode(event.target.value));
+  });
   bindIfPresent('#run-pack-select', 'change', (event) => updateRunDraft('packId', event.target.value));
   bindIfPresent('#run-tier-select', 'change', (event) => updateRunDraft('tier', event.target.value));
   bindIfPresent('#run-fail-condition', 'change', (event) => updateRunDraft('failCondition', event.target.value));
   bindIfPresent('#run-max-observations', 'input', (event) => updateRunDraft('maxObservations', event.target.value));
+  bindIfPresent('#run-agent-version', 'input', (event) => updateRunDraft('agentVersion', event.target.value));
+  bindIfPresent('#copy-benchmark-slug', 'click', (event) => copyText(event.currentTarget.dataset.benchmarkSlug ?? '', 'Copied benchmark slug'));
   bindIfPresent('#start-configured-run', 'click', startConfiguredRun);
   scheduleActiveRunProgression();
 }
@@ -6036,10 +6423,13 @@ function syncRunReportStateFromConsole({ persist = false } = {}) {
 function defaultRunDraft(harnesses = defaultConsoleHarnesses()) {
   return {
     harnessId: harnesses[0]?.id ?? '',
+    benchmarkId: '',
+    runMode: 'sample',
     packId: 'healthguard-core',
     tier: 'smoke',
     failCondition: 'block on critical failures',
-    maxObservations: 2000,
+    maxObservations: 120,
+    agentVersion: harnesses[0]?.agentVersion ?? 'unknown',
   };
 }
 
@@ -6052,8 +6442,10 @@ function normalizeConsoleRun(value) {
     name: String(value.name ?? 'HarnessAmp Run'),
     harness: String(value.harness ?? 'Unknown harness'),
     harnessId: String(value.harnessId ?? ''),
+    agentVersion: String(value.agentVersion ?? 'unknown'),
     pack: String(value.pack ?? 'Custom Pack'),
     packId: String(value.packId ?? ''),
+    benchmarkId: String(value.benchmarkId ?? ''),
     tier: String(value.tier ?? 'smoke'),
     tierLabel: String(value.tierLabel ?? 'Smoke'),
     status: String(value.status ?? 'queued'),

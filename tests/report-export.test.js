@@ -61,6 +61,13 @@ describe('report export payloads', () => {
     });
 
     assert.equal(report.releaseDecision, 'Block release');
+    assert.equal(report.benchmark.name, 'RetrievalGuard Smoke');
+    assert.equal(report.benchmark.version, '0.1');
+    assert.equal(report.benchmark.slug, 'retrievalguard-smoke');
+    assert.equal(report.benchmark.benchmarkRunType, 'customized');
+    assert.equal(report.benchmark.benchmarkSnapshot.slug, 'retrievalguard-smoke');
+    assert.equal(report.benchmark.tier, 'smoke');
+    assert.equal(report.benchmark.gateResult, 'block');
     assert.equal(report.project, 'New Demo_UCLA');
     assert.equal(report.evidenceMode, 'runner-observation');
     assert.equal(report.adapterMode, 'contract-smoke');
@@ -86,6 +93,16 @@ describe('report export payloads', () => {
     assert.match(html, /Regression Plan/);
     assert.match(html, /Audit Trail/);
     assert.match(html, /Evidence mode/);
+    assert.match(html, /RetrievalGuard Smoke v0\.1/);
+    assert.match(html, /Benchmark run type/);
+    assert.match(markdown, /Benchmark: RetrievalGuard Smoke v0\.1/);
+    assert.match(markdown, /Benchmark slug: retrievalguard-smoke/);
+    assert.match(markdown, /Benchmark run type: customized/);
+    assert.match(markdown, /Failed mutation families/);
+    assert.match(csv, /benchmark_name/);
+    assert.match(csv, /benchmark_slug/);
+    assert.match(csv, /benchmark_run_type/);
+    assert.match(csv, /RetrievalGuard Smoke/);
     assert.match(markdown, /Release gate/);
     assert.match(markdown, /runner-observation/);
     assert.match(csv, /recommended_control/);
@@ -109,5 +126,17 @@ describe('report export payloads', () => {
     assert.equal(report.releaseDecision, 'Safe to release');
     assert.equal(report.failureEvidence.length, 0);
     assert.equal(report.regressionPlan.cases.length, 0);
+  });
+
+  test('seeded sample exports stay labeled as sample data', () => {
+    const report = buildReportPayload('healthguard-regression-report-1', {
+      seedReports: [['HealthGuard regression report', 'Patient Intake', 'Healthcare Intake', 'HealthGuard', '2026-06-05', '78', '4']],
+    });
+
+    assert.equal(report.benchmark.seeded, true);
+    assert.equal(report.benchmark.benchmarkRunType, 'sample');
+    assert.equal(report.benchmark.benchmarkSnapshot.description, 'Seeded sample report. Not real benchmark evidence.');
+    assert.equal(report.benchmark.name, 'Seeded sample');
+    assert.match(reportMarkdown(report), /Benchmark: Seeded sample - not a real benchmark result/);
   });
 });
