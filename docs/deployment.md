@@ -112,6 +112,9 @@ SESSION_SECRET=<long random string>
 DATABASE_URL=<optional Postgres URL>
 POSTGRES_URL=<optional Postgres URL alternative>
 WORKER_SERVICE_TOKEN=<optional shared worker token for API polling>
+HARNESSAMP_ENABLE_HOSTED_BYOK=0
+HARNESSAMP_SECRET_ENCRYPTION_KEY=<required only when hosted BYOK is enabled>
+HARNESSAMP_SECRET_ENCRYPTION_KEY_VERSION=<optional key version label>
 ```
 
 Notes:
@@ -183,6 +186,19 @@ Separate worker service
 
 The separate worker can be deployed on any platform that supports a long-running Node process, for example Render, Fly.io, Railway, a container service, or a VM.
 
+## Bring Your Own Model In Production
+
+HarnessAmp should usually receive an execution target, not a provider API key.
+
+Recommended target options:
+
+- `registered_runner`: deploy your own runner endpoint near the agent or model. The runner calls OpenAI, Anthropic, Gemini, Mistral, Groq, Together, a self-hosted model, or an internal agent service with credentials stored in your infrastructure.
+- `vercel_ai_sdk`: point HarnessAmp at a Next.js/Vercel route that calls your agent. Provider keys stay in the app or worker environment.
+- `hosted_provider`: disabled scaffold only. Do not use until encrypted project secret storage is available.
+- `hosted_provider`: convenience BYOK mode. Enable only with encrypted project secret storage and explicit team acceptance of that security model.
+
+HarnessAmp stores only safe execution-target metadata such as target type, runner id, route URL/path, provider, model label, masked secret preview, and timing/error diagnostics. Hosted BYOK stores encrypted provider keys in `project_secrets`; job records reference `secretRef` only. Raw provider keys must not appear in job records, dashboard views, worker logs, API responses, CLI output, or reports.
+
 Worker service command:
 
 ```bash
@@ -201,11 +217,23 @@ HARNESSAMP_WORKER_STALE_AFTER_MS=120000
 HARNESSAMP_VERCEL_AI_SDK_TARGET=<optional default route module path>
 HARNESSAMP_VERCEL_AI_SDK_MODEL=<optional report label>
 HARNESSAMP_VERCEL_AI_SDK_TIMEOUT_MS=<optional adapter timeout>
+HARNESSAMP_ADAPTER_TIMEOUT_MS=<optional generic adapter timeout>
+HARNESSAMP_ENABLE_HOSTED_BYOK=1
+HARNESSAMP_SECRET_ENCRYPTION_KEY=<32-byte secret or passphrase>
+HARNESSAMP_SECRET_ENCRYPTION_KEY_VERSION=<rotation label>
 ```
 
 Prefer the environment variable over passing the token on the command line. The CLI also accepts `--worker-token <token>` for controlled local debugging.
 
 Adapter-backed jobs, such as the Vercel AI SDK adapter, run inside the worker process. The worker must be able to import the target route module path. If the production route is TypeScript-only, point the adapter at a compiled JavaScript module or a small JavaScript wrapper that exports the same `Request -> Response` handler.
+
+For production Vercel AI SDK routes, prefer one of these patterns:
+
+- deploy the worker with the same compiled route module available on disk and point `HARNESSAMP_VERCEL_AI_SDK_TARGET` at that module
+- create a small internal JavaScript wrapper that imports the app route and exports `POST`
+- keep provider API keys in the app/worker runtime environment, not in HarnessAmp job payloads
+
+Do not put authorization headers, cookies, provider keys, or tokens in adapter config intended for dashboard display. HarnessAmp strips secret-like header/env keys and redacts secret-looking values in diagnostics, reports, and worker logs.
 
 ## Job Lifecycle
 
@@ -218,6 +246,8 @@ Runner jobs move through these durable states:
 - `completed`: a report was generated and linked through `reportId`.
 - `failed`: attempts were exhausted or stale recovery could not retry safely.
 - `canceled`: a user/admin canceled the job before completion.
+
+Adapter-backed failures also record a deterministic failure class in `result.diagnostics.failureClass`. `adapter_target_missing`, `adapter_invalid_response`, `adapter_schema_mismatch`, and `adapter_worker_canceled` do not retry automatically. Timeout, HTTP, rate-limit, auth, execution, and unknown adapter failures retry while attempts remain.
 
 Workers check cancellation before external dispatch, before report creation, and before final completion. A canceled job does not create a report. Worker polling also recovers stale `claimed` or `running` jobs whose `claimedAt`/`lockedAt` lease exceeds `HARNESSAMP_WORKER_STALE_AFTER_MS` or `--stale-after-ms`.
 

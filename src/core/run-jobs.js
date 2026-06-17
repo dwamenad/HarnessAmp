@@ -1,3 +1,9 @@
+import {
+  adapterFailureRetryable,
+  classifyAdapterError,
+  normalizeAdapterDiagnostics,
+} from '../adapters/contract.js';
+
 const TERMINAL_STATES = new Set(['completed', 'failed', 'canceled']);
 
 export function createRunJobQueue(items, options = {}) {
@@ -111,10 +117,20 @@ async function runJob(job, options) {
       return job;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const shouldRetry = job.attempts < job.maxAttempts;
+      const diagnostics = normalizeAdapterDiagnostics(error?.diagnostics, {
+        jobId: job.id,
+        retryAttempt: job.attempts,
+        scenarioId: job.taskId ?? job.payload?.task?.id ?? '',
+        mutationId: job.mutationId ?? '',
+        failureClass: error?.failureClass ?? classifyAdapterError(error),
+        rawErrorMessage: message,
+        phase: error?.diagnostics?.phase ?? 'adapter_call',
+      });
+      const shouldRetry = job.attempts < job.maxAttempts && adapterFailureRetryable(diagnostics.failureClass);
       updateJob(job, {
         status: shouldRetry ? 'queued' : 'failed',
         error: message,
+        diagnostics,
         finishedAt: shouldRetry ? null : new Date().toISOString(),
       }, onJobUpdate);
       if (shouldRetry) {

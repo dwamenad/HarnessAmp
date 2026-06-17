@@ -1,6 +1,7 @@
 import { badRequest, methodNotAllowed, readJsonBody, serverError, unauthorized } from './_http.js';
 import { readSessionContext } from './_session.js';
 import { createRunnerJob, createRunnerRegistration, listProjectReports, listRunners } from './_store.js';
+import { normalizeExecutionTarget } from '../src/adapters/execution-targets.js';
 
 export default async function handler(request, response) {
   try {
@@ -71,8 +72,19 @@ export default async function handler(request, response) {
       }
 
       const body = await readJsonBody(request);
-      if ((!body.runnerId && !body.adapter?.type) || !body.pack) {
-        badRequest(response, 'runnerId or adapter, and pack are required');
+      const requestedExecutionTarget = body.executionTarget ?? body.execution_target ?? null;
+      if ((!requestedExecutionTarget && !body.runnerId && !body.adapter?.type) || !body.pack) {
+        badRequest(response, 'executionTarget, runnerId, or adapter, and pack are required');
+        return;
+      }
+      let executionTarget = null;
+      try {
+        executionTarget = normalizeExecutionTarget(requestedExecutionTarget, {
+          runnerId: body.runnerId ?? null,
+          adapter: body.adapter ?? null,
+        });
+      } catch (error) {
+        badRequest(response, error instanceof Error ? error.message : String(error));
         return;
       }
 
@@ -85,6 +97,7 @@ export default async function handler(request, response) {
         profileId: body.profileId ?? null,
         presetId: body.presetId ?? null,
         adapter: body.adapter ?? null,
+        executionTarget,
         idempotencyKey: body.idempotencyKey ?? request.headers?.['idempotency-key'] ?? null,
         maxAttempts: body.maxAttempts ?? 1,
         timeoutMs: body.timeoutMs ?? 0,
@@ -94,7 +107,16 @@ export default async function handler(request, response) {
         jobId: job.id,
         status: job.status,
         idempotencyKey: job.idempotencyKey,
+        executionTarget: job.payload?.executionTarget?.safeMetadata ?? null,
         adapter: job.payload?.adapter ?? null,
+        execution: job.result?.execution ?? {
+          kind: job.payload?.executionTarget?.type === 'registered_runner' ? 'registered-runner' : 'adapter',
+          type: job.payload?.executionTarget?.type ?? null,
+          adapterType: job.payload?.adapter?.type ?? null,
+          target: job.payload?.executionTarget?.routeUrl ?? job.payload?.adapter?.target ?? null,
+          runnerId: job.runnerId ?? null,
+        },
+        diagnostics: job.result?.diagnostics ?? null,
         attempts: job.attempts,
         maxAttempts: job.maxAttempts,
         workerId: job.workerId,

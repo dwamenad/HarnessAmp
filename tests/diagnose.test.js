@@ -6,6 +6,7 @@ import { getFailureType } from '../src/core/failure-taxonomy.js';
 import { normalizeRunArtifacts } from '../src/core/run-artifacts.js';
 import { createRunJobQueue, executeRunJobQueue } from '../src/core/run-jobs.js';
 import { createRunner, MockRunner, ModelSDKRunner } from '../src/adapters/runners.js';
+import { AdapterExecutionError } from '../src/adapters/contract.js';
 
 test('diagnose command path produces deltas, findings, and diagnostic report text', async () => {
   const diagnosis = await diagnoseHarness(createDemoBundle(), { maxMutations: 20 });
@@ -157,6 +158,31 @@ test('run job queue applies retry backoff before the next attempt', async () => 
 
   assert.equal(result.jobs[0].status, 'completed');
   assert.ok(Date.now() - startedAt >= 20);
+});
+
+test('run job queue does not retry non-retryable adapter failures', async () => {
+  let attempts = 0;
+  const runner = {
+    async run() {
+      attempts += 1;
+      throw new AdapterExecutionError('missing adapter target', {
+        failureClass: 'adapter_target_missing',
+        phase: 'before_dispatch',
+      });
+    },
+  };
+  const jobs = createRunJobQueue([{
+    id: 'non-retryable-adapter-job',
+    kind: 'baseline',
+    bundle: {},
+    task: { id: 'case-non-retryable' },
+  }], { maxAttempts: 3 });
+
+  const result = await executeRunJobQueue(jobs, { runner, maxAttempts: 3 });
+
+  assert.equal(attempts, 1);
+  assert.equal(result.jobs[0].status, 'failed');
+  assert.equal(result.jobs[0].diagnostics.failureClass, 'adapter_target_missing');
 });
 
 test('run artifact normalization captures coding-agent traces', () => {

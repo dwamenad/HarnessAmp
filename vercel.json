@@ -39,6 +39,14 @@
       "destination": "/api/projects?resource=jobs"
     },
     {
+      "source": "/api/projects/:projectId/secrets",
+      "destination": "/api/secrets"
+    },
+    {
+      "source": "/api/projects/:projectId/secrets/:id",
+      "destination": "/api/secrets"
+    },
+    {
       "source": "/api/jobs/:id/cancel",
       "destination": "/api/jobs?action=cancel"
     },

@@ -1041,6 +1041,8 @@ section[id] {
 .workspace-panel > .runner-state,
 .workspace-panel > .job-observability,
 .workspace-panel > .project-report-list,
+.workspace-panel > .execution-targets,
+.workspace-panel > .project-secrets,
 .workspace-panel > .inline-actions {
   grid-column: 1 / -1;
 }
@@ -1069,6 +1071,87 @@ section[id] {
   color: var(--text);
   padding: 0 12px;
   font-family: "IBM Plex Mono", monospace;
+}
+
+.execution-targets {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  background: rgba(17, 18, 17, 0.94);
+}
+
+.execution-targets h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.workspace-panel .execution-target-option {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: #0c0d0c;
+}
+
+.execution-target-option input {
+  min-height: 18px;
+  margin-top: 2px;
+}
+
+.execution-target-option span {
+  display: grid;
+  gap: 6px;
+}
+
+.execution-target-option strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.execution-target-option small {
+  color: var(--dim);
+  line-height: 1.45;
+}
+
+.execution-target-option--disabled {
+  opacity: 0.62;
+}
+
+.hosted-provider-controls,
+.project-secrets {
+  display: grid;
+  gap: 12px;
+}
+
+.project-secrets {
+  padding: 20px;
+  background: rgba(17, 18, 17, 0.94);
+}
+
+.project-secrets h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.project-secret-list {
+  display: grid;
+  gap: 10px;
+}
+
+.project-secret-item {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: #0c0d0c;
+}
+
+.project-secret-item span,
+.project-secret-item small {
+  color: var(--dim);
 }
 
 .session-card,

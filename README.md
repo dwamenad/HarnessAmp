@@ -138,6 +138,19 @@ node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated core 
 
 HarnessAmp keeps customer workloads outside the product. It sends baseline and mutated payloads to a runner and expects a normalized `AgentRunResult` back.
 
+## Bring Your Own Model
+
+Users can bring their own model or agent to HarnessAmp by exposing an execution target. HarnessAmp sends mutation-pack scenarios to that target, the target calls the user's model using the user's own provider credentials, and HarnessAmp scores the returned behavior. HarnessAmp does not need direct access to provider API keys when using registered runners or Vercel AI SDK routes.
+
+Recommended production path:
+
+- use a registered runner for deployed agents, RAG systems, enterprise copilots, and production apps
+- use a Vercel AI SDK route when a Next.js/Vercel app already owns the provider credentials
+- keep OpenAI, Anthropic, Gemini, Mistral, Groq, Together, or other provider keys inside your infrastructure
+- do not send raw provider API keys to HarnessAmp job creation endpoints
+
+Hosted provider BYOK is available as a convenience execution target when `HARNESSAMP_ENABLE_HOSTED_BYOK=1` and encrypted project secrets are configured. It stores provider keys encrypted at rest, references them by `secretRef` in jobs, and decrypts only inside worker/provider execution. Registered runners and Vercel AI SDK routes remain the recommended production paths.
+
 Supported paths:
 
 | Runner | Use |
@@ -145,8 +158,11 @@ Supported paths:
 | `mock` | Local end-to-end testing |
 | `custom_http` | Production agent endpoints |
 | `vercel-ai-sdk` | Next.js/Vercel AI SDK routes and handlers |
+| `hosted_provider` | Convenience BYOK execution through encrypted project secrets |
 | Replit demo runner | Public demo deployments |
 | Worker service | Durable queued project jobs |
+
+Vercel AI SDK adapter jobs run through the worker lifecycle, not the browser. Job status, API responses, CLI worker logs, dashboard job details, and report metadata expose a normalized diagnostics envelope with adapter type, target route, latency, HTTP status, worker/job ids, retry attempt, phase, safely truncated error text, and deterministic failure classes such as `adapter_timeout`, `adapter_http_error`, `adapter_invalid_response`, and `adapter_target_missing`.
 
 Custom HTTP example:
 

@@ -62,6 +62,23 @@ export async function ensureSchema() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists project_secrets (
+      id text primary key,
+      project_id text not null references projects(id) on delete cascade,
+      workspace_id text not null references workspaces(id) on delete cascade,
+      provider text not null,
+      display_name text not null,
+      masked_preview text not null,
+      status text not null,
+      validation_status text,
+      last_validation_error_class text,
+      encrypted_secret jsonb not null,
+      created_by text not null references users(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      last_used_at timestamptz
+    );
+
     create table if not exists reports (
       id text primary key,
       project_id text not null references projects(id) on delete cascade,

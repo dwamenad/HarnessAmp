@@ -107,10 +107,12 @@ if (command === 'validate') {
       timeoutMs: options.timeoutMs,
       retryBackoffMs: options.retryBackoffMs,
     });
+    printAdapterRunSummary(diagnosis, options);
     console.log(JSON.stringify({
       baselineRuns: diagnosis.baselineRuns,
       mutationRuns: diagnosis.mutationRuns,
     }, null, 2));
+    if (hasAdapterFailures(diagnosis)) process.exitCode = 2;
   }
 } else if (command === 'report') {
   const bundle = loadBundle(options.positional[0]);
@@ -137,6 +139,8 @@ if (command === 'validate') {
   console.log(JSON.stringify(getMutationRegistry(), null, 2));
 } else if (command === 'worker') {
   await runWorkerCommand(options);
+} else if (command === 'secrets') {
+  await runSecretsCommand(options);
 } else if (command === 'benchmark') {
   await runBenchmarkCommand(options);
 } else if (command === 'diagnose') {
@@ -160,11 +164,15 @@ if (command === 'validate') {
     retryBackoffMs: options.retryBackoffMs,
   });
   if (options.json) {
+    printAdapterRunSummary(diagnosis, options);
     console.log(JSON.stringify(diagnosis, null, 2));
   } else {
     console.log(diagnosis.reportText);
+    printAdapterRunSummary(diagnosis, options);
   }
-  if (diagnosis.summary.verdict === 'block') {
+  if (hasAdapterFailures(diagnosis)) {
+    process.exitCode = 2;
+  } else if (diagnosis.summary.verdict === 'block') {
     process.exitCode = 2;
   } else if (diagnosis.summary.verdict === 'warn') {
     process.exitCode = 1;
@@ -284,6 +292,9 @@ function parseArgs(args) {
     runnerKind: 'mock',
     runnerOptions: {},
     adapter: null,
+    targetType: null,
+    targetUrl: null,
+    runnerId: null,
     concurrency: 4,
     maxAttemptsPerRun: 1,
     timeoutMs: 0,
@@ -317,6 +328,10 @@ function parseArgs(args) {
     intervalMs: 2000,
     maxJobs: Infinity,
     staleAfterMs: Number(process.env.HARNESSAMP_WORKER_STALE_AFTER_MS ?? 120000),
+    provider: null,
+    secretName: null,
+    secretRef: null,
+    model: null,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -333,6 +348,55 @@ function parseArgs(args) {
     }
     if (arg === '--runner-kind') {
       parsed.runnerKind = args[index + 1] ?? parsed.runnerKind;
+      index += 1;
+      continue;
+    }
+    if (arg === '--target-type') {
+      parsed.targetType = args[index + 1] ?? null;
+      if (['vercel-ai-sdk', 'vercel_ai_sdk'].includes(parsed.targetType)) {
+        parsed.adapter = 'vercel-ai-sdk';
+        parsed.runnerKind = 'vercel-ai-sdk';
+        parsed.runnerOptions.type = 'vercel-ai-sdk';
+      } else if (['hosted-provider', 'hosted_provider'].includes(parsed.targetType)) {
+        parsed.runnerKind = 'hosted-provider';
+      } else if (['registered-runner', 'registered_runner'].includes(parsed.targetType)) {
+        parsed.runnerKind = parsed.runnerOptions.endpoint ? 'custom_http' : parsed.runnerKind;
+      }
+      index += 1;
+      continue;
+    }
+    if (arg === '--target-url') {
+      parsed.targetUrl = args[index + 1] ?? '';
+      parsed.runnerOptions.target = parsed.targetUrl;
+      index += 1;
+      continue;
+    }
+    if (arg === '--runner-id') {
+      parsed.runnerId = args[index + 1] ?? null;
+      parsed.runnerOptions.runnerId = parsed.runnerId;
+      index += 1;
+      continue;
+    }
+    if (arg === '--provider') {
+      parsed.provider = args[index + 1] ?? null;
+      parsed.runnerOptions.provider = parsed.provider;
+      index += 1;
+      continue;
+    }
+    if (arg === '--model') {
+      parsed.model = args[index + 1] ?? null;
+      parsed.runnerOptions.model = parsed.model;
+      index += 1;
+      continue;
+    }
+    if (arg === '--secret-ref') {
+      parsed.secretRef = args[index + 1] ?? null;
+      parsed.runnerOptions.secretRef = parsed.secretRef;
+      index += 1;
+      continue;
+    }
+    if (arg === '--name') {
+      parsed.secretName = args[index + 1] ?? null;
       index += 1;
       continue;
     }
@@ -375,6 +439,9 @@ function parseArgs(args) {
     }
     if (arg === '--runner-endpoint') {
       parsed.runnerOptions.endpoint = args[index + 1] ?? '';
+      if (parsed.targetType === 'registered-runner' || parsed.targetType === 'registered_runner') {
+        parsed.runnerKind = 'custom_http';
+      }
       index += 1;
       continue;
     }
@@ -558,6 +625,96 @@ function parseArgs(args) {
   }
 
   return parsed;
+}
+
+async function runSecretsCommand(parsedOptions) {
+  const [subcommand = 'list'] = parsedOptions.positional;
+  if (!parsedOptions.projectId) throw new Error('harnessamp secrets requires --project-id.');
+  const base = normalizeApiUrl(parsedOptions.apiUrl);
+  if (subcommand === 'create') {
+    const key = process.env.HARNESSAMP_PROVIDER_API_KEY;
+    if (!key) throw new Error('Set HARNESSAMP_PROVIDER_API_KEY to create a project secret.');
+    const response = await fetch(new URL(`/api/projects/${encodeURIComponent(parsedOptions.projectId)}/secrets`, base), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: parsedOptions.provider,
+        name: parsedOptions.secretName,
+        secretValue: key,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error ?? `Secret create failed with HTTP ${response.status}`);
+    console.log(JSON.stringify(payload.secret, null, 2));
+    return;
+  }
+  if (subcommand === 'list') {
+    const response = await fetch(new URL(`/api/projects/${encodeURIComponent(parsedOptions.projectId)}/secrets`, base));
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error ?? `Secret list failed with HTTP ${response.status}`);
+    console.log(JSON.stringify(payload.secrets, null, 2));
+    return;
+  }
+  if (subcommand === 'disable') {
+    if (!parsedOptions.secretRef) throw new Error('harnessamp secrets disable requires --secret-ref.');
+    const response = await fetch(new URL(`/api/projects/${encodeURIComponent(parsedOptions.projectId)}/secrets/${encodeURIComponent(parsedOptions.secretRef)}`, base), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'disable' }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error ?? `Secret disable failed with HTTP ${response.status}`);
+    console.log(JSON.stringify(payload.secret, null, 2));
+    return;
+  }
+  if (subcommand === 'delete') {
+    if (!parsedOptions.secretRef) throw new Error('harnessamp secrets delete requires --secret-ref.');
+    const response = await fetch(new URL(`/api/projects/${encodeURIComponent(parsedOptions.projectId)}/secrets/${encodeURIComponent(parsedOptions.secretRef)}`, base), {
+      method: 'DELETE',
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error ?? `Secret delete failed with HTTP ${response.status}`);
+    console.log(JSON.stringify(payload.secret, null, 2));
+    return;
+  }
+  throw new Error(`Unknown secrets command: ${subcommand}`);
+}
+
+function printAdapterRunSummary(diagnosis, options) {
+  const targetType = normalizeCliTargetType(options.targetType ?? options.adapter ?? options.runnerKind);
+  if (targetType !== 'vercel_ai_sdk' && targetType !== 'registered_runner') return;
+  const runs = [...(diagnosis.baselineRuns ?? []), ...(diagnosis.mutationRuns ?? [])];
+  const failures = runs.filter((run) => run.metadata?.failureClass || run.errors?.length);
+  const target = options.runnerOptions.target
+    ?? options.runnerOptions.endpoint
+    ?? options.runnerId
+    ?? process.env.HARNESSAMP_VERCEL_AI_SDK_TARGET
+    ?? 'not configured';
+  const pack = options.packName ?? options.positional?.[0] ?? 'default';
+  const benchmark = options.benchmark ?? 'default';
+  console.error(`pack=${pack} benchmark=${benchmark} execution_target=${targetType} target=${target} runs=${runs.length} failures=${failures.length}`);
+  for (const run of failures.slice(0, 5)) {
+    const failureClass = run.metadata?.failureClass ?? run.metadata?.diagnostics?.failureClass ?? 'adapter_unknown_error';
+    console.error(`execution failure ${run.taskId ?? run.runId}: ${failureClass} ${run.errors?.[0] ?? ''}`.trim());
+  }
+}
+
+function hasAdapterFailures(diagnosis) {
+  return [...(diagnosis.baselineRuns ?? []), ...(diagnosis.mutationRuns ?? [])]
+    .some((run) => run.metadata?.failureClass || (Array.isArray(run.errors) && run.errors.length));
+}
+
+function normalizeCliTargetType(value) {
+  const text = String(value ?? '').replaceAll('-', '_');
+  if (text === 'vercel_ai_sdk') return 'vercel_ai_sdk';
+  if (text === 'hosted_provider') return 'hosted_provider';
+  if (text === 'registered_runner' || text === 'custom_http') return 'registered_runner';
+  return text;
+}
+
+function normalizeApiUrl(value) {
+  const text = String(value || 'http://127.0.0.1:3000').trim();
+  return text.endsWith('/') ? text : `${text}/`;
 }
 
 function isScenarioPath(path) {

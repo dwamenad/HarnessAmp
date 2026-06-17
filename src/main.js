@@ -414,6 +414,12 @@ const defaultState = {
   selectedRunnerId: '',
   executionTarget: 'runner',
   vercelAiSdkTarget: './examples/vercel-ai-sdk/app/api/chat/route.mjs',
+  hostedProvider: 'openai',
+  hostedProviderModel: 'gpt-4.1-mini',
+  selectedSecretRef: '',
+  secretDraftName: 'OpenAI dev key',
+  secretDraftProvider: 'openai',
+  secretDraftValue: '',
   workspaceDraftName: 'Workspace',
   projectDraftName: 'Active Project',
   runnerRegistrationName: 'Primary runner',
@@ -422,6 +428,7 @@ const defaultState = {
   workspaceProjects: [],
   projectReports: [],
   projectRunners: [],
+  projectSecrets: [],
   projectJobs: [],
   projectBenchmarks: [],
   benchmarkDetail: null,
@@ -2294,7 +2301,7 @@ async function startConfiguredRun() {
   consoleState.runFeedback = `Queued ${run.name}`;
   persistConsoleState();
 
-  if (state.sessionStatus === 'authenticated' && state.selectedProjectId && (state.selectedRunnerId || state.executionTarget === 'vercel-ai-sdk')) {
+  if (state.sessionStatus === 'authenticated' && state.selectedProjectId && canDispatchExecutionTarget()) {
     try {
       const executionPayload = projectJobExecutionPayload();
       const payload = await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs`, {
@@ -2333,6 +2340,14 @@ async function startConfiguredRun() {
         attempts: payload.attempts,
         maxAttempts: payload.maxAttempts,
         idempotencyKey: payload.idempotencyKey,
+        result: {
+          execution: payload.execution,
+          diagnostics: payload.diagnostics,
+        },
+        payload: {
+          adapter: payload.adapter,
+          executionTarget: payload.executionTarget,
+        },
         history: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -3106,12 +3121,39 @@ function renderWorkspaceSection(isAuthed) {
               <button class="button button--secondary" id="register-runner" type="button">Register runner</button>
               <button class="button button--secondary" id="dispatch-job" type="button">Start run</button>
             </div>
-            <label><span>Execution target</span><select id="execution-target-select">
-              <option value="runner" ${state.executionTarget !== 'vercel-ai-sdk' ? 'selected' : ''}>Registered HTTP runner</option>
-              <option value="vercel-ai-sdk" ${state.executionTarget === 'vercel-ai-sdk' ? 'selected' : ''}>Vercel AI SDK adapter</option>
-            </select></label>
-            <label><span>Active runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>
-            <label><span>AI SDK route target</span><input id="vercel-ai-sdk-target" type="text" value="${escapeHtml(state.vercelAiSdkTarget)}" placeholder="./app/api/chat/route.mjs" /></label>
+            <div class="execution-targets">
+              <h4>Choose execution target</h4>
+              <label class="execution-target-option">
+                <input type="radio" name="execution-target" value="runner" ${state.executionTarget !== 'vercel-ai-sdk' ? 'checked' : ''} />
+                <span><strong>Use a registered runner</strong><small>Recommended for deployed agents, RAG systems, enterprise copilots, and production apps. Your provider API keys stay in your own infrastructure.</small></span>
+              </label>
+              <label><span>Runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>
+              <label class="execution-target-option">
+                <input type="radio" name="execution-target" value="vercel-ai-sdk" ${state.executionTarget === 'vercel-ai-sdk' ? 'checked' : ''} />
+                <span><strong>Use a Vercel AI SDK route</strong><small>Point HarnessAmp to a Next.js/Vercel route that calls your agent. Your OpenAI, Anthropic, Gemini, or other provider keys remain in your app environment.</small></span>
+              </label>
+              <label><span>Route URL or path</span><input id="vercel-ai-sdk-target" type="text" value="${escapeHtml(state.vercelAiSdkTarget)}" placeholder="./app/api/chat/route.mjs or http://localhost:3000/api/harnessamp/agent" /></label>
+              <label class="execution-target-option">
+                <input type="radio" name="execution-target" value="hosted-provider" ${state.executionTarget === 'hosted-provider' ? 'checked' : ''} />
+                <span><strong>Use your own provider API key</strong><small>Convenience path for quick tests. HarnessAmp stores the key encrypted and never shows it again after saving.</small></span>
+              </label>
+              <div class="hosted-provider-controls">
+                <label><span>Provider</span><select id="hosted-provider-select">${renderProviderOptions(state.hostedProvider)}</select></label>
+                <label><span>Model</span><input id="hosted-provider-model" type="text" value="${escapeHtml(state.hostedProviderModel)}" placeholder="gpt-4.1-mini" /></label>
+                <label><span>Saved key</span><select id="secret-select">${renderSecretOptions()}</select></label>
+              </div>
+            </div>
+            <div class="project-secrets">
+              <h4>Project secrets</h4>
+              <p class="session-muted">Registered runners and Vercel AI SDK routes keep keys in your infrastructure. Hosted BYOK stores an encrypted provider key in HarnessAmp and is best for quick tests, not regulated production.</p>
+              <div class="hosted-provider-controls">
+                <label><span>Name</span><input id="secret-draft-name" type="text" value="${escapeHtml(state.secretDraftName)}" /></label>
+                <label><span>Provider</span><select id="secret-draft-provider">${renderProviderOptions(state.secretDraftProvider)}</select></label>
+                <label><span>API key</span><input id="secret-draft-value" type="password" value="${escapeHtml(state.secretDraftValue)}" placeholder="Saved encrypted; never displayed again" /></label>
+                <button class="button button--secondary" id="create-project-secret" type="button">Save encrypted key</button>
+              </div>
+              <div class="project-secret-list">${renderProjectSecretList()}</div>
+            </div>
             <p class="runner-state" id="job-state">${escapeHtml(state.activeJobStatus || 'No run started')}</p>
             <div id="job-observability" class="job-observability">${renderJobObservability()}</div>
           ` : `
@@ -3448,14 +3490,44 @@ function bindEvents() {
     state.selectedRunnerId = event.target.value;
     persistState();
   });
-  bindIfPresent('#execution-target-select', 'change', (event) => {
+  document.querySelectorAll('input[name="execution-target"]').forEach((control) => control.addEventListener('change', (event) => {
     state.executionTarget = event.target.value;
     persistState();
-  });
+    renderWorkspacePanels();
+  }));
   bindIfPresent('#vercel-ai-sdk-target', 'input', (event) => {
     state.vercelAiSdkTarget = event.target.value;
     persistState();
   });
+  bindIfPresent('#hosted-provider-select', 'change', (event) => {
+    state.hostedProvider = event.target.value;
+    state.selectedSecretRef = '';
+    persistState();
+    renderWorkspacePanels();
+  });
+  bindIfPresent('#hosted-provider-model', 'input', (event) => {
+    state.hostedProviderModel = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#secret-select', 'change', (event) => {
+    state.selectedSecretRef = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#secret-draft-name', 'input', (event) => {
+    state.secretDraftName = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#secret-draft-provider', 'change', (event) => {
+    state.secretDraftProvider = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#secret-draft-value', 'input', (event) => {
+    state.secretDraftValue = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#create-project-secret', 'click', createProjectSecretFromDraft);
+  document.querySelectorAll('.secret-disable').forEach((button) => button.addEventListener('click', () => updateProjectSecret(button.dataset.secretId, 'disable')));
+  document.querySelectorAll('.secret-delete').forEach((button) => button.addEventListener('click', () => updateProjectSecret(button.dataset.secretId, 'delete')));
   bindIfPresent('#dispatch-job', 'click', dispatchProjectJob);
   bindBenchmarkLifecycleEvents();
 }
@@ -4624,6 +4696,35 @@ function renderRunnerOptions() {
   `).join('');
 }
 
+function renderProviderOptions(selected) {
+  return ['openai', 'anthropic', 'google', 'mistral', 'groq', 'together'].map((provider) => `
+    <option value="${provider}" ${provider === selected ? 'selected' : ''}>${escapeHtml(provider)}</option>
+  `).join('');
+}
+
+function renderSecretOptions() {
+  const active = state.projectSecrets.filter((secret) => secret.status === 'active' && secret.provider === state.hostedProvider);
+  if (!active.length) return '<option value="">No saved keys</option>';
+  return active.map((secret) => `
+    <option value="${escapeHtml(secret.ref ?? secret.id)}" ${(secret.ref ?? secret.id) === state.selectedSecretRef ? 'selected' : ''}>${escapeHtml(secret.displayName)} · ${escapeHtml(secret.maskedPreview)}</option>
+  `).join('');
+}
+
+function renderProjectSecretList() {
+  if (!state.projectSecrets.length) return '<p class="session-muted">No encrypted project secrets saved.</p>';
+  return state.projectSecrets.map((secret) => `
+    <article class="project-secret-item">
+      <span>${escapeHtml(secret.provider)} · ${escapeHtml(secret.status)}</span>
+      <strong>${escapeHtml(secret.displayName)}</strong>
+      <small>${escapeHtml(secret.maskedPreview)} · updated ${escapeHtml(formatJobDate(secret.updatedAt) ?? secret.updatedAt)}</small>
+      <div class="inline-actions">
+        <button class="button button--secondary secret-disable" data-secret-id="${escapeHtml(secret.ref ?? secret.id)}" type="button" ${secret.status !== 'active' ? 'disabled' : ''}>Disable</button>
+        <button class="button button--secondary secret-delete" data-secret-id="${escapeHtml(secret.ref ?? secret.id)}" type="button">Delete</button>
+      </div>
+    </article>
+  `).join('');
+}
+
 function renderJobObservabilityPanel() {
   const panel = document.querySelector('#job-observability');
   if (panel) {
@@ -4640,9 +4741,21 @@ function renderJobObservability() {
   const terminal = ['completed', 'failed', 'canceled', 'cancelled'].includes(job.status);
   const history = Array.isArray(job.history) ? job.history : [];
   const errors = history.filter((item) => item.error);
+  const diagnostics = job.result?.diagnostics ?? job.metadata?.diagnostics ?? {};
+  const execution = job.result?.execution ?? {};
+  const executionTarget = job.payload?.executionTarget ?? {};
+  const adapterType = execution.type ?? execution.adapterType ?? diagnostics.adapterType ?? executionTarget.type ?? job.payload?.adapter?.type ?? (job.runnerId ? 'registered-http-runner' : 'unknown');
+  const target = execution.target ?? execution.routeUrl ?? diagnostics.target ?? executionTarget.routeUrl ?? job.payload?.adapter?.target ?? execution.runnerId ?? diagnostics.runnerId ?? executionTarget.runnerId ?? job.runnerId ?? '';
+  const lifecycleState = job.status === 'completed'
+    ? 'completed'
+    : job.reportId
+      ? 'report linked'
+      : ['queued', 'claimed', 'running', 'retrying'].includes(job.status)
+        ? 'worker lifecycle active'
+        : job.status;
   const reportLink = job.reportId
     ? `<a class="job-report-link" href="${escapeHtml(reportPathFor(state.selectedProjectId, job.reportId))}">Open linked report</a>`
-    : '<span>Report pending</span>';
+    : '<span>No report yet</span>';
   return `
     <div class="job-observability__header">
       <div>
@@ -4650,6 +4763,13 @@ function renderJobObservability() {
         <strong>${escapeHtml(job.id)}</strong>
       </div>
       <span class="job-status job-status--${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
+    </div>
+    <div class="job-metrics">
+      <div><span>Execution</span><strong>${escapeHtml(['vercel-ai-sdk', 'vercel_ai_sdk'].includes(adapterType) ? 'Vercel AI SDK route' : 'Registered HTTP runner')}</strong></div>
+      <div><span>Target</span><strong>${escapeHtml(target || 'not recorded')}</strong></div>
+      <div><span>Lifecycle</span><strong>${escapeHtml(lifecycleState)}</strong></div>
+      <div><span>Failure class</span><strong>${escapeHtml(diagnostics.failureClass ?? job.result?.failureClass ?? 'none')}</strong></div>
+      <div><span>Last error</span><strong>${escapeHtml(job.lastError ?? job.error ?? diagnostics.rawErrorMessage ?? 'none')}</strong></div>
     </div>
     <div class="job-metrics">
       <div><span>Attempts</span><strong>${escapeHtml(job.attempts ?? 0)} / ${escapeHtml(job.maxAttempts ?? 1)}</strong></div>
@@ -4925,6 +5045,7 @@ async function refreshSession() {
     state.workspaceProjects = [];
     state.projectReports = [];
     state.projectRunners = [];
+    state.projectSecrets = [];
     state.projectJobs = [];
     state.projectBenchmarks = [];
     state.benchmarkDetail = null;
@@ -4962,16 +5083,18 @@ async function refreshProjectsForWorkspace(preferredProjectId = null) {
 async function refreshProjectResources() {
   if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId) return;
   try {
-    const [reportsPayload, runnersPayload, jobsPayload, benchmarksPayload] = await Promise.all([
+    const [reportsPayload, runnersPayload, jobsPayload, benchmarksPayload, secretsPayload] = await Promise.all([
       fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/reports`),
       fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/runners`),
       fetchJson(`/api/jobs?projectId=${encodeURIComponent(state.selectedProjectId)}`),
       fetchJson(`/api/benchmarks?projectId=${encodeURIComponent(state.selectedProjectId)}`),
+      fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/secrets`).catch(() => ({ secrets: [] })),
     ]);
     state.projectReports = reportsPayload.reports ?? [];
     state.projectRunners = runnersPayload.runners ?? [];
     state.projectJobs = jobsPayload.jobs ?? [];
     state.projectBenchmarks = benchmarksPayload.benchmarks ?? [];
+    state.projectSecrets = secretsPayload.secrets ?? [];
     if (!state.projectRunners.some((runner) => runner.id === state.selectedRunnerId)) {
       state.selectedRunnerId = state.projectRunners[0]?.id ?? '';
     }
@@ -4982,6 +5105,7 @@ async function refreshProjectResources() {
   } catch {
     state.projectReports = [];
     state.projectRunners = [];
+    state.projectSecrets = [];
     state.projectJobs = [];
     state.projectBenchmarks = [];
     state.benchmarkDetail = null;
@@ -5076,8 +5200,49 @@ async function registerRunner() {
   }
 }
 
+async function createProjectSecretFromDraft() {
+  if (!state.selectedProjectId || !state.secretDraftValue) {
+    showFeedback('Add a provider key before saving');
+    return;
+  }
+  try {
+    await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/secrets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: state.secretDraftProvider,
+        name: state.secretDraftName,
+        secretValue: state.secretDraftValue,
+      }),
+    });
+    state.secretDraftValue = '';
+    await refreshProjectResources();
+    renderWorkspacePanels();
+    showFeedback('Encrypted provider key saved');
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function updateProjectSecret(secretId, action) {
+  if (!state.selectedProjectId || !secretId) return;
+  try {
+    await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/secrets/${encodeURIComponent(secretId)}`, {
+      method: action === 'delete' ? 'DELETE' : 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: action === 'delete' ? undefined : JSON.stringify({ action: 'disable' }),
+    });
+    if (state.selectedSecretRef === secretId) state.selectedSecretRef = '';
+    await refreshProjectResources();
+    renderWorkspacePanels();
+    showFeedback(action === 'delete' ? 'Provider key deleted' : 'Provider key disabled');
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
 async function dispatchProjectJob() {
-  if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId || (!state.selectedRunnerId && state.executionTarget !== 'vercel-ai-sdk')) {
+  if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId || !canDispatchExecutionTarget()) {
     showFeedback('Select a project and execution target first');
     return;
   }
@@ -5104,6 +5269,14 @@ async function dispatchProjectJob() {
       attempts: payload.attempts,
       maxAttempts: payload.maxAttempts,
       idempotencyKey: payload.idempotencyKey,
+      result: {
+        execution: payload.execution,
+        diagnostics: payload.diagnostics,
+      },
+      payload: {
+        adapter: payload.adapter,
+        executionTarget: payload.executionTarget,
+      },
       history: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -5123,6 +5296,14 @@ function projectJobExecutionPayload() {
   if (state.executionTarget === 'vercel-ai-sdk') {
     return {
       runnerId: null,
+      executionTarget: {
+        type: 'vercel_ai_sdk',
+        routeUrl: state.vercelAiSdkTarget,
+        modelLabel: 'Vercel AI SDK route',
+        mode: 'sample',
+        streamingMode: 'auto',
+        captureToolCalls: true,
+      },
       adapter: {
         type: 'vercel-ai-sdk',
         target: state.vercelAiSdkTarget,
@@ -5133,7 +5314,32 @@ function projectJobExecutionPayload() {
       },
     };
   }
-  return { runnerId: state.selectedRunnerId };
+  if (state.executionTarget === 'hosted-provider') {
+    return {
+      runnerId: null,
+      executionTarget: {
+        type: 'hosted_provider',
+        provider: state.hostedProvider,
+        model: state.hostedProviderModel,
+        secretRef: state.selectedSecretRef,
+      },
+    };
+  }
+  return {
+    runnerId: state.selectedRunnerId,
+    executionTarget: {
+      type: 'registered_runner',
+      runnerId: state.selectedRunnerId,
+    },
+  };
+}
+
+function canDispatchExecutionTarget() {
+  return state.executionTarget === 'vercel-ai-sdk'
+    ? Boolean(state.vercelAiSdkTarget)
+    : state.executionTarget === 'hosted-provider'
+      ? Boolean(state.hostedProvider && state.hostedProviderModel && state.selectedSecretRef)
+      : Boolean(state.selectedRunnerId);
 }
 
 async function cancelActiveJob() {
