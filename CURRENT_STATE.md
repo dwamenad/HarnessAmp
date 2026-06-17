@@ -1,207 +1,165 @@
 # HarnessAmp Current State
 
-Last updated: June 13, 2026
+Last updated: June 16, 2026
 
 ## Snapshot
 
 HarnessAmp is on branch `codex/harnessamp-v2-contracts`.
 
-Latest commit:
+Latest checked-out commit:
 
 ```text
-5f657f5 Add Harness-1 RetrievalGuard reporting flow
+d7d3164 Add benchmark governance layer
 ```
 
-GitHub push status:
+Full commit:
 
-- Branch pushed to `origin/codex/harnessamp-v2-contracts`
-- Working tree was clean immediately after the push
+```text
+d7d3164ebe5901953447ce6813eeec62290b01fe
+```
 
-Local services currently running:
+Git status at this snapshot:
 
-- Web app: `http://127.0.0.1:4173`
-- Harness-1 adapter: `http://127.0.0.1:8788/harnessamp`
+- Worker/queue and Vercel AI SDK adapter work is currently uncommitted.
+- `CURRENT_STATE.md` was refreshed after inspecting the prior local modifications.
+- The branch is `codex/harnessamp-v2-contracts`.
 
-## Product Surface
+Modified files for the current build:
 
-HarnessAmp currently has three major surfaces:
+- `README.md`
+- `api/_db.js`
+- `api/_store.js`
+- `api/jobs.js`
+- `api/projects.js`
+- `docs/adapters/index.md`
+- `docs/adapters/vercel-ai-sdk.md`
+- `docs/cli.md`
+- `docs/deployment.md`
+- `docs/reference/api.md`
+- `examples/vercel-ai-sdk/`
+- `scripts/harnessamp.mjs`
+- `src/adapters/index.js`
+- `src/adapters/runners.js`
+- `src/adapters/vercel-ai-sdk.js`
+- `src/core/local-worker.js`
+- `src/main.js`
+- `styles.css`
+- `tests/api-routes.test.js`
+- `tests/conformance/runner-contract.test.js`
+- `tests/local-worker.test.js`
+- `tests/vercel-ai-sdk-adapter.test.js`
+- `CURRENT_STATE.md`
 
-- Public product site and docs
-- SaaS-style operator console at `/dashboard`
-- CLI/API reliability engine for mutation packs, runner jobs, reports, failure evidence, and release gates
+## Current Product Direction
 
-The console routes in active use include:
+HarnessAmp now has production-facing product surfaces, report exports, RetrievalGuard/Harness-1 flow, and benchmark governance. The current build focuses on the execution substrate and first framework adapter: queued runner jobs should be completed by a separate worker process, and Vercel AI SDK route handlers can now be evaluated through the same HarnessAmp runner contract.
 
+Primary product routes remain:
+
+- `/`
 - `/dashboard`
-- `/harnesses`
-- `/harnesses/new`
-- `/packs`
-- `/packs/retrievalguard`
-- `/contracts`
+- `/reports`
+- `/failures`
+- `/failures/:id`
 - `/runs/new`
 - `/runs/:id`
 - `/runs/:id/summary`
-- `/failures`
-- `/failures/:id`
 - `/compare`
-- `/reports`
 - `/ci`
-- `/usage`
-- `/team`
+- `/docs`
+- `/app#demo`
 
-## Latest Completed Work
+## Worker Layer In Progress
 
-The latest pushed work adds a full local Harness-1 to RetrievalGuard reporting flow.
+Implemented in the current working tree:
 
-Implemented:
+- Separate worker polling path via `node scripts/harnessamp.mjs worker`.
+- Worker poll support for stale lease recovery with `--stale-after-ms` and `HARNESSAMP_WORKER_STALE_AFTER_MS`.
+- Durable job state machine covering `queued`, `claimed`, `running`, `retrying`, `completed`, `failed`, and `canceled`.
+- Postgres schema columns for worker observability: worker id, claim time, retry time, completion/failure/cancellation times, last error, and retry reason.
+- Atomic claim semantics using conditional job-state updates so only one worker can claim a due job.
+- Memory-mode claim logic updated to re-read current job state before claiming, so tests model contention safely.
+- Worker execution now transitions from `claimed` to `running` before external dispatch.
+- Report creation is guarded so a job links at most one report.
+- Cancellation is checked before dispatch, before report creation, and before completion.
+- Worker polling recovers stale `claimed` or `running` jobs into `retrying` when attempts remain, otherwise `failed`.
+- Console job observability now shows worker id, retry reason, retry schedule, claim/start/complete/fail/cancel timestamps, linked report, and cancellation action.
+- The dashboard dispatch path no longer runs jobs from the browser after enqueueing.
+- Deployment/API/CLI docs now describe the worker process, env vars, lifecycle, stale recovery, and scaling model.
 
-- Harness-1 adapter example under `examples/harness1-adapter/`
-- Adapter docs at `docs/adapters/harness-1.md`
-- `npm run harness1:adapter`
-- RetrievalGuard smoke payload support for local Harness-1 testing
-- RAG/retrieval harness domain options in the UI
-- Report export module at `src/console/report-export.js`
-- Report evidence labels:
-  - `runner observation`
-  - `contract-smoke preview`
-  - `seeded sample`
-- Adapter mode display such as `runner observation / contract-smoke`
-- `Print HTML`, JSON, CSV, and Markdown report exports
-- Local run report rows that use actual browser run state before seeded sample reports
-- Dashboard metrics that can reflect the latest completed local run
-- A local persisted run/report state layer for harnesses, runs, observations, failures, reports, and export artifacts
-- Explicit seeded sample isolation so demo reports appear after real reports and stay labeled `seeded sample`
-- Public `/` now funnels into `/dashboard` as the main product entry, keeps `/app` as a sample diagnosis sandbox, and avoids duplicate product/app explanation sections
-- `/dashboard` now stays operational by removing the inert route-state explainer panels
-- `.Rhistory` and `outputs/` ignored as local artifacts
+## Vercel AI SDK Adapter In Progress
 
-## RetrievalGuard And Harness-1 Flow
+Implemented in the current working tree:
 
-To run the local adapter:
+- `vercel-ai-sdk` / `vercel_ai_sdk` runner kind support in the adapter registry.
+- Route handler execution for modules that export `POST` or a configured handler export.
+- CLI support for `--adapter vercel-ai-sdk`, `--target`, `--mode`, `--streaming-mode`, `--model-label`, and structured-output metadata.
+- Project job creation with `runnerId` or an adapter config, allowing worker-backed adapter jobs without a registered HTTP runner.
+- Report observations for text output, stream output, tool calls/results, structured output, citations/sources, latency, and normalized pass/fail state.
+- Deterministic fixture under `examples/vercel-ai-sdk/` for local tests and docs.
+- Adapter docs at `docs/adapters/vercel-ai-sdk.md`.
 
-```bash
-npm run harness1:adapter
-```
+## Verification Run
 
-Register this endpoint in HarnessAmp:
-
-```text
-http://127.0.0.1:8788/harnessamp
-```
-
-Recommended new harness values:
-
-- Harness name: `harness-1`
-- Project: `New Demo_UCLA`
-- Domain: `knowledge / RAG`
-- Agent version: `pat-jj/harness-1 local`
-- Endpoint URL: `http://127.0.0.1:8788/harnessamp`
-- Auth type: `none`
-- Environment: `local`
-
-Then start a run:
-
-- Harness: `harness-1 / local`
-- Mutation Pack: `RetrievalGuard`
-- Tier: `Smoke`
-
-Expected report behavior:
-
-- The latest report appears first in `/reports`
-- Evidence column should show `runner observation / contract-smoke`
-- Release decision should block when critical failures are present
-- Exports should include Print HTML, JSON, CSV, and Markdown
-- RetrievalGuard reports should include source fidelity, failure evidence, remediation, regression plan, and audit trail sections
-
-## Report Expectations
-
-When a run fails, the robust report should show:
-
-- Release decision and gate result
-- Score, critical count, observation count, and environment
-- Evidence mode and adapter mode
-- Failed contracts and mutation IDs
-- Scenario-level failure evidence
-- Retrieved/cited source evidence for RetrievalGuard
-- Citation precision, recall, final-answer recall, and provenance completeness when available
-- Required, missing, or stale source IDs
-- Remediation checklist
-- Regression plan
-- Audit trail
-
-The app no longer labels the print artifact as a PDF. It now uses `Print HTML` because the browser downloads an HTML report that can be printed or saved as PDF by the browser.
-
-## Mutation Packs
-
-Current v2 pack set:
-
-- HealthGuard
-- FinanceGuard
-- RetrievalGuard
-- CustomerCareGuard
-- LegalGuard
-- AgentGuard/catalog entries where applicable in the console
-
-RetrievalGuard covers:
-
-- Query intent preservation
-- Query ambiguity
-- Distractor document injection
-- Contradictory evidence injection
-- Stale document injection
-- Missing key document handling
-- Citation metadata corruption
-- Retrieval order shuffle
-- Reranker drift
-- Tool failure handling
-- Context compression loss
-- Missing bridge document handling
-- Source authority swaps
-- Answer pressure
-
-## Key Files
-
-Recent files worth knowing:
-
-- `src/main.js`
-- `src/console/report-export.js`
-- `examples/harness1-adapter/server.mjs`
-- `examples/harness1-adapter/README.md`
-- `examples/harness1-adapter/request.json`
-- `examples/harness1-adapter/response.json`
-- `docs/adapters/harness-1.md`
-- `docs/adapters/index.md`
-- `tests/harness1-adapter.test.js`
-- `tests/report-export.test.js`
-- `tests/web-ui.test.js`
-
-## Verification
-
-Last verification before commit:
+Focused worker/API verification:
 
 ```bash
-npm test -- --test-reporter=spec
+npm test -- --test-reporter=spec tests/api-routes.test.js tests/local-worker.test.js
+```
+
+Result:
+
+- 17 passing
+
+Focused UI/report verification:
+
+```bash
+npm test -- --test-reporter=spec tests/web-ui.test.js tests/run-report-store.test.js tests/report-export.test.js
+```
+
+Result:
+
+- 21 passing
+
+Focused adapter/API/UI verification:
+
+```bash
+npm test -- --test-reporter=spec tests/vercel-ai-sdk-adapter.test.js tests/api-routes.test.js tests/conformance/runner-contract.test.js tests/web-ui.test.js
+```
+
+Result:
+
+- 41 passing
+
+Completed broader verification:
+
+```bash
+git diff --check
 npm run build
+npm test -- --test-reporter=spec
 ```
 
 Results:
 
-- Full test suite: 199 passing
+- `git diff --check`: passing
 - Production build: passing
-- Vite emitted only the existing large chunk warning
+- Full source test suite: 228 passing
+- Vite still emits the existing large chunk warning only
 
-Browser verification performed locally:
+Completed browser verification:
 
-- Registered `harness-1` with `http://127.0.0.1:8788/harnessamp`
-- Smoke test passed
-- Started `RetrievalGuard Smoke`
-- Run completed and opened summary
-- `/reports` showed the new local report first
-- Evidence column showed `runner observation / contract-smoke`
+```bash
+npm run test:e2e -- --reporter=line
+```
+
+Result:
+
+- Playwright e2e: 31 passing, 1 skipped
 
 ## Known Notes
 
-- The SaaS console now has a local persisted source-of-truth layer for completed local runs and reports. API-backed project jobs still use the existing project job/report APIs, and seeded demo fixtures remain as explicitly labeled fallback/sample rows.
-- Local Harness-1 adapter mode defaults to deterministic `contract-smoke` unless `HARNESS1_EVAL_COMMAND` is configured.
-- Vercel production will only reflect this branch after deployment or merge.
-- `.Rhistory` and `outputs/` are local ignored artifacts.
+- The worker layer and Vercel AI SDK adapter are not committed yet.
+- No OpenAI Agents SDK, LangGraph, or MCP adapter work was added in this build.
+- The existing RetrievalGuard/Harness-1 adapter flow remains in place.
+- Production durability still requires `DATABASE_URL` or `POSTGRES_URL`.
+- Worker authentication uses `WORKER_SERVICE_TOKEN` for worker polling and run actions.

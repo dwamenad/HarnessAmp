@@ -6,6 +6,7 @@ export async function runLocalApiWorker(options = {}) {
     once = false,
     intervalMs = 2000,
     maxJobs = Infinity,
+    staleAfterMs = Number(process.env.HARNESSAMP_WORKER_STALE_AFTER_MS ?? 120000),
     workerToken = process.env.WORKER_SERVICE_TOKEN,
     fetchImpl = globalThis.fetch,
     log = () => {},
@@ -20,7 +21,7 @@ export async function runLocalApiWorker(options = {}) {
 
   while (processed < maxJobs) {
     polls += 1;
-    const jobs = await listClaimableJobs({ apiUrl, projectId, workerToken, fetchImpl });
+    const jobs = await listClaimableJobs({ apiUrl, projectId, workerToken, staleAfterMs, fetchImpl });
     if (!jobs.length) {
       if (once) break;
       await sleep(intervalMs);
@@ -40,10 +41,11 @@ export async function runLocalApiWorker(options = {}) {
   return { processed, polls };
 }
 
-async function listClaimableJobs({ apiUrl, projectId, workerToken, fetchImpl }) {
+async function listClaimableJobs({ apiUrl, projectId, workerToken, staleAfterMs, fetchImpl }) {
   const url = new URL('/api/jobs', normalizeApiUrl(apiUrl));
   url.searchParams.set('projectId', projectId);
   url.searchParams.set('status', 'queued,retrying');
+  url.searchParams.set('staleAfterMs', String(Math.max(1, Number(staleAfterMs) || 120000)));
   const response = await fetchWorkerUrl(fetchImpl, url, `Worker job poll failed for ${url.origin}`, {
     headers: workerHeaders(workerToken),
   });

@@ -6,6 +6,7 @@ The adapter layer is the boundary between HarnessAmp and external infrastructure
 
 - [Runner Contract](runner-contract.md)
 - [Harness-1 Search Adapter](harness-1.md)
+- [Vercel AI SDK Adapter](vercel-ai-sdk.md)
 
 ## Adapter Principle
 

@@ -71,19 +71,20 @@ export default async function handler(request, response) {
       }
 
       const body = await readJsonBody(request);
-      if (!body.runnerId || !body.pack) {
-        badRequest(response, 'runnerId and pack are required');
+      if ((!body.runnerId && !body.adapter?.type) || !body.pack) {
+        badRequest(response, 'runnerId or adapter, and pack are required');
         return;
       }
 
       const job = await createRunnerJob({
         projectId,
-        runnerId: body.runnerId,
+        runnerId: body.runnerId ?? null,
         userId: session.user.id,
         pack: body.pack,
         thresholds: body.thresholds ?? {},
         profileId: body.profileId ?? null,
         presetId: body.presetId ?? null,
+        adapter: body.adapter ?? null,
         idempotencyKey: body.idempotencyKey ?? request.headers?.['idempotency-key'] ?? null,
         maxAttempts: body.maxAttempts ?? 1,
         timeoutMs: body.timeoutMs ?? 0,
@@ -93,8 +94,19 @@ export default async function handler(request, response) {
         jobId: job.id,
         status: job.status,
         idempotencyKey: job.idempotencyKey,
+        adapter: job.payload?.adapter ?? null,
         attempts: job.attempts,
         maxAttempts: job.maxAttempts,
+        workerId: job.workerId,
+        claimedAt: job.claimedAt,
+        startedAt: job.startedAt,
+        completedAt: job.completedAt,
+        failedAt: job.failedAt,
+        canceledAt: job.canceledAt,
+        cancelledAt: job.cancelledAt,
+        lastError: job.lastError,
+        retryReason: job.retryReason,
+        nextRetryAt: job.nextRetryAt,
       });
       return;
     }

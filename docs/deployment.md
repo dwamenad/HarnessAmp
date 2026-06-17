@@ -90,6 +90,7 @@ Useful worker flags:
 - `--once` polls once, processes available jobs, and exits.
 - `--interval-ms <n>` sets the polling interval for long-running workers.
 - `--max-jobs <n>` exits after processing a fixed number of jobs.
+- `--stale-after-ms <n>` recovers `claimed` or `running` jobs whose worker lease is older than the timeout. Default: `120000`.
 
 Example one-shot local worker:
 
@@ -196,9 +197,31 @@ Recommended worker environment:
 
 ```text
 WORKER_SERVICE_TOKEN=<same value configured in Vercel>
+HARNESSAMP_WORKER_STALE_AFTER_MS=120000
+HARNESSAMP_VERCEL_AI_SDK_TARGET=<optional default route module path>
+HARNESSAMP_VERCEL_AI_SDK_MODEL=<optional report label>
+HARNESSAMP_VERCEL_AI_SDK_TIMEOUT_MS=<optional adapter timeout>
 ```
 
 Prefer the environment variable over passing the token on the command line. The CLI also accepts `--worker-token <token>` for controlled local debugging.
+
+Adapter-backed jobs, such as the Vercel AI SDK adapter, run inside the worker process. The worker must be able to import the target route module path. If the production route is TypeScript-only, point the adapter at a compiled JavaScript module or a small JavaScript wrapper that exports the same `Request -> Response` handler.
+
+## Job Lifecycle
+
+Runner jobs move through these durable states:
+
+- `queued`: the API accepted the run and returned immediately.
+- `claimed`: a worker atomically claimed the job and incremented the attempt count.
+- `running`: the worker started the external runner request.
+- `retrying`: an attempt failed or a worker lease expired, and the job is due after `nextRetryAt`.
+- `completed`: a report was generated and linked through `reportId`.
+- `failed`: attempts were exhausted or stale recovery could not retry safely.
+- `canceled`: a user/admin canceled the job before completion.
+
+Workers check cancellation before external dispatch, before report creation, and before final completion. A canceled job does not create a report. Worker polling also recovers stale `claimed` or `running` jobs whose `claimedAt`/`lockedAt` lease exceeds `HARNESSAMP_WORKER_STALE_AFTER_MS` or `--stale-after-ms`.
+
+Two workers cannot claim the same pending job. The Postgres path uses a single conditional `UPDATE` against claimable states, so only one worker can move a job from `queued` or `retrying` to `claimed`.
 
 ## Deployment Checklist
 
@@ -214,6 +237,8 @@ Prefer the environment variable over passing the token on the command line. The 
 3. Deploy the Vercel frontend/API.
 4. Run database migrations/schema setup through the API startup path.
 5. Deploy a separate long-running worker process with the same `WORKER_SERVICE_TOKEN`.
+   - Include `HARNESSAMP_WORKER_STALE_AFTER_MS` if the default 120 seconds does not match your runner latency.
+   - Include `HARNESSAMP_VERCEL_AI_SDK_TARGET` if this worker should process adapter-backed jobs with a default route target.
 6. Confirm `/api/session` returns the expected auth state.
 7. Register a runner in the console.
 8. Enqueue a job.

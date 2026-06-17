@@ -144,6 +144,7 @@ Supported paths:
 | --- | --- |
 | `mock` | Local end-to-end testing |
 | `custom_http` | Production agent endpoints |
+| `vercel-ai-sdk` | Next.js/Vercel AI SDK routes and handlers |
 | Replit demo runner | Public demo deployments |
 | Worker service | Durable queued project jobs |
 
@@ -159,6 +160,18 @@ node scripts/harnessamp.mjs diagnose examples/demo-bundle.json \
 ```
 
 See [docs/adapters/runner-contract.md](docs/adapters/runner-contract.md).
+
+Vercel AI SDK route example:
+
+```bash
+node scripts/harnessamp.mjs run examples/demo-bundle.json \
+  --adapter vercel-ai-sdk \
+  --target ./examples/vercel-ai-sdk/app/api/chat/route.mjs \
+  --mode sample \
+  --json
+```
+
+See [docs/adapters/vercel-ai-sdk.md](docs/adapters/vercel-ai-sdk.md).
 
 ## CI Gate
 
@@ -205,7 +218,7 @@ The PR-facing metric is `Robustness Gap`: original pass rate minus mutated pass 
 | Validate a bundle | `node scripts/harnessamp.mjs validate examples/demo-bundle.json` |
 | Run release gate | `node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --json` |
 | Inspect mutations | `node scripts/harnessamp.mjs mutate examples/demo-bundle.json --max-mutations 20` |
-| Run local worker | `node scripts/harnessamp.mjs worker --project-id <project-id> --api-url http://127.0.0.1:3000` |
+| Run local worker | `node scripts/harnessamp.mjs worker --project-id <project-id> --api-url http://127.0.0.1:3000 --stale-after-ms 120000` |
 
 ## Configuration
 
@@ -229,6 +242,7 @@ Worker service authentication:
 
 ```text
 WORKER_SERVICE_TOKEN
+HARNESSAMP_WORKER_STALE_AFTER_MS
 ```
 
 Local seeded auth:
@@ -246,7 +260,7 @@ HARNESSAMP_DEV_AUTH=1
 | `src/v2/` | Domain packs, contract checkers, generated scenario engines, v2 runner |
 | `api/` | Local/Vercel report, auth, project, workspace, job, and event endpoints |
 | `docs/` | Concepts, usage, deployment, CI, runner contract, architecture |
-| `examples/` | Demo bundles, benchmark packs, domain scenarios, Replit runner |
+| `examples/` | Demo bundles, benchmark packs, domain scenarios, Replit runner, Vercel AI SDK fixture |
 | `tests/` | Engine, mutation, diagnosis, conformance, v2, web, and E2E coverage |
 
 ## Docs
@@ -257,6 +271,7 @@ HARNESSAMP_DEV_AUTH=1
 - [Deployment](docs/deployment.md)
 - [Mutation engine](docs/mutation-engine.md)
 - [Runner contract](docs/adapters/runner-contract.md)
+- [Vercel AI SDK adapter](docs/adapters/vercel-ai-sdk.md)
 - [CI gates](docs/ci-gates.md)
 - [GitHub OAuth](docs/github-oauth.md)
 - [Replit demo](docs/replit.md)

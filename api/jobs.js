@@ -35,6 +35,7 @@ export default async function handler(request, response) {
           ? await listRunnerJobsForWorker({
             projectId,
             statuses: request.query?.status ?? request.query?.statuses ?? [],
+            staleAfterMs: request.query?.staleAfterMs,
           })
           : await listRunnerJobs({
             projectId,

@@ -32,7 +32,7 @@ test('local API worker polls queued jobs and runs them once', async () => {
   });
 
   assert.deepEqual(result, { processed: 2, polls: 1 });
-  assert.equal(calls[0].url, 'http://127.0.0.1:3000/api/jobs?projectId=proj_worker&status=queued%2Cretrying');
+  assert.equal(calls[0].url, 'http://127.0.0.1:3000/api/jobs?projectId=proj_worker&status=queued%2Cretrying&staleAfterMs=120000');
   assert.equal(calls[0].init.headers.authorization, 'Bearer worker-secret');
   assert.equal(calls[1].url, 'http://127.0.0.1:3000/api/jobs/job_001?action=run');
   assert.equal(calls[1].init.headers.authorization, 'Bearer worker-secret');

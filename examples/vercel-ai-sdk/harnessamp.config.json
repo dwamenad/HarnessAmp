@@ -1,0 +1,14 @@
+{
+  "adapter": {
+    "type": "vercel-ai-sdk",
+    "target": "./examples/vercel-ai-sdk/app/api/chat/route.mjs",
+    "modelLabel": "fixture/vercel-ai-sdk",
+    "timeoutMs": 5000,
+    "mode": "sample",
+    "streamingMode": "auto",
+    "captureToolCalls": true,
+    "structuredOutputSchema": "fixture_answer"
+  },
+  "benchmark": "retrievalguard-smoke",
+  "command": "node scripts/harnessamp.mjs run examples/demo-bundle.json --adapter vercel-ai-sdk --target ./examples/vercel-ai-sdk/app/api/chat/route.mjs --mode sample --json"
+}

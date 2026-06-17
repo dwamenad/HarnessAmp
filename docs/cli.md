@@ -14,6 +14,7 @@ npm run collect:failures -- examples/demo-bundle.json examples/cli/observed-runs
 npm run release:gate -- examples/demo-bundle.json examples/cli/observed-runs.json
 npm run diagnose -- examples/demo-bundle.json
 node scripts/harnessamp.mjs mutate examples/demo-bundle.json --max-mutations 20
+node scripts/harnessamp.mjs run examples/demo-bundle.json --adapter vercel-ai-sdk --target ./examples/vercel-ai-sdk/app/api/chat/route.mjs --mode sample --json
 node scripts/harnessamp.mjs worker --project-id <project-id> --api-url http://127.0.0.1:3000
 node scripts/harnessamp.mjs benchmark import examples/benchmarks/support-mvp/benchmark-pack.json --out benchmark.lifecycle.json
 node scripts/harnessamp.mjs benchmark edit benchmark.lifecycle.json --edits benchmark-edits.json --out benchmark.lifecycle.json
@@ -29,6 +30,12 @@ Flags:
 - `--run-attempts <n>` retries failed run jobs before the diagnosis fails.
 - `--retry-backoff-ms <n>` waits before retrying a failed run job.
 - `--timeout-ms <n>` fails an individual run job after the configured timeout.
+- `--adapter vercel-ai-sdk` runs the bundle through a Vercel AI SDK route or compatible handler instead of the default mock runner.
+- `--target <path>` points the Vercel AI SDK adapter at a route module that exports `POST` or another configured handler.
+- `--mode sample|full` selects visible sample variants or all generated variants for adapter-backed runs.
+- `--streaming-mode auto|text|sse|data` controls stream text normalization for adapter-backed runs.
+- `--model-label <label>` labels adapter-backed observations in reports.
+- `--structured-output-schema <json>` records the expected structured-output shape for adapter-backed runs.
 - no flag prints the markdown report.
 
 Worker flags:
@@ -40,6 +47,7 @@ Worker flags:
 - `--once` polls once and exits.
 - `--interval-ms <n>` controls polling delay for long-running workers.
 - `--max-jobs <n>` exits after processing that many jobs.
+- `--stale-after-ms <n>` recovers stale `claimed` or `running` jobs after the worker lease expires.
 
 Typical terminal-first flow:
 
@@ -84,6 +92,13 @@ Typical mutation diagnosis flow:
 2. Run `node scripts/harnessamp.mjs mutate <bundle.json> --max-mutations 20` to inspect selected mutation records.
 3. Run `node scripts/harnessamp.mjs diagnose <bundle.json> --concurrency 4` to produce the robustness report.
 4. Treat `PASS`, `WARN`, and `BLOCK` as the CI/release signal.
+
+Typical Vercel AI SDK adapter flow:
+
+1. Export a route handler from a module such as `app/api/chat/route.ts` or use the fixture at `examples/vercel-ai-sdk/app/api/chat/route.mjs`.
+2. Run `node scripts/harnessamp.mjs run examples/demo-bundle.json --adapter vercel-ai-sdk --target ./examples/vercel-ai-sdk/app/api/chat/route.mjs --mode sample --json`.
+3. Inspect captured text, tool calls, structured outputs, citations, latency, and pass/fail observations.
+4. Use `--mode full` before a release gate when you want visible and holdout variants.
 
 Typical local worker flow:
 

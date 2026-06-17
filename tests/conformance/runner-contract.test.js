@@ -12,6 +12,7 @@ import {
   MockRunner,
   ModelSDKRunner,
   MultiAgentRunner,
+  VercelAISDKRunner,
   createRunner,
 } from '../../src/adapters/runners.js';
 import { listCliCommands } from '../../src/cli/index.js';
@@ -77,6 +78,26 @@ test('future adapter classes are explicit AgentRunner placeholders', async () =>
     assert.ok(runner instanceof AgentRunner);
     await assert.rejects(() => runner.run({}), /must be implemented/);
   }
+});
+
+test('Vercel AI SDK runner satisfies the AgentRunResult conformance shape', async () => {
+  const bundle = createDemoBundle();
+  const runner = createRunner('vercel-ai-sdk', {
+    target: './examples/vercel-ai-sdk/app/api/chat/route.mjs',
+    modelLabel: 'fixture/conformance',
+  });
+  const result = await runner.run({
+    bundle,
+    task: bundle.harness.scenarios[0],
+    environment: 'conformance',
+  });
+
+  assert.ok(runner instanceof VercelAISDKRunner);
+  REQUIRED_RUN_RESULT_FIELDS.forEach((field) => {
+    assert.ok(field in result, `missing ${field}`);
+  });
+  assert.equal(result.toolMode, 'ai-sdk-route');
+  assert.equal(result.metadata.adapterType, 'vercel-ai-sdk');
 });
 
 test('custom HTTP runner normalizes external runner responses', async () => {

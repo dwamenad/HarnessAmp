@@ -11,6 +11,10 @@ import {
 } from '../src/core/benchmark-lifecycle.js';
 import { analyzeBundle } from '../src/core/engine.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
+import {
+  executeVercelAiSdkAdapterBenchmark,
+  validateVercelAiSdkAdapterConfig,
+} from '../src/adapters/vercel-ai-sdk.js';
 import { ensureSchema, hasPostgresConfig, query } from './_db.js';
 
 const memory = globalThis.__harnessAmpStore ?? {
@@ -32,8 +36,9 @@ const memory = globalThis.__harnessAmpStore ?? {
   events: [],
 };
 
-const RUNNER_JOB_TERMINAL_STATUSES = new Set(['completed', 'failed', 'canceled']);
+const RUNNER_JOB_TERMINAL_STATUSES = new Set(['completed', 'failed', 'canceled', 'cancelled']);
 const RUNNER_JOB_CLAIMABLE_STATUSES = new Set(['queued', 'retrying']);
+const RUNNER_JOB_RECOVERABLE_STATUSES = new Set(['claimed', 'running']);
 
 globalThis.__harnessAmpStore = memory;
 memory.benchmarkPacks ??= new Map();
@@ -575,28 +580,32 @@ export async function createRunnerJob({
   maxAttempts = 1,
   timeoutMs = 0,
   retryBackoffMs = 0,
+  adapter = null,
 }) {
   const membership = await getProjectMembership(userId, projectId);
   if (!membership || !canMutateProject(membership.role)) {
     throw new Error('Only owners and maintainers can create jobs');
   }
 
-  const runner = await getRunnerById(runnerId);
-  if (!runner || runner.projectId !== projectId) {
+  const adapterConfig = normalizeAdapterConfig(adapter);
+  const runner = runnerId ? await getRunnerById(runnerId) : null;
+  if (!adapterConfig && (!runner || runner.projectId !== projectId)) {
     throw new Error('Runner not found');
   }
+  if (runner && runner.projectId !== projectId) throw new Error('Runner not found');
 
   const payload = {
     pack,
     thresholds,
     profileId,
     presetId,
+    adapter: adapterConfig,
   };
   const normalizedIdempotencyKey = normalizeOptionalText(idempotencyKey);
   if (normalizedIdempotencyKey) {
     const existing = await findRunnerJobByIdempotencyKey({
       projectId,
-      runnerId,
+      runnerId: runnerId ?? null,
       idempotencyKey: normalizedIdempotencyKey,
     });
     if (existing) return existing;
@@ -633,7 +642,8 @@ export async function listRunnerJobs({ projectId, userId, statuses = [] }) {
   return listRunnerJobsForProject({ projectId, statuses });
 }
 
-export async function listRunnerJobsForWorker({ projectId, statuses = [] }) {
+export async function listRunnerJobsForWorker({ projectId, statuses = [], staleAfterMs = null }) {
+  await recoverStaleRunnerJobs({ projectId, staleAfterMs });
   return listRunnerJobsForProject({ projectId, statuses });
 }
 
@@ -675,13 +685,21 @@ export async function cancelRunnerJob({ jobId, userId }) {
     throw new Error('Only owners and maintainers can cancel jobs');
   }
   if (RUNNER_JOB_TERMINAL_STATUSES.has(job.status)) return job;
+  const now = new Date().toISOString();
   return updateJobStatus(jobId, {
     status: 'canceled',
     error: null,
+    lastError: null,
+    retryReason: null,
     claimedBy: null,
+    workerId: null,
     lockedAt: null,
+    claimedAt: null,
     nextRunAt: null,
-    finishedAt: new Date().toISOString(),
+    nextRetryAt: null,
+    finishedAt: now,
+    canceledAt: now,
+    cancelledAt: now,
   });
 }
 
@@ -698,10 +716,18 @@ export async function retryRunnerJob({ jobId, userId }) {
   return updateJobStatus(jobId, {
     status: 'retrying',
     error: null,
+    lastError: null,
+    retryReason: 'Manual retry requested.',
     claimedBy: null,
+    workerId: null,
     lockedAt: null,
+    claimedAt: null,
     nextRunAt: new Date().toISOString(),
+    nextRetryAt: new Date().toISOString(),
     finishedAt: null,
+    failedAt: null,
+    canceledAt: null,
+    cancelledAt: null,
   });
 }
 
@@ -1258,7 +1284,79 @@ export async function saveEvent(event, session = {}) {
 }
 
 async function dispatchRunnerJob(job) {
+  const current = await readJob(job.id);
+  if (!current || RUNNER_JOB_TERMINAL_STATUSES.has(current.status)) return current;
+  if (current.reportId) return current;
   if (await isJobCanceled(job.id)) return readJob(job.id);
+
+  const runningAt = new Date().toISOString();
+  const running = await updateJobStatus(job.id, {
+    status: 'running',
+    startedAt: current.startedAt ?? runningAt,
+    finishedAt: null,
+  });
+  if (!running || await isJobCanceled(job.id)) return readJob(job.id);
+
+  const adapterConfig = normalizeAdapterConfig(running.payload.adapter);
+  const observations = adapterConfig
+    ? await runAdapterBackedJob(running, adapterConfig)
+    : await runHttpRunnerBackedJob(running);
+
+  if (await isJobCanceled(job.id)) return readJob(job.id);
+  const analysis = analyzeBundle(running.payload.pack, observations, {
+    intensity: running.payload.pack?.mutationPolicy?.intensity ?? 2,
+  });
+  const snapshot = buildReportSnapshot({
+    analysis,
+    reportId: createId('report'),
+    workspace: {
+      workspaceId: running.workspaceId,
+    },
+    projectId: running.projectId,
+    profileId: running.payload.profileId,
+    presetId: running.payload.presetId,
+    thresholds: running.payload.thresholds,
+    sourceBundle: running.payload.pack,
+  });
+
+  if (await isJobCanceled(job.id)) return readJob(job.id);
+  const saved = await persistReport({
+    snapshot,
+    projectId: running.projectId,
+    workspaceId: running.workspaceId,
+    userId: running.userId,
+  });
+
+  if (await isJobCanceled(job.id)) return readJob(job.id);
+  const beforeComplete = await readJob(job.id);
+  if (!beforeComplete || beforeComplete.reportId || RUNNER_JOB_TERMINAL_STATUSES.has(beforeComplete.status)) {
+    return beforeComplete;
+  }
+  const completedAt = new Date().toISOString();
+  await updateJobStatus(job.id, {
+    status: 'completed',
+    reportId: saved.id,
+    result: {
+      reportId: saved.id,
+      gate: snapshot.summary.verdict,
+      overallScore: snapshot.summary.overallScore,
+    },
+    error: null,
+    lastError: null,
+    retryReason: null,
+    claimedBy: null,
+    workerId: null,
+    lockedAt: null,
+    claimedAt: null,
+    nextRunAt: null,
+    nextRetryAt: null,
+    finishedAt: completedAt,
+    completedAt,
+  });
+  return readJob(job.id);
+}
+
+async function runHttpRunnerBackedJob(job) {
   const runner = await getRunnerById(job.runnerId);
   if (!runner) throw new Error('Runner not found');
 
@@ -1286,58 +1384,31 @@ async function dispatchRunnerJob(job) {
   }
 
   const payload = await response.json();
-  if (await isJobCanceled(job.id)) return readJob(job.id);
+  if (await isJobCanceled(job.id)) return [];
   const observations = Array.isArray(payload) ? payload : payload.observations;
   if (!Array.isArray(observations)) {
     throw new Error('Runner response must be an observation array or { observations }.');
   }
+  return observations;
+}
 
-  if (await isJobCanceled(job.id)) return readJob(job.id);
-  const analysis = analyzeBundle(job.payload.pack, observations, {
-    intensity: job.payload.pack?.mutationPolicy?.intensity ?? 2,
+async function runAdapterBackedJob(job, adapterConfig) {
+  if (adapterConfig.type !== 'vercel-ai-sdk') {
+    throw new Error(`Unsupported adapter job type: ${adapterConfig.type}`);
+  }
+  const result = await executeVercelAiSdkAdapterBenchmark(job.payload.pack, {
+    ...adapterConfig,
+    timeoutMs: job.timeoutMs || adapterConfig.timeoutMs,
+  }, {
+    environment: 'worker',
+    shouldCancel: () => isJobCanceled(job.id),
   });
-  const snapshot = buildReportSnapshot({
-    analysis,
-    reportId: createId('report'),
-    workspace: {
-      workspaceId: job.workspaceId,
-    },
-    projectId: job.projectId,
-    profileId: job.payload.profileId,
-    presetId: job.payload.presetId,
-    thresholds: job.payload.thresholds,
-    sourceBundle: job.payload.pack,
-  });
-
-  if (await isJobCanceled(job.id)) return readJob(job.id);
-  const saved = await persistReport({
-    snapshot,
-    projectId: job.projectId,
-    workspaceId: job.workspaceId,
-    userId: job.userId,
-  });
-
-  if (await isJobCanceled(job.id)) return readJob(job.id);
-  await updateJobStatus(job.id, {
-    status: 'completed',
-    reportId: saved.id,
-    result: {
-      reportId: saved.id,
-      gate: snapshot.summary.verdict,
-      overallScore: snapshot.summary.overallScore,
-    },
-    error: null,
-    claimedBy: null,
-    lockedAt: null,
-    nextRunAt: null,
-    finishedAt: new Date().toISOString(),
-  });
-  return readJob(job.id);
+  return result.observations;
 }
 
 async function isJobCanceled(jobId) {
   const current = await readJob(jobId);
-  return current?.status === 'canceled';
+  return current?.status === 'canceled' || current?.status === 'cancelled';
 }
 
 async function markRunnerJobFailure(jobId, error) {
@@ -1345,14 +1416,86 @@ async function markRunnerJobFailure(jobId, error) {
   if (!current || current.status === 'canceled') return current;
   const message = error instanceof Error ? error.message : String(error);
   const canRetry = current.attempts < current.maxAttempts;
+  const failedAt = canRetry ? null : new Date().toISOString();
+  const nextRetryAt = canRetry ? retryReadyAt(current.retryBackoffMs) : null;
   return updateJobStatus(jobId, {
     status: canRetry ? 'retrying' : 'failed',
     error: message,
+    lastError: message,
+    retryReason: canRetry ? message : null,
     claimedBy: null,
+    workerId: null,
     lockedAt: null,
-    nextRunAt: canRetry ? retryReadyAt(current.retryBackoffMs) : null,
-    finishedAt: canRetry ? null : new Date().toISOString(),
+    claimedAt: null,
+    nextRunAt: nextRetryAt,
+    nextRetryAt,
+    finishedAt: failedAt,
+    failedAt,
   });
+}
+
+async function recoverStaleRunnerJobs({ projectId, staleAfterMs = Number(process.env.HARNESSAMP_WORKER_STALE_AFTER_MS ?? 120000) } = {}) {
+  const leaseMs = normalizePositiveInteger(staleAfterMs, 120000);
+  const cutoff = new Date(Date.now() - leaseMs).toISOString();
+  const reason = `Worker lease expired after ${leaseMs}ms.`;
+
+  if (useMemory()) {
+    const recovered = [];
+    for (const job of memory.jobs.values()) {
+      if (projectId && job.projectId !== projectId) continue;
+      if (!RUNNER_JOB_RECOVERABLE_STATUSES.has(job.status)) continue;
+      const leaseTime = Date.parse(job.lockedAt ?? job.claimedAt ?? job.startedAt ?? job.updatedAt);
+      if (!Number.isFinite(leaseTime) || leaseTime > Date.parse(cutoff)) continue;
+      const canRetry = job.attempts < job.maxAttempts;
+      const recoveredJob = await updateJobStatus(job.id, {
+        status: canRetry ? 'retrying' : 'failed',
+        error: canRetry ? job.error : job.error ?? reason,
+        lastError: job.lastError ?? job.error ?? reason,
+        retryReason: canRetry ? reason : null,
+        claimedBy: null,
+        workerId: null,
+        lockedAt: null,
+        claimedAt: null,
+        nextRunAt: canRetry ? new Date().toISOString() : null,
+        nextRetryAt: canRetry ? new Date().toISOString() : null,
+        finishedAt: canRetry ? null : new Date().toISOString(),
+        failedAt: canRetry ? null : new Date().toISOString(),
+      });
+      if (recoveredJob) recovered.push(recoveredJob);
+    }
+    return recovered;
+  }
+
+  await ensureSchema();
+  const result = await query(
+    `update runner_jobs
+     set status = case when attempts < max_attempts then 'retrying' else 'failed' end,
+         error = case when attempts < max_attempts then error else coalesce(error, $3) end,
+         last_error = coalesce(last_error, error, $3),
+         retry_reason = case when attempts < max_attempts then $3 else null end,
+         history = coalesce(history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+           'status', case when attempts < max_attempts then 'retrying' else 'failed' end,
+           'message', 'Recovered stale worker lease.',
+           'error', $3,
+           'attempts', attempts,
+           'createdAt', $4
+         )),
+         claimed_by = null,
+         worker_id = null,
+         locked_at = null,
+         claimed_at = null,
+         next_run_at = case when attempts < max_attempts then $4::timestamptz else null end,
+         next_retry_at = case when attempts < max_attempts then $4::timestamptz else null end,
+         finished_at = case when attempts < max_attempts then null else $4::timestamptz end,
+         failed_at = case when attempts < max_attempts then null else $4::timestamptz end,
+         updated_at = $4
+     where ($1::text is null or project_id = $1)
+       and status in ('claimed', 'running')
+       and coalesce(locked_at, claimed_at, started_at, updated_at) <= $2::timestamptz
+     returning *`,
+    [projectId ?? null, cutoff, reason, new Date().toISOString()],
+  );
+  return result.rows.map(normalizeJobRow);
 }
 
 async function claimJobForWorker(job, workerId) {
@@ -1361,20 +1504,24 @@ async function claimJobForWorker(job, workerId) {
     await ensureSchema();
     const updated = await query(
       `update runner_jobs
-       set status = 'running',
+       set status = 'claimed',
            attempts = attempts + 1,
            error = null,
+           last_error = null,
+           retry_reason = null,
            history = coalesce(history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-             'status', 'running',
+             'status', 'claimed',
              'message', 'Worker claimed job.',
              'attempts', attempts + 1,
              'claimedBy', $2,
              'createdAt', $3
            )),
            claimed_by = $2,
+           worker_id = $2,
            locked_at = $3,
+           claimed_at = $3,
            next_run_at = null,
-           started_at = coalesce(started_at, $3),
+           next_retry_at = null,
            finished_at = null,
            updated_at = $3
        where id = $1
@@ -1397,23 +1544,30 @@ async function claimJobForWorker(job, workerId) {
     return null;
   }
 
-  if (!RUNNER_JOB_CLAIMABLE_STATUSES.has(job.status)) return null;
-  if (!isJobDue(job)) return null;
-  if (job.attempts >= job.maxAttempts) {
-    return updateJobStatus(job.id, {
+  const current = memory.jobs.get(job.id);
+  if (!current) return null;
+  if (!RUNNER_JOB_CLAIMABLE_STATUSES.has(current.status)) return null;
+  if (!isJobDue(current)) return null;
+  if (current.attempts >= current.maxAttempts) {
+    return updateJobStatus(current.id, {
       status: 'failed',
-      error: job.error ?? 'Runner job exhausted all attempts.',
+      error: current.error ?? 'Runner job exhausted all attempts.',
       finishedAt: new Date().toISOString(),
     });
   }
-  return updateJobStatus(job.id, {
-    status: 'running',
-    attempts: job.attempts + 1,
+  const claimedAt = new Date().toISOString();
+  return updateJobStatus(current.id, {
+    status: 'claimed',
+    attempts: current.attempts + 1,
     error: null,
+    lastError: null,
+    retryReason: null,
     claimedBy: normalizedWorkerId,
-    lockedAt: new Date().toISOString(),
+    workerId: normalizedWorkerId,
+    lockedAt: claimedAt,
+    claimedAt,
     nextRunAt: null,
-    startedAt: job.startedAt ?? new Date().toISOString(),
+    nextRetryAt: null,
     finishedAt: null,
   });
 }
@@ -1504,16 +1658,25 @@ async function persistJob({
     result: null,
     reportId: null,
     error: null,
+    lastError: null,
+    retryReason: null,
     history: [jobHistoryEntry({ status, message: 'Job queued for worker execution.' })],
     attempts,
     maxAttempts,
     timeoutMs,
     retryBackoffMs,
     claimedBy: null,
+    workerId: null,
     lockedAt: null,
+    claimedAt: null,
     nextRunAt: null,
+    nextRetryAt: null,
     startedAt: null,
     finishedAt: null,
+    completedAt: null,
+    failedAt: null,
+    canceledAt: null,
+    cancelledAt: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -1566,17 +1729,25 @@ async function updateJobStatus(jobId, patch) {
          report_id = $3,
          result = $4,
          error = $5,
-         history = $6,
-         attempts = $7,
-         max_attempts = $8,
-         timeout_ms = $9,
-         retry_backoff_ms = $10,
-         claimed_by = $11,
-         locked_at = $12,
-         next_run_at = $13,
-         started_at = $14,
-         finished_at = $15,
-         updated_at = $16
+         last_error = $6,
+         retry_reason = $7,
+         history = $8,
+         attempts = $9,
+         max_attempts = $10,
+         timeout_ms = $11,
+         retry_backoff_ms = $12,
+         claimed_by = $13,
+         worker_id = $14,
+         locked_at = $15,
+         claimed_at = $16,
+         next_run_at = $17,
+         next_retry_at = $18,
+         started_at = $19,
+         finished_at = $20,
+         completed_at = $21,
+         failed_at = $22,
+         cancelled_at = $23,
+         updated_at = $24
      where id = $1
      returning *`,
     [
@@ -1585,16 +1756,24 @@ async function updateJobStatus(jobId, patch) {
       next.reportId ?? null,
       next.result ?? null,
       next.error ?? null,
+      next.lastError ?? next.error ?? null,
+      next.retryReason ?? null,
       next.history,
       next.attempts,
       next.maxAttempts,
       next.timeoutMs,
       next.retryBackoffMs,
       next.claimedBy ?? null,
+      next.workerId ?? next.claimedBy ?? null,
       next.lockedAt ?? null,
+      next.claimedAt ?? next.lockedAt ?? null,
       next.nextRunAt ?? null,
+      next.nextRetryAt ?? next.nextRunAt ?? null,
       next.startedAt ?? null,
       next.finishedAt ?? null,
+      next.completedAt ?? (next.status === 'completed' ? next.finishedAt : null),
+      next.failedAt ?? (next.status === 'failed' ? next.finishedAt : null),
+      next.cancelledAt ?? next.canceledAt ?? (next.status === 'canceled' || next.status === 'cancelled' ? next.finishedAt : null),
       next.updatedAt,
     ],
   );
@@ -1624,7 +1803,7 @@ async function findRunnerJobByIdempotencyKey({ projectId, runnerId, idempotencyK
   await ensureSchema();
   const result = await query(
     `select * from runner_jobs
-     where project_id = $1 and runner_id = $2 and idempotency_key = $3
+     where project_id = $1 and runner_id is not distinct from $2 and idempotency_key = $3
      limit 1`,
     [projectId, runnerId, idempotencyKey],
   );
@@ -1772,6 +1951,16 @@ function normalizeOptionalText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function normalizeAdapterConfig(value) {
+  if (!value || typeof value !== 'object') return null;
+  const type = normalizeOptionalText(value.type ?? value.adapter);
+  if (!type) return null;
+  if (type === 'vercel-ai-sdk' || type === 'vercel_ai_sdk') {
+    return validateVercelAiSdkAdapterConfig(value);
+  }
+  throw new Error(`Unsupported adapter type: ${type}`);
+}
+
 function normalizePositiveInteger(value, fallback) {
   const normalized = Number(value);
   if (!Number.isFinite(normalized) || normalized < 1) return fallback;
@@ -1835,11 +2024,12 @@ function shouldRecordJobHistory(job, patch) {
 }
 
 function jobHistoryMessage(job, patch) {
-  if (patch.status === 'running') return 'Worker claimed job.';
+  if (patch.status === 'claimed') return 'Worker claimed job.';
+  if (patch.status === 'running') return 'Worker started execution.';
   if (patch.status === 'retrying') return 'Attempt failed; job scheduled for retry.';
   if (patch.status === 'failed') return 'Job failed after exhausting attempts.';
   if (patch.status === 'completed') return 'Job completed and linked a report.';
-  if (patch.status === 'canceled') return 'Job canceled before completion.';
+  if (patch.status === 'canceled' || patch.status === 'cancelled') return 'Job canceled before completion.';
   if (patch.status === 'queued' && job.status === 'failed') return 'Job queued for retry.';
   if (patch.error) return 'Job recorded an error.';
   return 'Job updated.';
@@ -2051,16 +2241,25 @@ function normalizeJobRow(row) {
     payload: row.payload,
     result: row.result,
     error: row.error,
+    lastError: row.last_error ?? row.error ?? null,
+    retryReason: row.retry_reason ?? null,
     history: Array.isArray(row.history) ? row.history : [],
     attempts: Number(row.attempts ?? 0),
     maxAttempts: Number(row.max_attempts ?? 1),
     timeoutMs: Number(row.timeout_ms ?? 0),
     retryBackoffMs: Number(row.retry_backoff_ms ?? 0),
     claimedBy: row.claimed_by ?? null,
+    workerId: row.worker_id ?? row.claimed_by ?? null,
     lockedAt: row.locked_at ? String(row.locked_at) : null,
+    claimedAt: row.claimed_at ? String(row.claimed_at) : row.locked_at ? String(row.locked_at) : null,
     nextRunAt: row.next_run_at ? String(row.next_run_at) : null,
+    nextRetryAt: row.next_retry_at ? String(row.next_retry_at) : row.next_run_at ? String(row.next_run_at) : null,
     startedAt: row.started_at ? String(row.started_at) : null,
     finishedAt: row.finished_at ? String(row.finished_at) : null,
+    completedAt: row.completed_at ? String(row.completed_at) : row.status === 'completed' && row.finished_at ? String(row.finished_at) : null,
+    failedAt: row.failed_at ? String(row.failed_at) : row.status === 'failed' && row.finished_at ? String(row.finished_at) : null,
+    canceledAt: row.cancelled_at ? String(row.cancelled_at) : ['canceled', 'cancelled'].includes(row.status) && row.finished_at ? String(row.finished_at) : null,
+    cancelledAt: row.cancelled_at ? String(row.cancelled_at) : ['canceled', 'cancelled'].includes(row.status) && row.finished_at ? String(row.finished_at) : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
