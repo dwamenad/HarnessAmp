@@ -384,7 +384,7 @@ test('runner jobs enqueue durably, dedupe by idempotency key, and run through wo
     assert.ok(runResponse.body.reportId);
     assert.deepEqual(
       runResponse.body.history.map((item) => item.status),
-      ['queued', 'running', 'completed'],
+      ['queued', 'claimed', 'running', 'completed'],
     );
     assert.equal(runnerCalls, 1);
 
@@ -638,6 +638,380 @@ test('runner jobs retry failed attempts and can be canceled before execution', a
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('runner job claims reject duplicate workers and create only one report', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+  const originalFetch = globalThis.fetch;
+  let runnerCalls = 0;
+
+  try {
+    const runnerResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'runners' },
+      body: {
+        name: 'Contention Runner',
+        endpointUrl: 'https://runner.example.test/contention',
+      },
+    }, runnerResponse);
+    const runnerId = runnerResponse.body.runner.id;
+
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        runnerId,
+        pack: bundle,
+        idempotencyKey: 'contention-job-key-001',
+        maxAttempts: 2,
+      },
+    }, createResponse);
+
+    globalThis.fetch = async () => {
+      runnerCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { observations: [] };
+        },
+      };
+    };
+
+    const firstRun = createMockResponse();
+    const secondRun = createMockResponse();
+    await Promise.all([
+      jobsHandler({
+        method: 'POST',
+        headers: {},
+        query: { id: createResponse.body.jobId, action: 'run' },
+        body: { workerId: 'worker-a' },
+      }, firstRun),
+      jobsHandler({
+        method: 'POST',
+        headers: {},
+        query: { id: createResponse.body.jobId, action: 'run' },
+        body: { workerId: 'worker-b' },
+      }, secondRun),
+    ]);
+
+    const statuses = [firstRun.statusCode, secondRun.statusCode].sort();
+    assert.deepEqual(statuses, [200, 409]);
+    const completed = [firstRun, secondRun].find((response) => response.statusCode === 200);
+    assert.equal(completed.body.status, 'completed');
+    assert.ok(completed.body.reportId);
+    assert.equal(runnerCalls, 1);
+
+    const getResponse = createMockResponse();
+    await jobsHandler({
+      method: 'GET',
+      headers: {},
+      query: { id: createResponse.body.jobId },
+    }, getResponse);
+
+    assert.equal(getResponse.body.status, 'completed');
+    assert.equal(getResponse.body.reportId, completed.body.reportId);
+    assert.equal(getResponse.body.history.filter((item) => item.status === 'completed').length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('worker polling recovers stale claimed jobs for retry', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  process.env.WORKER_SERVICE_TOKEN = 'worker-recovery-secret';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+
+  try {
+    const runnerResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'runners' },
+      body: {
+        name: 'Recovery Runner',
+        endpointUrl: 'https://runner.example.test/recovery',
+      },
+    }, runnerResponse);
+
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        runnerId: runnerResponse.body.runner.id,
+        pack: bundle,
+        idempotencyKey: 'stale-recovery-job-key-001',
+        maxAttempts: 2,
+      },
+    }, createResponse);
+
+    const claimResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'claim' },
+      body: { workerId: 'crashed-worker' },
+    }, claimResponse);
+
+    assert.equal(claimResponse.statusCode, 200);
+    assert.equal(claimResponse.body.status, 'claimed');
+    assert.equal(claimResponse.body.attempts, 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    delete process.env.HARNESSAMP_DEV_AUTH;
+
+    const listResponse = createMockResponse();
+    await jobsHandler({
+      method: 'GET',
+      headers: { authorization: 'Bearer worker-recovery-secret' },
+      query: {
+        projectId: session.defaultProjectId,
+        status: 'queued,retrying',
+        staleAfterMs: '1',
+      },
+    }, listResponse);
+
+    assert.equal(listResponse.statusCode, 200);
+    const recovered = listResponse.body.jobs.find((job) => job.id === createResponse.body.jobId);
+    assert.equal(recovered.status, 'retrying');
+    assert.match(recovered.retryReason, /Worker lease expired/);
+    assert.equal(recovered.claimedBy, null);
+  } finally {
+    delete process.env.WORKER_SERVICE_TOKEN;
+    process.env.HARNESSAMP_DEV_AUTH = '1';
+  }
+});
+
+test('canceling a running job prevents report creation after worker response', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+  const originalFetch = globalThis.fetch;
+  let releaseRunner;
+  let runnerCalls = 0;
+  const runnerStarted = new Promise((resolve) => {
+    globalThis.fetch = async () => {
+      runnerCalls += 1;
+      resolve();
+      await new Promise((release) => {
+        releaseRunner = release;
+      });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { observations: [] };
+        },
+      };
+    };
+  });
+
+  try {
+    const runnerResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'runners' },
+      body: {
+        name: 'Cancel Running Runner',
+        endpointUrl: 'https://runner.example.test/cancel-running',
+      },
+    }, runnerResponse);
+
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        runnerId: runnerResponse.body.runner.id,
+        pack: bundle,
+        idempotencyKey: 'cancel-running-job-key-001',
+      },
+    }, createResponse);
+
+    const runResponse = createMockResponse();
+    const runPromise = jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'cancel-test-worker' },
+    }, runResponse);
+
+    await runnerStarted;
+
+    const cancelResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'cancel' },
+      body: {},
+    }, cancelResponse);
+
+    assert.equal(cancelResponse.statusCode, 200);
+    assert.equal(cancelResponse.body.status, 'canceled');
+    assert.equal(cancelResponse.body.reportId, null);
+
+    releaseRunner();
+    await runPromise;
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'canceled');
+    assert.equal(runResponse.body.reportId, null);
+    assert.equal(runnerCalls, 1);
+
+    const getResponse = createMockResponse();
+    await jobsHandler({
+      method: 'GET',
+      headers: {},
+      query: { id: createResponse.body.jobId },
+    }, getResponse);
+    assert.equal(getResponse.body.status, 'canceled');
+    assert.equal(getResponse.body.reportId, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Vercel AI SDK adapter jobs run through the worker and link reports', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+
+  const createResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      adapter: {
+        type: 'vercel-ai-sdk',
+        target: './examples/vercel-ai-sdk/app/api/chat/route.mjs',
+        modelLabel: 'fixture/worker',
+        mode: 'sample',
+      },
+      pack: bundle,
+      idempotencyKey: 'vercel-ai-sdk-worker-job-001',
+      maxAttempts: 2,
+      timeoutMs: 5000,
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.body.status, 'queued');
+  assert.equal(createResponse.body.adapter.type, 'vercel-ai-sdk');
+
+  const runResponse = createMockResponse();
+  await jobsHandler({
+    method: 'POST',
+    headers: {},
+    query: { id: createResponse.body.jobId, action: 'run' },
+    body: { workerId: 'adapter-worker' },
+  }, runResponse);
+
+  assert.equal(runResponse.statusCode, 200);
+  assert.equal(runResponse.body.status, 'completed');
+  assert.equal(runResponse.body.attempts, 1);
+  assert.ok(runResponse.body.reportId);
+  assert.equal(runResponse.body.result.reportId, runResponse.body.reportId);
+});
+
+test('Vercel AI SDK adapter jobs keep duplicate workers from creating duplicate reports', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+
+  const createResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      adapter: {
+        type: 'vercel-ai-sdk',
+        target: './examples/vercel-ai-sdk/app/api/chat/route.mjs',
+        mode: 'sample',
+      },
+      pack: bundle,
+      idempotencyKey: 'vercel-ai-sdk-contention-job-001',
+      maxAttempts: 2,
+    },
+  }, createResponse);
+
+  const firstRun = createMockResponse();
+  const secondRun = createMockResponse();
+  await Promise.all([
+    jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'adapter-worker-a' },
+    }, firstRun),
+    jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'adapter-worker-b' },
+    }, secondRun),
+  ]);
+
+  assert.deepEqual([firstRun.statusCode, secondRun.statusCode].sort(), [200, 409]);
+  const completed = [firstRun, secondRun].find((response) => response.statusCode === 200);
+  assert.equal(completed.body.status, 'completed');
+  assert.ok(completed.body.reportId);
+  assert.equal(completed.body.history.filter((item) => item.status === 'completed').length, 1);
+});
+
+test('canceling an adapter job before execution prevents report creation', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+
+  const createResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      adapter: {
+        type: 'vercel-ai-sdk',
+        target: './examples/vercel-ai-sdk/app/api/chat/route.mjs',
+      },
+      pack: bundle,
+      idempotencyKey: 'vercel-ai-sdk-cancel-job-001',
+    },
+  }, createResponse);
+
+  const cancelResponse = createMockResponse();
+  await jobsHandler({
+    method: 'POST',
+    headers: {},
+    query: { id: createResponse.body.jobId, action: 'cancel' },
+    body: {},
+  }, cancelResponse);
+
+  assert.equal(cancelResponse.statusCode, 200);
+  assert.equal(cancelResponse.body.status, 'canceled');
+
+  const runResponse = createMockResponse();
+  await jobsHandler({
+    method: 'POST',
+    headers: {},
+    query: { id: createResponse.body.jobId, action: 'run' },
+    body: { workerId: 'adapter-worker' },
+  }, runResponse);
+
+  assert.equal(runResponse.statusCode, 409);
 });
 
 test('benchmark lifecycle creates drafts, approvals, and promoted golden cases', async () => {

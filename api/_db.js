@@ -169,7 +169,7 @@ export async function ensureSchema() {
       id text primary key,
       project_id text not null references projects(id) on delete cascade,
       workspace_id text references workspaces(id) on delete cascade,
-      runner_id text not null references runner_registrations(id) on delete cascade,
+      runner_id text references runner_registrations(id) on delete cascade,
       created_by text not null references users(id) on delete cascade,
       report_id text references reports(id) on delete set null,
       status text not null,
@@ -199,16 +199,28 @@ export async function ensureSchema() {
     alter table runner_jobs add column if not exists timeout_ms integer not null default 0;
     alter table runner_jobs add column if not exists retry_backoff_ms integer not null default 0;
     alter table runner_jobs add column if not exists claimed_by text;
+    alter table runner_jobs add column if not exists worker_id text;
     alter table runner_jobs add column if not exists locked_at timestamptz;
+    alter table runner_jobs add column if not exists claimed_at timestamptz;
     alter table runner_jobs add column if not exists next_run_at timestamptz;
+    alter table runner_jobs add column if not exists next_retry_at timestamptz;
     alter table runner_jobs add column if not exists started_at timestamptz;
     alter table runner_jobs add column if not exists finished_at timestamptz;
+    alter table runner_jobs add column if not exists completed_at timestamptz;
+    alter table runner_jobs add column if not exists failed_at timestamptz;
+    alter table runner_jobs add column if not exists cancelled_at timestamptz;
+    alter table runner_jobs add column if not exists last_error text;
+    alter table runner_jobs add column if not exists retry_reason text;
+    alter table runner_jobs alter column runner_id drop not null;
     update runner_jobs r
       set workspace_id = p.workspace_id
       from projects p
       where r.project_id = p.id and r.workspace_id is null;
     create unique index if not exists runner_jobs_project_runner_idempotency_idx
       on runner_jobs (project_id, runner_id, idempotency_key)
+      where idempotency_key is not null;
+    create unique index if not exists runner_jobs_project_adapter_idempotency_idx
+      on runner_jobs (project_id, coalesce(runner_id, '__adapter__'), idempotency_key)
       where idempotency_key is not null;
 
     create table if not exists failure_workflows (

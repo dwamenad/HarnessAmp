@@ -227,6 +227,7 @@ const operatorNextActions = [
 
 const runLifecycleSteps = [
   'queued',
+  'claimed',
   'running',
   'completed',
   'failed to execute',
@@ -411,6 +412,8 @@ const defaultState = {
   selectedWorkspaceId: '',
   selectedProjectId: '',
   selectedRunnerId: '',
+  executionTarget: 'runner',
+  vercelAiSdkTarget: './examples/vercel-ai-sdk/app/api/chat/route.mjs',
   workspaceDraftName: 'Workspace',
   projectDraftName: 'Active Project',
   runnerRegistrationName: 'Primary runner',
@@ -1335,19 +1338,36 @@ function renderSaasReports() {
 }
 
 function renderReportsTable(reportRows) {
-  const headers = ['Name', 'Project', 'Harness', 'Pack', 'Benchmark', 'Run type', 'Run date', 'Score', 'Critical', 'Evidence'];
+  const headers = ['Name', 'Project / harness', 'Pack / benchmark', 'Run', 'Score', 'Critical', 'Evidence'];
   return `
     <table class="ha-table ha-report-table">
       <thead><tr>${headers.map((header) => `<th>${header}</th>`).join('')}<th>Decision</th><th>Export</th></tr></thead>
       <tbody>${reportRows.map((report) => `
         <tr>
-          ${report.cells.map((cell, index) => `<td data-label="${escapeHtml(headers[index])}">${escapeHtml(cell)}</td>`).join('')}
+          ${reportDisplayCells(report).map(({ label, html }) => `<td data-label="${escapeHtml(label)}">${html}</td>`).join('')}
           <td data-label="Decision">${renderDecisionBadge(report.decision, report.tone)}</td>
           <td data-label="Export">${renderReportExportButtons(report)}</td>
         </tr>`).join('')}
       </tbody>
     </table>
   `;
+}
+
+function reportDisplayCells(report) {
+  const cells = report.cells;
+  return [
+    { label: 'Name', html: escapeHtml(cells[0]) },
+    { label: 'Project / harness', html: renderReportCellStack(cells[1], cells[2]) },
+    { label: 'Pack / benchmark', html: renderReportCellStack(cells[3], cells[4]) },
+    { label: 'Run', html: renderReportCellStack(cells[5], cells[6]) },
+    { label: 'Score', html: escapeHtml(cells[7]) },
+    { label: 'Critical', html: escapeHtml(cells[8]) },
+    { label: 'Evidence', html: escapeHtml(cells[9]) },
+  ];
+}
+
+function renderReportCellStack(primary, secondary) {
+  return `<span class="ha-report-cellstack"><span>${escapeHtml(primary)}</span><small>${escapeHtml(secondary)}</small></span>`;
 }
 
 function renderReportExportButtons(report) {
@@ -2274,13 +2294,14 @@ async function startConfiguredRun() {
   consoleState.runFeedback = `Queued ${run.name}`;
   persistConsoleState();
 
-  if (state.sessionStatus === 'authenticated' && state.selectedProjectId && state.selectedRunnerId) {
+  if (state.sessionStatus === 'authenticated' && state.selectedProjectId && (state.selectedRunnerId || state.executionTarget === 'vercel-ai-sdk')) {
     try {
+      const executionPayload = projectJobExecutionPayload();
       const payload = await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          runnerId: state.selectedRunnerId,
+          ...executionPayload,
           pack: {
             id: run.packId,
             tier: run.tier,
@@ -3085,7 +3106,12 @@ function renderWorkspaceSection(isAuthed) {
               <button class="button button--secondary" id="register-runner" type="button">Register runner</button>
               <button class="button button--secondary" id="dispatch-job" type="button">Start run</button>
             </div>
+            <label><span>Execution target</span><select id="execution-target-select">
+              <option value="runner" ${state.executionTarget !== 'vercel-ai-sdk' ? 'selected' : ''}>Registered HTTP runner</option>
+              <option value="vercel-ai-sdk" ${state.executionTarget === 'vercel-ai-sdk' ? 'selected' : ''}>Vercel AI SDK adapter</option>
+            </select></label>
             <label><span>Active runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>
+            <label><span>AI SDK route target</span><input id="vercel-ai-sdk-target" type="text" value="${escapeHtml(state.vercelAiSdkTarget)}" placeholder="./app/api/chat/route.mjs" /></label>
             <p class="runner-state" id="job-state">${escapeHtml(state.activeJobStatus || 'No run started')}</p>
             <div id="job-observability" class="job-observability">${renderJobObservability()}</div>
           ` : `
@@ -3420,6 +3446,14 @@ function bindEvents() {
   bindIfPresent('#register-runner', 'click', registerRunner);
   bindIfPresent('#runner-select', 'change', (event) => {
     state.selectedRunnerId = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#execution-target-select', 'change', (event) => {
+    state.executionTarget = event.target.value;
+    persistState();
+  });
+  bindIfPresent('#vercel-ai-sdk-target', 'input', (event) => {
+    state.vercelAiSdkTarget = event.target.value;
     persistState();
   });
   bindIfPresent('#dispatch-job', 'click', dispatchProjectJob);
@@ -4385,7 +4419,7 @@ function renderProjectCommandCenterContent() {
   const latestReport = latestCommandCenterReport();
   const latestGate = latestReport?.gate ?? 'none';
   const robustnessDrop = latestReport?.summary?.robustnessDrop ?? latestReport?.summary?.gap ?? null;
-  const activeJobs = state.projectJobs.filter((job) => ['queued', 'running', 'retrying'].includes(job.status));
+  const activeJobs = state.projectJobs.filter((job) => ['queued', 'claimed', 'running', 'retrying'].includes(job.status));
   const failedJobs = state.projectJobs.filter((job) => job.status === 'failed');
   const activeRunners = state.projectRunners.filter((runner) => runner.status === 'active');
   const benchmarkSummary = commandCenterBenchmarkSummary();
@@ -4603,7 +4637,7 @@ function renderJobObservability() {
   if (!job) {
     return '<p class="session-muted">Queued runs, worker claims, retries, errors, and linked reports appear here.</p>';
   }
-  const terminal = ['completed', 'failed', 'canceled'].includes(job.status);
+  const terminal = ['completed', 'failed', 'canceled', 'cancelled'].includes(job.status);
   const history = Array.isArray(job.history) ? job.history : [];
   const errors = history.filter((item) => item.error);
   const reportLink = job.reportId
@@ -4619,19 +4653,23 @@ function renderJobObservability() {
     </div>
     <div class="job-metrics">
       <div><span>Attempts</span><strong>${escapeHtml(job.attempts ?? 0)} / ${escapeHtml(job.maxAttempts ?? 1)}</strong></div>
-      <div><span>Worker</span><strong>${escapeHtml(job.claimedBy ?? 'unclaimed')}</strong></div>
-      <div><span>Retry schedule</span><strong>${escapeHtml(formatJobDate(job.nextRunAt) ?? 'not scheduled')}</strong></div>
+      <div><span>Worker</span><strong>${escapeHtml(job.workerId ?? job.claimedBy ?? 'unclaimed')}</strong></div>
+      <div><span>Retry reason</span><strong>${escapeHtml(job.retryReason ?? 'none')}</strong></div>
+      <div><span>Retry schedule</span><strong>${escapeHtml(formatJobDate(job.nextRetryAt ?? job.nextRunAt) ?? 'not scheduled')}</strong></div>
       <div><span>Report</span><strong>${reportLink}</strong></div>
     </div>
     <div class="job-metrics">
       <div><span>Queued</span><strong>${escapeHtml(formatJobDate(job.createdAt) ?? '--')}</strong></div>
+      <div><span>Claimed</span><strong>${escapeHtml(formatJobDate(job.claimedAt ?? job.lockedAt) ?? '--')}</strong></div>
       <div><span>Started</span><strong>${escapeHtml(formatJobDate(job.startedAt) ?? '--')}</strong></div>
+      <div><span>Completed</span><strong>${escapeHtml(formatJobDate(job.completedAt ?? (job.status === 'completed' ? job.finishedAt : null)) ?? '--')}</strong></div>
+      <div><span>Failed</span><strong>${escapeHtml(formatJobDate(job.failedAt ?? (job.status === 'failed' ? job.finishedAt : null)) ?? '--')}</strong></div>
+      <div><span>Cancelled</span><strong>${escapeHtml(formatJobDate(job.cancelledAt ?? job.canceledAt ?? (['canceled', 'cancelled'].includes(job.status) ? job.finishedAt : null)) ?? '--')}</strong></div>
       <div><span>Updated</span><strong>${escapeHtml(formatJobDate(job.updatedAt) ?? '--')}</strong></div>
-      <div><span>Finished</span><strong>${escapeHtml(formatJobDate(job.finishedAt) ?? '--')}</strong></div>
     </div>
     <div class="job-actions">
       <button class="button button--secondary" id="cancel-active-job" type="button" ${terminal ? 'disabled' : ''}>Cancel job</button>
-      ${job.error ? `<span class="job-error">${escapeHtml(job.error)}</span>` : '<span class="session-muted">No current error</span>'}
+      ${job.error || job.lastError ? `<span class="job-error">${escapeHtml(job.error ?? job.lastError)}</span>` : '<span class="session-muted">No current error</span>'}
     </div>
     <div class="job-history">
       <h4>Timeline</h4>
@@ -5039,17 +5077,18 @@ async function registerRunner() {
 }
 
 async function dispatchProjectJob() {
-  if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId || !state.selectedRunnerId) {
-    showFeedback('Select a project and runner first');
+  if (state.sessionStatus !== 'authenticated' || !state.selectedProjectId || (!state.selectedRunnerId && state.executionTarget !== 'vercel-ai-sdk')) {
+    showFeedback('Select a project and execution target first');
     return;
   }
   if (!state.analysis) runDiagnosis();
   try {
+    const executionPayload = projectJobExecutionPayload();
     const payload = await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        runnerId: state.selectedRunnerId,
+        ...executionPayload,
         pack: state.analysis?.exportPack ?? {},
         thresholds: state.thresholds,
         profileId: getSelectedRiskProfile().id,
@@ -5074,17 +5113,27 @@ async function dispatchProjectJob() {
     renderJobObservabilityPanel();
     renderProjectCommandCenterPanel();
     persistState();
-    void fetchJson(`/api/jobs/${encodeURIComponent(payload.jobId)}?action=run`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workerId: 'console-worker' }),
-    }).catch((error) => {
-      showFeedback(error.message);
-    });
     await pollJob(payload.jobId);
   } catch (error) {
     showFeedback(error.message);
   }
+}
+
+function projectJobExecutionPayload() {
+  if (state.executionTarget === 'vercel-ai-sdk') {
+    return {
+      runnerId: null,
+      adapter: {
+        type: 'vercel-ai-sdk',
+        target: state.vercelAiSdkTarget,
+        modelLabel: 'Vercel AI SDK route',
+        mode: 'sample',
+        streamingMode: 'auto',
+        captureToolCalls: true,
+      },
+    };
+  }
+  return { runnerId: state.selectedRunnerId };
 }
 
 async function cancelActiveJob() {
@@ -5352,7 +5401,7 @@ async function pollJob(jobId) {
       persistState();
       return;
     }
-    if (job.status === 'failed' || job.status === 'canceled') {
+    if (job.status === 'failed' || job.status === 'canceled' || job.status === 'cancelled') {
       showFeedback(job.error ?? `Runner job ${job.status}`);
       persistState();
       return;

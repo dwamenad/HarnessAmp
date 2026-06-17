@@ -136,37 +136,50 @@ Creates or returns a durable runner job.
 
 Body:
 
-- `runnerId` - registered runner id
+- `runnerId` - registered runner id for a custom HTTP runner; omit when using `adapter`
+- `adapter` - optional adapter config, currently `{ "type": "vercel-ai-sdk", "target": "./app/api/chat/route.mjs" }`
 - `pack` - benchmark or harness pack to evaluate
 - `thresholds` - optional release-gate thresholds
 - `profileId` - optional risk profile id
 - `presetId` - optional UI preset id
-- `idempotencyKey` - optional key that deduplicates job creation for the same project and runner
+- `idempotencyKey` - optional key that deduplicates job creation for the same project and runner or adapter
 - `maxAttempts` - attempts before terminal failure
 - `timeoutMs` - external runner request timeout
 - `retryBackoffMs` - delay before a failed attempt can be claimed again
+
+`runnerId` or `adapter.type` is required. Adapter-backed jobs use the same queue, claim, retry, cancellation, and report-linking lifecycle as registered HTTP runners.
 
 Returns:
 
 - `jobId`
 - `status`
 - `idempotencyKey`
+- `adapter`
 - `attempts`
 - `maxAttempts`
+- `workerId`
+- `claimedAt`
+- `startedAt`
+- `completedAt`
+- `failedAt`
+- `cancelledAt`
+- `lastError`
+- `retryReason`
+- `nextRetryAt`
 
 ### `GET /api/jobs/<job-id>`
 
-Returns the current job document, including `status`, `attempts`, `maxAttempts`, `reportId`, `result`, `error`, `history`, `claimedBy`, `lockedAt`, `nextRunAt`, `startedAt`, and `finishedAt`.
+Returns the current job document, including `status`, `attempts`, `maxAttempts`, `reportId`, `result`, `error`, `lastError`, `retryReason`, `history`, `claimedBy`, `workerId`, `lockedAt`, `claimedAt`, `nextRunAt`, `nextRetryAt`, `startedAt`, `completedAt`, `failedAt`, `cancelledAt`, and `finishedAt`.
 
-### `GET /api/jobs?projectId=<project-id>&status=queued,retrying`
+### `GET /api/jobs?projectId=<project-id>&status=queued,retrying&staleAfterMs=120000`
 
-Lists project runner jobs, optionally filtered by comma-separated status values. The local `harnessamp worker` command uses this endpoint to find queued or retryable jobs from the dev API process.
+Lists project runner jobs, optionally filtered by comma-separated status values. The local `harnessamp worker` command uses this endpoint to find queued or retryable jobs from the API process.
 
-Worker services may call this endpoint with `Authorization: Bearer <WORKER_SERVICE_TOKEN>`.
+Worker services may call this endpoint with `Authorization: Bearer <WORKER_SERVICE_TOKEN>`. Worker-authenticated polls recover stale `claimed` or `running` jobs older than `staleAfterMs` by moving them to `retrying` when attempts remain, or `failed` when attempts are exhausted.
 
 ### `POST /api/jobs/<job-id>?action=claim`
 
-Claims a `queued` or due `retrying` job for a worker. Claiming sets the job to `running`, increments `attempts`, records `claimedBy`, and stamps `startedAt` if it was empty.
+Claims a `queued` or due `retrying` job for a worker. Claiming sets the job to `claimed`, increments `attempts`, records `claimedBy`/`workerId`, and stamps `claimedAt`/`lockedAt`.
 
 Body:
 
@@ -175,7 +188,7 @@ Body:
 
 ### `POST /api/jobs/<job-id>?action=run`
 
-Claims and executes a job through the registered runner. On success it writes a report and marks the job `completed`. On failure it marks the job `retrying` until attempts are exhausted, then `failed`.
+Claims and executes a job through the registered runner. The action moves the job from `claimed` to `running`, calls the registered runner, writes exactly one report on success, and links it through `reportId`. On failure it marks the job `retrying` until attempts are exhausted, then `failed`.
 
 Worker services may call this action with `Authorization: Bearer <WORKER_SERVICE_TOKEN>` and a matching `projectId` in the JSON body.
 

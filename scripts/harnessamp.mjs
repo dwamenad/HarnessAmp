@@ -184,6 +184,7 @@ async function runWorkerCommand(parsedOptions) {
       once: parsedOptions.once,
       intervalMs: parsedOptions.intervalMs,
       maxJobs: parsedOptions.maxJobs,
+      staleAfterMs: parsedOptions.staleAfterMs,
       log: (line) => console.log(line),
     });
     console.log(JSON.stringify(result, null, 2));
@@ -282,6 +283,7 @@ function parseArgs(args) {
     riskProfile: null,
     runnerKind: 'mock',
     runnerOptions: {},
+    adapter: null,
     concurrency: 4,
     maxAttemptsPerRun: 1,
     timeoutMs: 0,
@@ -314,6 +316,7 @@ function parseArgs(args) {
     once: false,
     intervalMs: 2000,
     maxJobs: Infinity,
+    staleAfterMs: Number(process.env.HARNESSAMP_WORKER_STALE_AFTER_MS ?? 120000),
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -330,6 +333,43 @@ function parseArgs(args) {
     }
     if (arg === '--runner-kind') {
       parsed.runnerKind = args[index + 1] ?? parsed.runnerKind;
+      index += 1;
+      continue;
+    }
+    if (arg === '--adapter') {
+      parsed.adapter = args[index + 1] ?? null;
+      parsed.runnerKind = parsed.adapter === 'vercel-ai-sdk' ? 'vercel-ai-sdk' : parsed.runnerKind;
+      parsed.runnerOptions.type = parsed.adapter;
+      index += 1;
+      continue;
+    }
+    if (arg === '--target') {
+      parsed.runnerOptions.target = args[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--mode') {
+      parsed.runnerOptions.mode = args[index + 1] ?? 'sample';
+      index += 1;
+      continue;
+    }
+    if (arg === '--streaming-mode') {
+      parsed.runnerOptions.streamingMode = args[index + 1] ?? 'auto';
+      index += 1;
+      continue;
+    }
+    if (arg === '--model-label') {
+      parsed.runnerOptions.modelLabel = args[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--structured-output-schema') {
+      parsed.runnerOptions.structuredOutputSchema = args[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--benchmark') {
+      parsed.benchmark = args[index + 1] ?? '';
       index += 1;
       continue;
     }
@@ -355,6 +395,7 @@ function parseArgs(args) {
     }
     if (arg === '--timeout-ms') {
       parsed.timeoutMs = Number(args[index + 1] ?? parsed.timeoutMs);
+      parsed.runnerOptions.timeoutMs = parsed.timeoutMs;
       index += 1;
       continue;
     }
@@ -503,6 +544,11 @@ function parseArgs(args) {
     }
     if (arg === '--max-jobs') {
       parsed.maxJobs = Number(args[index + 1] ?? parsed.maxJobs);
+      index += 1;
+      continue;
+    }
+    if (arg === '--stale-after-ms') {
+      parsed.staleAfterMs = Number(args[index + 1] ?? parsed.staleAfterMs);
       index += 1;
       continue;
     }

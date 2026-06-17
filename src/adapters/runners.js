@@ -1,3 +1,5 @@
+import { executeVercelAiSdkAgentRun, validateVercelAiSdkAdapterConfig } from './vercel-ai-sdk.js';
+
 export class AgentRunner {
   async run() {
     throw new Error('AgentRunner.run must be implemented by a concrete runner.');
@@ -61,6 +63,28 @@ export class AgentFrameworkRunner extends AgentRunner {}
 export class GraphWorkflowRunner extends AgentRunner {}
 export class CrewWorkflowRunner extends AgentRunner {}
 export class MultiAgentRunner extends AgentRunner {}
+export class VercelAISDKRunner extends AgentRunner {
+  constructor(options = {}) {
+    super();
+    this.config = validateVercelAiSdkAdapterConfig({
+      type: 'vercel-ai-sdk',
+      ...options,
+      target: options.target ?? options.targetRoute ?? process.env.HARNESSAMP_VERCEL_AI_SDK_TARGET,
+      modelLabel: options.modelLabel ?? process.env.HARNESSAMP_VERCEL_AI_SDK_MODEL ?? options.model,
+      timeoutMs: options.timeoutMs ?? process.env.HARNESSAMP_VERCEL_AI_SDK_TIMEOUT_MS,
+    });
+  }
+
+  async run({ bundle, mutation = null, task = null, environment = 'local' }) {
+    return executeVercelAiSdkAgentRun({
+      bundle,
+      mutation,
+      task,
+      environment,
+      config: this.config,
+    });
+  }
+}
 export class CustomHTTPRunner extends AgentRunner {
   constructor(options = {}) {
     super();
@@ -124,6 +148,8 @@ export function createRunner(kind = 'mock', options = {}) {
     graph_workflow: GraphWorkflowRunner,
     crew_workflow: CrewWorkflowRunner,
     multi_agent: MultiAgentRunner,
+    vercel_ai_sdk: VercelAISDKRunner,
+    'vercel-ai-sdk': VercelAISDKRunner,
     custom_http: CustomHTTPRunner,
     mcp: MCPRunner,
   };

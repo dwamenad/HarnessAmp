@@ -3214,44 +3214,74 @@ section[id] {
 }
 
 .ha-report-table th:nth-child(2),
-.ha-report-table td:nth-child(2),
-.ha-report-table th:nth-child(3),
-.ha-report-table td:nth-child(3) {
-  width: 13%;
+.ha-report-table td:nth-child(2) {
+  width: 17%;
 }
 
 .ha-report-table th:nth-child(4),
 .ha-report-table td:nth-child(4) {
-  width: 9%;
+  width: 10%;
+}
+
+.ha-report-table th:nth-child(3),
+.ha-report-table td:nth-child(3) {
+  width: 18%;
 }
 
 .ha-report-table th:nth-child(5),
-.ha-report-table td:nth-child(5) {
-  width: 8%;
+.ha-report-table td:nth-child(5),
+.ha-report-table th:nth-child(6),
+.ha-report-table td:nth-child(6) {
+  width: 7%;
 }
 
-.ha-report-table th:nth-child(6),
-.ha-report-table td:nth-child(6),
 .ha-report-table th:nth-child(7),
 .ha-report-table td:nth-child(7) {
-  width: 5%;
+  width: 10%;
 }
 
 .ha-report-table th:nth-child(8),
 .ha-report-table td:nth-child(8) {
-  width: 10%;
+  width: 11%;
 }
 
 .ha-report-table th:nth-child(9),
-.ha-report-table td:nth-child(9),
-.ha-report-table th:nth-child(10),
-.ha-report-table td:nth-child(10) {
-  width: 10%;
+.ha-report-table td:nth-child(9) {
+  width: 11%;
 }
 
 .ha-report-table td {
-  overflow-wrap: normal;
+  overflow-wrap: anywhere;
   word-break: normal;
+}
+
+.ha-report-table th:nth-child(5),
+.ha-report-table td:nth-child(5),
+.ha-report-table th:nth-child(6),
+.ha-report-table td:nth-child(6),
+.ha-report-table th:nth-child(8),
+.ha-report-table td:nth-child(8),
+.ha-report-table th:nth-child(9),
+.ha-report-table td:nth-child(9) {
+  text-align: center;
+}
+
+.ha-report-cellstack {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ha-report-cellstack span,
+.ha-report-cellstack small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ha-report-cellstack small {
+  color: var(--ha-muted);
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 .ha-harness-table {
@@ -3827,8 +3857,9 @@ section[id] {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
+  justify-content: center;
   gap: 6px;
-  min-width: 132px;
+  min-width: 0;
 }
 
 .ha-report-export details {
