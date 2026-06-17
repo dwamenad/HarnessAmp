@@ -15,6 +15,25 @@ import {
   executeVercelAiSdkAdapterBenchmark,
   validateVercelAiSdkAdapterConfig,
 } from '../src/adapters/vercel-ai-sdk.js';
+import {
+  AdapterExecutionError,
+  adapterFailureRetryable,
+  classifyAdapterError,
+  normalizeAdapterDiagnostics,
+} from '../src/adapters/contract.js';
+import {
+  adapterConfigForExecutionTarget,
+  executionTargetRunnerId,
+  executionTargetSafeMetadata,
+  normalizeExecutionTarget,
+} from '../src/adapters/execution-targets.js';
+import { executeHostedProviderBenchmark } from '../src/adapters/hosted-provider.js';
+import {
+  assertHostedByokEnabled,
+  decryptSecretValue,
+  encryptSecretValue,
+  maskSecretValue,
+} from '../src/adapters/secrets.js';
 import { ensureSchema, hasPostgresConfig, query } from './_db.js';
 
 const memory = globalThis.__harnessAmpStore ?? {
@@ -23,6 +42,7 @@ const memory = globalThis.__harnessAmpStore ?? {
   projects: new Map(),
   memberships: new Map(),
   runners: new Map(),
+  projectSecrets: new Map(),
   reports: new Map(),
   jobs: new Map(),
   failureWorkflows: new Map(),
@@ -47,6 +67,7 @@ memory.benchmarkReviews ??= new Map();
 memory.benchmarkReviewAssignments ??= new Map();
 memory.promotionCandidates ??= new Map();
 memory.goldenCases ??= new Map();
+memory.projectSecrets ??= new Map();
 memory.failureWorkflows ??= new Map();
 memory.failureRegressionSuites ??= new Map();
 
@@ -568,6 +589,121 @@ export async function listRunners({ projectId, userId }) {
   return result.rows.map(normalizeRunnerRow);
 }
 
+export async function createProjectSecret({
+  projectId,
+  userId,
+  provider,
+  name,
+  secretValue,
+  validationStatus = null,
+}) {
+  assertHostedByokEnabled();
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can create project secrets');
+  }
+  const normalizedProvider = normalizeProvider(provider);
+  if (!normalizedProvider) throw new Error('Provider is required');
+  if (!secretValue) throw new Error('Provider API key is required');
+  const now = new Date().toISOString();
+  const secret = {
+    id: createId('sec'),
+    projectId,
+    workspaceId: membership.workspaceId,
+    provider: normalizedProvider,
+    displayName: normalizeOptionalText(name) ?? `${normalizedProvider} key`,
+    maskedPreview: maskSecretValue(secretValue),
+    status: 'active',
+    validationStatus,
+    lastValidationErrorClass: null,
+    encryptedSecret: encryptSecretValue(secretValue),
+    createdBy: userId,
+    createdAt: now,
+    updatedAt: now,
+    lastUsedAt: null,
+  };
+
+  if (useMemory()) {
+    memory.projectSecrets.set(secret.id, secret);
+    return projectSecretSummary(secret);
+  }
+
+  await ensureSchema();
+  const inserted = await query(
+    `insert into project_secrets
+       (id, project_id, workspace_id, provider, display_name, masked_preview, status, validation_status, last_validation_error_class, encrypted_secret, created_by, created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, null, $9, $10, $11, $11)
+     returning *`,
+    [secret.id, projectId, membership.workspaceId, secret.provider, secret.displayName, secret.maskedPreview, secret.status, validationStatus, secret.encryptedSecret, userId, now],
+  );
+  return projectSecretSummary(normalizeProjectSecretRow(inserted.rows[0]));
+}
+
+export async function listProjectSecrets({ projectId, userId }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership) throw new Error('Project membership not found');
+  if (useMemory()) {
+    return Array.from(memory.projectSecrets.values())
+      .filter((secret) => secret.projectId === projectId && secret.status !== 'deleted')
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map(projectSecretSummary);
+  }
+  await ensureSchema();
+  const result = await query(
+    `select * from project_secrets
+     where project_id = $1 and status <> 'deleted'
+     order by updated_at desc`,
+    [projectId],
+  );
+  return result.rows.map(normalizeProjectSecretRow).map(projectSecretSummary);
+}
+
+export async function getProjectSecretMetadata({ projectId, secretId, userId }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership) throw new Error('Project membership not found');
+  const secret = await readProjectSecret(secretId);
+  if (!secret || secret.projectId !== projectId || secret.status === 'deleted') return null;
+  return projectSecretSummary(secret);
+}
+
+export async function disableProjectSecret({ projectId, secretId, userId }) {
+  return updateProjectSecretStatus({ projectId, secretId, userId, status: 'disabled' });
+}
+
+export async function deleteProjectSecret({ projectId, secretId, userId }) {
+  return updateProjectSecretStatus({ projectId, secretId, userId, status: 'deleted' });
+}
+
+export async function resolveHostedProviderSecret({ projectId, secretRef, provider }) {
+  const secret = await readProjectSecret(secretRef);
+  if (!secret || secret.projectId !== projectId || secret.status === 'deleted') {
+    throw new AdapterExecutionError('Hosted provider secret not found.', {
+      failureClass: 'hosted_provider_secret_missing',
+      rawErrorMessage: 'Hosted provider secret not found.',
+      phase: 'before_dispatch',
+    });
+  }
+  if (secret.status !== 'active') {
+    throw new AdapterExecutionError('Hosted provider secret is disabled.', {
+      failureClass: 'hosted_provider_secret_disabled',
+      rawErrorMessage: 'Hosted provider secret is disabled.',
+      phase: 'before_dispatch',
+    });
+  }
+  if (secret.provider !== provider) {
+    throw new AdapterExecutionError('Hosted provider secret provider mismatch.', {
+      failureClass: 'hosted_provider_secret_provider_mismatch',
+      rawErrorMessage: 'Hosted provider secret provider mismatch.',
+      phase: 'before_dispatch',
+    });
+  }
+  await markProjectSecretUsed(secret.id);
+  return {
+    metadata: projectSecretSummary(secret),
+    secretValue: decryptSecretValue(secret.encryptedSecret),
+  };
+}
+
 export async function createRunnerJob({
   projectId,
   runnerId,
@@ -581,15 +717,21 @@ export async function createRunnerJob({
   timeoutMs = 0,
   retryBackoffMs = 0,
   adapter = null,
+  executionTarget = null,
 }) {
   const membership = await getProjectMembership(userId, projectId);
   if (!membership || !canMutateProject(membership.role)) {
     throw new Error('Only owners and maintainers can create jobs');
   }
 
-  const adapterConfig = normalizeAdapterConfig(adapter);
-  const runner = runnerId ? await getRunnerById(runnerId) : null;
-  if (!adapterConfig && (!runner || runner.projectId !== projectId)) {
+  const target = normalizeExecutionTarget(executionTarget, { runnerId, adapter });
+  if (target.type === 'hosted_provider') {
+    await validateHostedProviderTargetForProject({ projectId, target });
+  }
+  const adapterConfig = adapterConfigForExecutionTarget(target);
+  const resolvedRunnerId = executionTargetRunnerId(target);
+  const runner = resolvedRunnerId ? await getRunnerById(resolvedRunnerId) : null;
+  if (!adapterConfig && target.type === 'registered_runner' && (!runner || runner.projectId !== projectId)) {
     throw new Error('Runner not found');
   }
   if (runner && runner.projectId !== projectId) throw new Error('Runner not found');
@@ -600,12 +742,17 @@ export async function createRunnerJob({
     profileId,
     presetId,
     adapter: adapterConfig,
+    executionTarget: {
+      ...target,
+      adapter: adapterConfig,
+      safeMetadata: executionTargetSafeMetadata(target),
+    },
   };
   const normalizedIdempotencyKey = normalizeOptionalText(idempotencyKey);
   if (normalizedIdempotencyKey) {
     const existing = await findRunnerJobByIdempotencyKey({
       projectId,
-      runnerId: runnerId ?? null,
+      runnerId: resolvedRunnerId ?? null,
       idempotencyKey: normalizedIdempotencyKey,
     });
     if (existing) return existing;
@@ -614,7 +761,7 @@ export async function createRunnerJob({
   const job = await persistJob({
     id: createId('job'),
     projectId,
-    runnerId,
+    runnerId: resolvedRunnerId,
     userId,
     workspaceId: membership.workspaceId,
     status: 'queued',
@@ -1294,13 +1441,37 @@ async function dispatchRunnerJob(job) {
     status: 'running',
     startedAt: current.startedAt ?? runningAt,
     finishedAt: null,
+    result: {
+      ...(current.result ?? {}),
+      execution: executionDescriptor(current),
+      diagnostics: normalizeAdapterDiagnostics({}, {
+        adapterType: current.payload?.executionTarget?.type ?? current.payload?.adapter?.type ?? 'registered-http-runner',
+        target: current.payload?.executionTarget?.routeUrl ?? current.payload?.adapter?.target ?? '',
+        runnerId: current.runnerId ?? '',
+        requestTimestamp: runningAt,
+        workerId: current.workerId ?? current.claimedBy ?? '',
+        jobId: current.id,
+        retryAttempt: current.attempts,
+        benchmarkId: current.payload?.pack?.id ?? current.payload?.pack?.project ?? '',
+        benchmarkVersion: current.payload?.pack?.version ?? null,
+        phase: 'before_dispatch',
+      }),
+    },
   });
   if (!running || await isJobCanceled(job.id)) return readJob(job.id);
 
-  const adapterConfig = normalizeAdapterConfig(running.payload.adapter);
+  const executionTarget = normalizeExecutionTarget(running.payload?.executionTarget, {
+    runnerId: running.runnerId,
+    adapter: running.payload?.adapter,
+  });
+  const adapterConfig = adapterConfigForExecutionTarget(executionTarget);
   const observations = adapterConfig
     ? await runAdapterBackedJob(running, adapterConfig)
-    : await runHttpRunnerBackedJob(running);
+    : executionTarget.type === 'registered_runner'
+      ? await runHttpRunnerBackedJob(running)
+      : executionTarget.type === 'hosted_provider'
+        ? await runHostedProviderBackedJob(running, executionTarget)
+        : failUnsupportedExecutionTarget(running, executionTarget);
 
   if (await isJobCanceled(job.id)) return readJob(job.id);
   const analysis = analyzeBundle(running.payload.pack, observations, {
@@ -1340,6 +1511,8 @@ async function dispatchRunnerJob(job) {
       reportId: saved.id,
       gate: snapshot.summary.verdict,
       overallScore: snapshot.summary.overallScore,
+      execution: executionDescriptor(running),
+      diagnostics: collectObservationDiagnostics(observations)[0] ?? running.result?.diagnostics ?? null,
     },
     error: null,
     lastError: null,
@@ -1358,7 +1531,21 @@ async function dispatchRunnerJob(job) {
 
 async function runHttpRunnerBackedJob(job) {
   const runner = await getRunnerById(job.runnerId);
-  if (!runner) throw new Error('Runner not found');
+  if (!runner) {
+    throw new AdapterExecutionError('Registered runner not found.', {
+      adapterType: 'registered_runner',
+      runnerId: job.runnerId ?? '',
+      workerId: job.workerId ?? job.claimedBy ?? '',
+      jobId: job.id,
+      retryAttempt: job.attempts,
+      benchmarkId: job.payload?.pack?.id ?? job.payload?.pack?.project ?? '',
+      benchmarkVersion: job.payload?.pack?.version ?? null,
+      failureClass: 'registered_runner_missing',
+      rawErrorMessage: 'Registered runner not found.',
+      phase: 'before_dispatch',
+    });
+  }
+  const requestTimestamp = new Date().toISOString();
 
   const response = await runFetchWithTimeout(
     () => fetch(runner.endpointUrl, {
@@ -1380,14 +1567,43 @@ async function runHttpRunnerBackedJob(job) {
   );
 
   if (!response.ok) {
-    throw new Error(`Runner returned HTTP ${response.status}`);
+    throw new AdapterExecutionError(`Runner returned HTTP ${response.status}`, {
+      adapterType: 'registered-http-runner',
+      runnerId: runner.id,
+      target: runner.endpointUrl,
+      requestTimestamp,
+      responseTimestamp: new Date().toISOString(),
+      httpStatus: response.status,
+      workerId: job.workerId ?? job.claimedBy ?? '',
+      jobId: job.id,
+      retryAttempt: job.attempts,
+      benchmarkId: job.payload?.pack?.id ?? job.payload?.pack?.project ?? '',
+      benchmarkVersion: job.payload?.pack?.version ?? null,
+      failureClass: classifyAdapterError(new Error(`Runner returned HTTP ${response.status}`), { httpStatus: response.status }),
+      rawErrorMessage: `Runner returned HTTP ${response.status}`,
+      phase: 'during_adapter_call',
+    });
   }
 
   const payload = await response.json();
   if (await isJobCanceled(job.id)) return [];
   const observations = Array.isArray(payload) ? payload : payload.observations;
   if (!Array.isArray(observations)) {
-    throw new Error('Runner response must be an observation array or { observations }.');
+    throw new AdapterExecutionError('Runner response must be an observation array or { observations }.', {
+      adapterType: 'registered-http-runner',
+      runnerId: runner.id,
+      target: runner.endpointUrl,
+      requestTimestamp,
+      responseTimestamp: new Date().toISOString(),
+      workerId: job.workerId ?? job.claimedBy ?? '',
+      jobId: job.id,
+      retryAttempt: job.attempts,
+      benchmarkId: job.payload?.pack?.id ?? job.payload?.pack?.project ?? '',
+      benchmarkVersion: job.payload?.pack?.version ?? null,
+      failureClass: 'adapter_invalid_response',
+      rawErrorMessage: 'Runner response must be an observation array or { observations }.',
+      phase: 'during_parsing',
+    });
   }
   return observations;
 }
@@ -1402,8 +1618,62 @@ async function runAdapterBackedJob(job, adapterConfig) {
   }, {
     environment: 'worker',
     shouldCancel: () => isJobCanceled(job.id),
+    workerId: job.workerId ?? job.claimedBy ?? '',
+    jobId: job.id,
+    retryAttempt: job.attempts,
   });
+  const failing = result.observations.find((observation) => observation?.metadata?.adapterDiagnostics?.failureClass);
+  if (failing) {
+    const diagnostics = failing.metadata.adapterDiagnostics;
+    throw new AdapterExecutionError(failing.error ?? diagnostics.rawErrorMessage ?? 'Adapter execution failed.', diagnostics);
+  }
   return result.observations;
+}
+
+async function runHostedProviderBackedJob(job, executionTarget) {
+  const resolved = await resolveHostedProviderSecret({
+    projectId: job.projectId,
+    secretRef: executionTarget.secretRef,
+    provider: executionTarget.provider,
+  });
+  let apiKey = resolved.secretValue;
+  try {
+    const result = await executeHostedProviderBenchmark(job.payload.pack, {
+      provider: executionTarget.provider,
+      model: executionTarget.model,
+      secretRef: resolved.metadata.ref,
+      apiKey,
+      timeoutMs: job.timeoutMs || 30000,
+      mode: executionTarget.mode ?? 'sample',
+    }, {
+      environment: 'worker',
+      shouldCancel: () => isJobCanceled(job.id),
+      workerId: job.workerId ?? job.claimedBy ?? '',
+      jobId: job.id,
+      retryAttempt: job.attempts,
+    });
+    const failing = result.observations.find((observation) => observation?.metadata?.diagnostics?.failureClass);
+    if (failing) {
+      throw new AdapterExecutionError(failing.error ?? failing.metadata.diagnostics.rawErrorMessage ?? 'Hosted provider execution failed.', failing.metadata.diagnostics);
+    }
+    return result.observations;
+  } finally {
+    apiKey = null;
+  }
+}
+
+function failUnsupportedExecutionTarget(job, executionTarget) {
+  throw new AdapterExecutionError(`Unsupported execution target type: ${executionTarget?.type ?? 'missing'}`, {
+    adapterType: executionTarget?.type ?? '',
+    workerId: job.workerId ?? job.claimedBy ?? '',
+    jobId: job.id,
+    retryAttempt: job.attempts,
+    benchmarkId: job.payload?.pack?.id ?? job.payload?.pack?.project ?? '',
+    benchmarkVersion: job.payload?.pack?.version ?? null,
+    failureClass: executionTarget ? 'execution_target_unsupported' : 'execution_target_missing',
+    rawErrorMessage: `Unsupported execution target type: ${executionTarget?.type ?? 'missing'}`,
+    phase: 'before_dispatch',
+  });
 }
 
 async function isJobCanceled(jobId) {
@@ -1415,7 +1685,20 @@ async function markRunnerJobFailure(jobId, error) {
   const current = await readJob(jobId);
   if (!current || current.status === 'canceled') return current;
   const message = error instanceof Error ? error.message : String(error);
-  const canRetry = current.attempts < current.maxAttempts;
+  const diagnostics = normalizeAdapterDiagnostics(error?.diagnostics, {
+    adapterType: current.payload?.executionTarget?.type ?? current.payload?.adapter?.type ?? (current.runnerId ? 'registered-http-runner' : ''),
+    target: current.payload?.executionTarget?.routeUrl ?? current.payload?.adapter?.target ?? '',
+    runnerId: current.runnerId ?? '',
+    workerId: current.workerId ?? current.claimedBy ?? '',
+    jobId: current.id,
+    retryAttempt: current.attempts,
+    benchmarkId: current.payload?.pack?.id ?? current.payload?.pack?.project ?? '',
+    benchmarkVersion: current.payload?.pack?.version ?? null,
+    failureClass: error?.failureClass ?? classifyAdapterError(error),
+    rawErrorMessage: message,
+    phase: error?.diagnostics?.phase ?? 'during_adapter_call',
+  });
+  const canRetry = current.attempts < current.maxAttempts && adapterFailureRetryable(diagnostics.failureClass);
   const failedAt = canRetry ? null : new Date().toISOString();
   const nextRetryAt = canRetry ? retryReadyAt(current.retryBackoffMs) : null;
   return updateJobStatus(jobId, {
@@ -1423,6 +1706,13 @@ async function markRunnerJobFailure(jobId, error) {
     error: message,
     lastError: message,
     retryReason: canRetry ? message : null,
+    result: {
+      ...(current.result ?? {}),
+      execution: executionDescriptor(current),
+      diagnostics,
+      failureClass: diagnostics.failureClass,
+      retryable: diagnostics.retryable,
+    },
     claimedBy: null,
     workerId: null,
     lockedAt: null,
@@ -1951,6 +2241,93 @@ function normalizeOptionalText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+const SUPPORTED_HOSTED_PROVIDERS = new Set(['openai', 'anthropic', 'google', 'mistral', 'groq', 'together']);
+const EXECUTABLE_HOSTED_PROVIDERS = new Set(['openai', 'anthropic']);
+
+function normalizeProvider(value) {
+  const provider = normalizeOptionalText(value)?.toLowerCase() ?? '';
+  return SUPPORTED_HOSTED_PROVIDERS.has(provider) ? provider : null;
+}
+
+async function updateProjectSecretStatus({ projectId, secretId, userId, status }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership || !canMutateProject(membership.role)) {
+    throw new Error('Only owners and maintainers can update project secrets');
+  }
+  const existing = await readProjectSecret(secretId);
+  if (!existing || existing.projectId !== projectId) return null;
+  const next = { ...existing, status, updatedAt: new Date().toISOString() };
+  if (useMemory()) {
+    memory.projectSecrets.set(secretId, next);
+    return projectSecretSummary(next);
+  }
+  await ensureSchema();
+  const result = await query(
+    `update project_secrets
+     set status = $3, updated_at = $4
+     where id = $1 and project_id = $2
+     returning *`,
+    [secretId, projectId, status, next.updatedAt],
+  );
+  return result.rows[0] ? projectSecretSummary(normalizeProjectSecretRow(result.rows[0])) : null;
+}
+
+async function validateHostedProviderTargetForProject({ projectId, target }) {
+  assertHostedByokEnabled();
+  if (!EXECUTABLE_HOSTED_PROVIDERS.has(target.provider)) {
+    throw new Error(`Hosted provider execution is not implemented for ${target.provider}.`);
+  }
+  if (!target.model) throw new Error('hosted_provider execution target requires model.');
+  if (!target.secretRef) throw new Error('hosted_provider execution target requires secretRef.');
+  const secret = await readProjectSecret(target.secretRef);
+  if (!secret || secret.projectId !== projectId || secret.status === 'deleted') {
+    throw new Error('Hosted provider secret not found.');
+  }
+  if (secret.status !== 'active') {
+    throw new Error('Hosted provider secret is disabled.');
+  }
+  if (secret.provider !== target.provider) {
+    throw new Error('Hosted provider secret provider mismatch.');
+  }
+}
+
+async function readProjectSecret(secretId) {
+  if (!secretId) return null;
+  if (useMemory()) return memory.projectSecrets.get(secretId) ?? null;
+  await ensureSchema();
+  const result = await query('select * from project_secrets where id = $1 limit 1', [secretId]);
+  return result.rows[0] ? normalizeProjectSecretRow(result.rows[0]) : null;
+}
+
+async function markProjectSecretUsed(secretId) {
+  const now = new Date().toISOString();
+  if (useMemory()) {
+    const existing = memory.projectSecrets.get(secretId);
+    if (existing) memory.projectSecrets.set(secretId, { ...existing, lastUsedAt: now, updatedAt: now });
+    return;
+  }
+  await ensureSchema();
+  await query('update project_secrets set last_used_at = $2, updated_at = $2 where id = $1', [secretId, now]);
+}
+
+function projectSecretSummary(secret) {
+  return {
+    id: secret.id,
+    ref: secret.id,
+    projectId: secret.projectId,
+    provider: secret.provider,
+    displayName: secret.displayName,
+    maskedPreview: secret.maskedPreview,
+    status: secret.status,
+    validationStatus: secret.validationStatus ?? null,
+    lastValidationErrorClass: secret.lastValidationErrorClass ?? null,
+    createdBy: secret.createdBy ?? null,
+    createdAt: secret.createdAt,
+    updatedAt: secret.updatedAt,
+    lastUsedAt: secret.lastUsedAt ?? null,
+  };
+}
+
 function normalizeAdapterConfig(value) {
   if (!value || typeof value !== 'object') return null;
   const type = normalizeOptionalText(value.type ?? value.adapter);
@@ -1959,6 +2336,48 @@ function normalizeAdapterConfig(value) {
     return validateVercelAiSdkAdapterConfig(value);
   }
   throw new Error(`Unsupported adapter type: ${type}`);
+}
+
+function executionDescriptor(job) {
+  const target = normalizeExecutionTarget(job.payload?.executionTarget, {
+    runnerId: job.runnerId,
+    adapter: job.payload?.adapter,
+  });
+  const adapter = adapterConfigForExecutionTarget(target);
+  const safeTarget = executionTargetSafeMetadata(target);
+  if (adapter || target.type === 'vercel_ai_sdk') {
+    return {
+      kind: 'adapter',
+      type: target.type,
+      adapterType: adapter?.type ?? 'vercel-ai-sdk',
+      target: adapter?.target ?? safeTarget.routeUrl ?? '',
+      routeUrl: safeTarget.routeUrl ?? adapter?.target ?? '',
+      timeoutMs: job.timeoutMs || adapter?.timeoutMs || 0,
+    };
+  }
+  if (target.type === 'hosted_provider') {
+    return {
+      kind: 'hosted-provider',
+      type: target.type,
+      provider: target.provider,
+      model: target.model,
+      secretRef: target.secretRef,
+      timeoutMs: job.timeoutMs,
+    };
+  }
+  return {
+    kind: 'registered-runner',
+    type: target.type,
+    runnerId: job.runnerId ?? null,
+    timeoutMs: job.timeoutMs,
+  };
+}
+
+function collectObservationDiagnostics(observations) {
+  return (Array.isArray(observations) ? observations : [])
+    .map((observation) => observation?.metadata?.adapterDiagnostics ?? observation?.diagnostics)
+    .filter(Boolean)
+    .map((diagnostics) => normalizeAdapterDiagnostics(diagnostics));
 }
 
 function normalizePositiveInteger(value, fallback) {
@@ -2262,6 +2681,25 @@ function normalizeJobRow(row) {
     cancelledAt: row.cancelled_at ? String(row.cancelled_at) : ['canceled', 'cancelled'].includes(row.status) && row.finished_at ? String(row.finished_at) : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+  };
+}
+
+function normalizeProjectSecretRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    provider: row.provider,
+    displayName: row.display_name,
+    maskedPreview: row.masked_preview,
+    status: row.status,
+    validationStatus: row.validation_status ?? null,
+    lastValidationErrorClass: row.last_validation_error_class ?? null,
+    encryptedSecret: row.encrypted_secret,
+    createdBy: row.created_by,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    lastUsedAt: row.last_used_at ? String(row.last_used_at) : null,
   };
 }
 

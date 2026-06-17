@@ -32,13 +32,24 @@ export async function runLocalApiWorker(options = {}) {
       if (processed >= maxJobs) break;
       const result = await runJob({ apiUrl, projectId, jobId: job.id, workerId, workerToken, fetchImpl });
       processed += 1;
-      log(`job ${result.id} ${result.status}${result.reportId ? ` report=${result.reportId}` : ''}`);
+      log(formatWorkerJobLine(result));
     }
 
     if (once) break;
   }
 
   return { processed, polls };
+}
+
+function formatWorkerJobLine(job) {
+  const diagnostics = job.result?.diagnostics ?? {};
+  const execution = job.result?.execution ?? {};
+  const target = execution.target ?? diagnostics.target ?? execution.runnerId ?? diagnostics.runnerId ?? job.runnerId ?? '';
+  const report = job.reportId ? ` report=${job.reportId}` : ' no-report-yet';
+  const failure = diagnostics.failureClass ? ` failure=${diagnostics.failureClass}` : '';
+  const route = target ? ` target=${target}` : '';
+  const kind = execution.adapterType ?? diagnostics.adapterType ?? execution.kind ?? 'runner';
+  return `job ${job.id} ${job.status} ${kind}${route}${report}${failure}`;
 }
 
 async function listClaimableJobs({ apiUrl, projectId, workerToken, staleAfterMs, fetchImpl }) {

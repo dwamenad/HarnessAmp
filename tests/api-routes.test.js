@@ -9,6 +9,7 @@ import harnessSmokeHandler from '../api/harness-smoke.js';
 import jobsHandler from '../api/jobs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
+import secretsHandler from '../api/secrets.js';
 import { analyzeBundle, createDemoBundle } from '../src/core/engine.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
 import { seedDevSession } from '../api/_store.js';
@@ -924,6 +925,270 @@ test('Vercel AI SDK adapter jobs run through the worker and link reports', async
   assert.equal(runResponse.body.attempts, 1);
   assert.ok(runResponse.body.reportId);
   assert.equal(runResponse.body.result.reportId, runResponse.body.reportId);
+  assert.equal(runResponse.body.result.execution.adapterType, 'vercel-ai-sdk');
+  assert.equal(runResponse.body.result.diagnostics.adapterType, 'vercel-ai-sdk');
+});
+
+test('project jobs accept normalized execution target payloads', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+
+  const runnerResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'runners' },
+    body: {
+      name: 'Execution Target Runner',
+      endpointUrl: 'https://runner.example.com/harnessamp',
+    },
+  }, runnerResponse);
+
+  const registeredJobResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'registered_runner',
+        runnerId: runnerResponse.body.runner.id,
+      },
+      pack: bundle,
+      idempotencyKey: 'execution-target-runner-job-001',
+    },
+  }, registeredJobResponse);
+
+  assert.equal(registeredJobResponse.statusCode, 200);
+  assert.equal(registeredJobResponse.body.executionTarget.type, 'registered_runner');
+  assert.equal(registeredJobResponse.body.executionTarget.runnerId, runnerResponse.body.runner.id);
+
+  const adapterJobResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      execution_target: {
+        type: 'vercel_ai_sdk',
+        routeUrl: './examples/vercel-ai-sdk/app/api/chat/route.mjs',
+      },
+      pack: bundle,
+      idempotencyKey: 'execution-target-vercel-job-001',
+    },
+  }, adapterJobResponse);
+
+  assert.equal(adapterJobResponse.statusCode, 200);
+  assert.equal(adapterJobResponse.body.executionTarget.type, 'vercel_ai_sdk');
+  assert.equal(adapterJobResponse.body.executionTarget.routeUrl, './examples/vercel-ai-sdk/app/api/chat/route.mjs');
+  assert.equal(adapterJobResponse.body.execution.type, 'vercel_ai_sdk');
+});
+
+test('project job creation rejects hosted provider BYOK without secret infrastructure', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const createResponse = createMockResponse();
+
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'hosted_provider',
+        provider: 'openai',
+        model: 'gpt-5.4',
+        apiKey: 'sk-test-should-not-be-accepted',
+      },
+      pack: createDemoBundle(),
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 400);
+  assert.match(createResponse.body.error, /Unsupported execution target type: hosted_provider|raw provider API keys/);
+});
+
+test('project secrets are encrypted and list safe metadata only', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  process.env.HARNESSAMP_ENABLE_HOSTED_BYOK = '1';
+  process.env.HARNESSAMP_SECRET_ENCRYPTION_KEY = 'test-secret-encryption-key';
+  const session = await seedDevSession();
+
+  const createResponse = createMockResponse();
+  await secretsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId },
+    body: {
+      provider: 'openai',
+      name: 'OpenAI test key',
+      secretValue: 'sk-test-secret-1234abcd',
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.body.secret.provider, 'openai');
+  assert.equal(createResponse.body.secret.maskedPreview, 'sk-...abcd');
+  assert.equal(JSON.stringify(createResponse.body), JSON.stringify(createResponse.body).replace('sk-test-secret-1234abcd', ''));
+
+  const listResponse = createMockResponse();
+  await secretsHandler({
+    method: 'GET',
+    headers: {},
+    query: { projectId: session.defaultProjectId },
+  }, listResponse);
+
+  assert.equal(listResponse.statusCode, 200);
+  assert.ok(listResponse.body.secrets.some((secret) => secret.id === createResponse.body.secret.id));
+  assert.doesNotMatch(JSON.stringify(listResponse.body), /sk-test-secret/);
+
+  const disableResponse = createMockResponse();
+  await secretsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, id: createResponse.body.secret.id },
+    body: { action: 'disable' },
+  }, disableResponse);
+  assert.equal(disableResponse.body.secret.status, 'disabled');
+
+  const deleteResponse = createMockResponse();
+  await secretsHandler({
+    method: 'DELETE',
+    headers: {},
+    query: { projectId: session.defaultProjectId, id: createResponse.body.secret.id },
+  }, deleteResponse);
+  assert.equal(deleteResponse.body.secret.status, 'deleted');
+});
+
+test('hosted provider jobs run through worker with safe metadata only', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  process.env.HARNESSAMP_ENABLE_HOSTED_BYOK = '1';
+  process.env.HARNESSAMP_SECRET_ENCRYPTION_KEY = 'test-secret-encryption-key';
+  const session = await seedDevSession();
+  const secretResponse = createMockResponse();
+  await secretsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId },
+    body: {
+      provider: 'openai',
+      name: 'OpenAI worker key',
+      secretValue: 'sk-worker-secret-1234wxyz',
+    },
+  }, secretResponse);
+
+  const createResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'hosted_provider',
+        provider: 'openai',
+        model: 'gpt-test',
+        secretRef: secretResponse.body.secret.id,
+      },
+      pack: createDemoBundle(),
+      idempotencyKey: 'hosted-provider-job-001',
+      timeoutMs: 5000,
+    },
+  }, createResponse);
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.body.executionTarget.type, 'hosted_provider');
+
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      assert.equal(url, 'https://api.openai.com/v1/chat/completions');
+      assert.equal(init.headers.authorization, 'Bearer sk-worker-secret-1234wxyz');
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            choices: [{ message: { content: 'Hosted provider answer.' } }],
+            usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
+          });
+        },
+      };
+    };
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'hosted-worker' },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'completed');
+    assert.equal(runResponse.body.result.execution.provider, 'openai');
+    assert.equal(runResponse.body.result.execution.model, 'gpt-test');
+    assert.doesNotMatch(JSON.stringify(runResponse.body), /sk-worker-secret/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Vercel AI SDK adapter jobs expose failure class and stop non-retryable config failures', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+
+  const createResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      adapter: {
+        type: 'vercel-ai-sdk',
+        target: './examples/vercel-ai-sdk/app/api/chat/missing-route.mjs',
+        modelLabel: 'fixture/missing',
+      },
+      pack: bundle,
+      idempotencyKey: 'vercel-ai-sdk-missing-route-job-001',
+      maxAttempts: 3,
+      timeoutMs: 5000,
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 200);
+
+  const runResponse = createMockResponse();
+  await jobsHandler({
+    method: 'POST',
+    headers: {},
+    query: { id: createResponse.body.jobId, action: 'run' },
+    body: { workerId: 'adapter-worker' },
+  }, runResponse);
+
+  assert.equal(runResponse.statusCode, 200);
+  assert.equal(runResponse.body.status, 'failed');
+  assert.equal(runResponse.body.attempts, 1);
+  assert.equal(runResponse.body.result.failureClass, 'adapter_target_missing');
+  assert.equal(runResponse.body.result.retryable, false);
+});
+
+test('project job creation rejects invalid adapter config before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const createResponse = createMockResponse();
+
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      adapter: { type: 'vercel-ai-sdk' },
+      pack: createDemoBundle(),
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 400);
+  assert.match(createResponse.body.error, /requires target/);
 });
 
 test('Vercel AI SDK adapter jobs keep duplicate workers from creating duplicate reports', async () => {

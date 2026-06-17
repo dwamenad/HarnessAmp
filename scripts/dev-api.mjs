@@ -12,6 +12,7 @@ import harnessSmokeHandler from '../api/harness-smoke.js';
 import jobsHandler from '../api/jobs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
+import secretsHandler from '../api/secrets.js';
 import workspacesHandler from '../api/workspaces.js';
 
 const SCRIPT_DIR = fileURLToPath(new URL('.', import.meta.url));
@@ -26,6 +27,7 @@ const HANDLERS = {
   jobs: jobsHandler,
   projects: projectsHandler,
   reports: reportsHandler,
+  secrets: secretsHandler,
   workspaces: workspacesHandler,
 };
 
@@ -95,6 +97,23 @@ const ROUTES = [
     buildQuery: (url, match) => withQuery(url, {
       resource: 'jobs',
       projectId: decodeURIComponent(match[1]),
+    }),
+  },
+  {
+    name: 'secrets',
+    pattern: /^\/api\/projects\/([^/]+)\/secrets$/u,
+    handler: HANDLERS.secrets,
+    buildQuery: (url, match) => withQuery(url, {
+      projectId: decodeURIComponent(match[1]),
+    }),
+  },
+  {
+    name: 'secrets',
+    pattern: /^\/api\/projects\/([^/]+)\/secrets\/([^/]+)$/u,
+    handler: HANDLERS.secrets,
+    buildQuery: (url, match) => withQuery(url, {
+      projectId: decodeURIComponent(match[1]),
+      id: decodeURIComponent(match[2]),
     }),
   },
   {

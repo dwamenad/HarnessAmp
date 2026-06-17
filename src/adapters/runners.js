@@ -1,4 +1,5 @@
 import { executeVercelAiSdkAgentRun, validateVercelAiSdkAdapterConfig } from './vercel-ai-sdk.js';
+import { executeHostedProviderAgentRun } from './hosted-provider.js';
 
 export class AgentRunner {
   async run() {
@@ -63,6 +64,30 @@ export class AgentFrameworkRunner extends AgentRunner {}
 export class GraphWorkflowRunner extends AgentRunner {}
 export class CrewWorkflowRunner extends AgentRunner {}
 export class MultiAgentRunner extends AgentRunner {}
+export class HostedProviderRunner extends AgentRunner {
+  constructor(options = {}) {
+    super();
+    this.config = {
+      provider: options.provider ?? process.env.HARNESSAMP_HOSTED_PROVIDER ?? 'openai',
+      model: options.model ?? process.env.HARNESSAMP_HOSTED_PROVIDER_MODEL ?? '',
+      secretRef: options.secretRef ?? null,
+      apiKey: options.apiKey ?? process.env.HARNESSAMP_PROVIDER_API_KEY ?? '',
+      timeoutMs: options.timeoutMs ?? process.env.HARNESSAMP_HOSTED_PROVIDER_TIMEOUT_MS ?? 30000,
+    };
+    if (!this.config.model) throw new Error('HostedProviderRunner requires model.');
+    if (!this.config.apiKey) throw new Error('HostedProviderRunner requires HARNESSAMP_PROVIDER_API_KEY for local CLI execution.');
+  }
+
+  async run({ bundle, mutation = null, task = null, environment = 'local' }) {
+    return executeHostedProviderAgentRun({
+      bundle,
+      mutation,
+      task,
+      environment,
+      config: this.config,
+    });
+  }
+}
 export class VercelAISDKRunner extends AgentRunner {
   constructor(options = {}) {
     super();
@@ -148,6 +173,8 @@ export function createRunner(kind = 'mock', options = {}) {
     graph_workflow: GraphWorkflowRunner,
     crew_workflow: CrewWorkflowRunner,
     multi_agent: MultiAgentRunner,
+    hosted_provider: HostedProviderRunner,
+    'hosted-provider': HostedProviderRunner,
     vercel_ai_sdk: VercelAISDKRunner,
     'vercel-ai-sdk': VercelAISDKRunner,
     custom_http: CustomHTTPRunner,

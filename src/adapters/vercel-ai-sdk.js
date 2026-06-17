@@ -1,6 +1,13 @@
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { analyzeBundle } from '../core/engine.js';
+import {
+  AdapterExecutionError,
+  ADAPTER_FAILURE_CLASSES,
+  classifyAdapterError,
+  normalizeAdapterDiagnostics,
+  sanitizeDebugPayload as sanitizeContractDebugPayload,
+} from './contract.js';
 
 const ADAPTER_TYPE = 'vercel-ai-sdk';
 const SECRET_HEADER_PATTERN = /authorization|cookie|token|secret|key|credential/i;
@@ -12,9 +19,14 @@ export function validateVercelAiSdkAdapterConfig(config = {}) {
     throw new Error(`Unsupported adapter type: ${type}`);
   }
 
-  const target = stringOr(source.target ?? source.targetRoute ?? source.handlerPath, '');
+  const target = stringOr(source.target ?? source.routeUrl ?? source.route_url ?? source.targetRoute ?? source.handlerPath, '');
   const handlerExport = stringOr(source.handlerExport, 'POST');
-  const timeoutMs = positiveInteger(source.timeoutMs, 30000);
+  const timeoutMs = positiveInteger(
+    source.timeoutMs
+      ?? process.env.HARNESSAMP_VERCEL_AI_SDK_TIMEOUT_MS
+      ?? process.env.HARNESSAMP_ADAPTER_TIMEOUT_MS,
+    30000,
+  );
   const maxRetries = nonNegativeInteger(source.maxRetries, 0);
   const mode = ['sample', 'full'].includes(source.mode) ? source.mode : 'sample';
   const streamingMode = ['auto', 'text', 'ui-message', 'data'].includes(source.streamingMode) ? source.streamingMode : 'auto';
@@ -57,6 +69,13 @@ export async function executeVercelAiSdkAdapterBenchmark(bundleInput, configInpu
       config,
       environment: options.environment ?? 'worker',
       shouldCancel: options.shouldCancel,
+      diagnosticsContext: {
+        workerId: options.workerId,
+        jobId: options.jobId,
+        retryAttempt: options.retryAttempt,
+        benchmarkId: analysis.bundle.id ?? analysis.bundle.project ?? '',
+        benchmarkVersion: analysis.bundle.version ?? null,
+      },
     });
     observations.push(observation);
   }
@@ -120,6 +139,8 @@ export async function executeVercelAiSdkAgentRun({ bundle, mutation = null, task
       score: observation.score,
       adapterType: ADAPTER_TYPE,
       target: adapterConfig.target,
+      diagnostics: observation.diagnostics,
+      failureClass: observation.diagnostics?.failureClass ?? null,
       structuredOutput: observation.structuredOutput ? true : false,
       citations: observation.citations,
       sources: observation.sources,
@@ -129,7 +150,19 @@ export async function executeVercelAiSdkAgentRun({ bundle, mutation = null, task
 
 async function executeVercelAiSdkVariant({ bundle, variant, scenario, mutation = null, config, environment, shouldCancel: shouldCancelFn }) {
   const startedAt = Date.now();
+  const requestTimestamp = new Date(startedAt).toISOString();
   const inputPrompt = scenario.objective ?? scenario.input ?? scenario.title ?? '';
+  const diagnosticsBase = {
+    adapterType: ADAPTER_TYPE,
+    target: config.target || 'inline-handler',
+    requestTimestamp,
+    phase: 'before_dispatch',
+    benchmarkId: bundle.id ?? bundle.project ?? '',
+    benchmarkVersion: bundle.version ?? null,
+    scenarioId: scenario.id ?? variant.id ?? '',
+    mutationId: mutation?.mutationId ?? null,
+    mutationFamily: mutation?.mutationFamily ?? variant.familyId ?? '',
+  };
   const requestPayload = {
     messages: buildMessages(bundle, variant, scenario, mutation),
     prompt: inputPrompt,
@@ -154,20 +187,32 @@ async function executeVercelAiSdkVariant({ bundle, variant, scenario, mutation =
 
   try {
     if (await shouldCancel({ shouldCancel: shouldCancelFn })) {
-      throw new Error('Adapter execution canceled before dispatch.');
+      throw new AdapterExecutionError('Adapter execution canceled before dispatch.', {
+        ...diagnosticsBase,
+        phase: 'before_dispatch',
+        failureClass: ADAPTER_FAILURE_CLASSES.WORKER_CANCELED,
+      });
     }
 
     const response = await runWithTimeout(
       () => callAiSdkHandler(config, requestPayload),
       config.timeoutMs,
-      `Vercel AI SDK adapter timed out after ${config.timeoutMs}ms`,
+      {
+        ...diagnosticsBase,
+        phase: 'adapter_call',
+        rawErrorMessage: `Vercel AI SDK adapter timed out after ${config.timeoutMs}ms`,
+      },
     );
 
     if (await shouldCancel({ shouldCancel: shouldCancelFn })) {
-      throw new Error('Adapter execution canceled before normalization.');
+      throw new AdapterExecutionError('Adapter execution canceled before normalization.', {
+        ...diagnosticsBase,
+        phase: 'during_parsing',
+        failureClass: ADAPTER_FAILURE_CLASSES.WORKER_CANCELED,
+      });
     }
 
-    const normalized = await normalizeAiSdkResponse(response, config);
+    const normalized = await normalizeAiSdkResponse(response, config, diagnosticsBase);
     const passed = typeof normalized.passed === 'boolean'
       ? normalized.passed
       : !normalized.error && Boolean(normalized.outputText || normalized.structuredOutput);
@@ -197,15 +242,29 @@ async function executeVercelAiSdkVariant({ bundle, variant, scenario, mutation =
       },
       rawResponse: config.rawDebug ? normalized.rawResponse : null,
       error: normalized.error,
+      diagnostics: normalized.diagnostics,
       passed,
       score,
       notes: normalized.error
         ? `Vercel AI SDK adapter error: ${normalized.error}`
         : `Vercel AI SDK adapter captured ${normalized.outputText ? 'text' : 'structured output'} from ${config.target || 'handler'}.`,
       source: 'observed',
+      metadata: {
+        adapterType: ADAPTER_TYPE,
+        adapterTarget: config.target,
+        adapterDiagnostics: normalized.diagnostics,
+      },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const diagnostics = normalizeAdapterDiagnostics(error?.diagnostics, {
+      ...diagnosticsBase,
+      responseTimestamp: new Date().toISOString(),
+      latencyMs: Date.now() - startedAt,
+      failureClass: error?.failureClass ?? classifyAdapterError(error),
+      rawErrorMessage: message,
+      phase: error?.diagnostics?.phase ?? 'adapter_call',
+    });
     return {
       id: `${variant.id}:vercel-ai-sdk:error`,
       variantId: variant.id,
@@ -225,15 +284,31 @@ async function executeVercelAiSdkVariant({ bundle, variant, scenario, mutation =
       modelMetadata: { model: config.modelLabel },
       rawResponse: null,
       error: message,
+      diagnostics,
       passed: false,
       score: 0,
       notes: `Vercel AI SDK adapter error: ${message}`,
       source: 'observed',
+      metadata: {
+        adapterType: ADAPTER_TYPE,
+        adapterTarget: config.target,
+        adapterDiagnostics: diagnostics,
+      },
     };
   }
 }
 
 async function callAiSdkHandler(config, payload) {
+  if (/^https?:\/\//i.test(config.target)) {
+    return fetch(config.target, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...config.headers,
+      },
+      body: JSON.stringify(payload),
+    });
+  }
   const handler = config.handler ?? await loadHandler(config);
   const request = new Request('http://harnessamp.local/api/adapter/vercel-ai-sdk', {
     method: 'POST',
@@ -256,25 +331,58 @@ async function loadHandler(config) {
   return handler;
 }
 
-async function normalizeAiSdkResponse(response, config) {
+async function normalizeAiSdkResponse(response, config, diagnosticsBase = {}) {
   if (response instanceof Response) {
     const contentType = response.headers.get('content-type') ?? '';
     const text = await response.text();
     const parsed = parseResponseText(text, contentType, config);
     const httpError = response.ok ? null : `HTTP ${response.status}`;
+    const failureClass = httpError
+      ? classifyAdapterError(new Error(httpError), { httpStatus: response.status })
+      : parsed.error
+        ? ADAPTER_FAILURE_CLASSES.EXECUTION_ERROR
+        : !parsed.outputText && !parsed.structuredOutput
+          ? ADAPTER_FAILURE_CLASSES.INVALID_RESPONSE
+          : null;
+    const diagnostics = normalizeAdapterDiagnostics(parsed.diagnostics, {
+      ...diagnosticsBase,
+      responseTimestamp: new Date().toISOString(),
+      latencyMs: Date.now() - Date.parse(diagnosticsBase.requestTimestamp ?? new Date().toISOString()),
+      httpStatus: response.status,
+      failureClass,
+      rawErrorMessage: parsed.error ?? httpError ?? '',
+      phase: httpError ? 'during_adapter_call' : failureClass ? 'during_parsing' : 'completion',
+      toolTraceCount: (parsed.toolCalls?.length ?? 0) + (parsed.toolResults?.length ?? 0),
+      modelMetadata: parsed.modelMetadata,
+    });
     return {
       ...parsed,
       error: parsed.error ?? httpError,
+      diagnostics,
       rawResponse: config.rawDebug ? { status: response.status, contentType, text: truncate(text, 12000) } : null,
     };
   }
 
   if (response && typeof response === 'object') {
-    return normalizePayload(response, config);
+    const parsed = normalizePayload(response, config);
+    return {
+      ...parsed,
+      diagnostics: normalizeAdapterDiagnostics(parsed.diagnostics, {
+        ...diagnosticsBase,
+        responseTimestamp: new Date().toISOString(),
+        latencyMs: Date.now() - Date.parse(diagnosticsBase.requestTimestamp ?? new Date().toISOString()),
+        failureClass: parsed.error ? ADAPTER_FAILURE_CLASSES.EXECUTION_ERROR : null,
+        rawErrorMessage: parsed.error ?? '',
+        phase: parsed.error ? 'during_adapter_call' : 'completion',
+        toolTraceCount: (parsed.toolCalls?.length ?? 0) + (parsed.toolResults?.length ?? 0),
+        modelMetadata: parsed.modelMetadata,
+      }),
+    };
   }
 
+  const outputText = String(response ?? '');
   return {
-    outputText: String(response ?? ''),
+    outputText,
     toolCalls: [],
     toolResults: [],
     structuredOutput: null,
@@ -283,6 +391,14 @@ async function normalizeAiSdkResponse(response, config) {
     tokenUsage: { input: null, output: null },
     modelMetadata: {},
     rawResponse: config.rawDebug ? response : null,
+    diagnostics: normalizeAdapterDiagnostics({}, {
+      ...diagnosticsBase,
+      responseTimestamp: new Date().toISOString(),
+      latencyMs: Date.now() - Date.parse(diagnosticsBase.requestTimestamp ?? new Date().toISOString()),
+      failureClass: outputText ? null : ADAPTER_FAILURE_CLASSES.INVALID_RESPONSE,
+      rawErrorMessage: outputText ? '' : 'Adapter returned an empty response.',
+      phase: outputText ? 'completion' : 'during_parsing',
+    }),
   };
 }
 
@@ -448,7 +564,13 @@ async function runWithTimeout(fn, timeoutMs, message) {
     return await Promise.race([
       fn(),
       new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(new Error(message)), limit);
+        timeout = setTimeout(() => reject(new AdapterExecutionError(message.rawErrorMessage, {
+          ...message,
+          responseTimestamp: new Date().toISOString(),
+          timedOut: true,
+          latencyMs: limit,
+          failureClass: ADAPTER_FAILURE_CLASSES.TIMEOUT,
+        })), limit);
       }),
     ]);
   } finally {
@@ -487,7 +609,7 @@ function sanitizeDebugPayload(value, { rawDebug = false } = {}) {
       clean[key] = truncate(item, 2000);
     }
   }
-  return clean;
+  return sanitizeContractDebugPayload(clean);
 }
 
 function normalizeTokenUsage(value) {

@@ -24,6 +24,10 @@ export const CLI_COMMANDS = [
     description: 'Poll the local HarnessAmp API for queued runner jobs and execute them.',
   },
   {
+    name: 'secrets',
+    description: 'Manage encrypted project provider secrets for hosted BYOK execution targets.',
+  },
+  {
     name: 'benchmark',
     description: 'Validate, import, edit, review, diff, and export benchmark lifecycle files.',
   },

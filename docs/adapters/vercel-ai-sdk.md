@@ -2,6 +2,8 @@
 
 The Vercel AI SDK adapter lets HarnessAmp execute benchmark packs against Next.js or Vercel AI SDK-style route handlers without asking teams to build a separate HarnessAmp HTTP runner first.
 
+This adapter is one execution-target option. It lets users bring their own app route to HarnessAmp while keeping provider API keys inside the user's app or worker environment.
+
 Use it when your product already exposes AI behavior through routes such as:
 
 - `app/api/chat/route.ts`
@@ -9,6 +11,17 @@ Use it when your product already exposes AI behavior through routes such as:
 - tool-calling chat routes built with `streamText`
 - routes returning structured output objects
 - routes returning text, JSON, Server-Sent Events, or AI SDK UI/data stream responses
+
+The target can be a local route module path or an HTTP route URL:
+
+```json
+{
+  "executionTarget": {
+    "type": "vercel_ai_sdk",
+    "routeUrl": "https://example.com/api/harnessamp/agent"
+  }
+}
+```
 
 The adapter is additive. Existing custom HTTP runners, Replit runners, Harness-1 adapters, worker jobs, benchmark governance, reports, and exports continue to use their existing paths.
 
@@ -25,6 +38,7 @@ Each scenario execution is normalized into a HarnessAmp observation with:
 - citations and sources when present
 - latency
 - error state
+- diagnostics envelope with phase, worker/job ids, retry attempt, HTTP status, and failure class
 - model/provider metadata when available
 - safe raw debug payload only when explicitly enabled
 
@@ -50,6 +64,8 @@ Important flags:
 - `--model-label <label>` stores a model/provider label in reports.
 - `--structured-output-schema <name>` records the expected structured-output schema label.
 - `--timeout-ms <n>` fails a scenario when the handler does not respond in time.
+
+When `--adapter vercel-ai-sdk` is used, the CLI also prints a compact adapter summary to stderr with the selected adapter, target, run count, and any failure class. Adapter execution failures exit non-zero.
 
 The adapter calls the route handler with a standard `Request` whose JSON body includes:
 
@@ -111,9 +127,65 @@ Optional adapter environment:
 HARNESSAMP_VERCEL_AI_SDK_TARGET=./app/api/chat/route.mjs
 HARNESSAMP_VERCEL_AI_SDK_MODEL=openai/gpt-5.4
 HARNESSAMP_VERCEL_AI_SDK_TIMEOUT_MS=30000
+HARNESSAMP_ADAPTER_TIMEOUT_MS=30000
 ```
 
 AI provider credentials remain owned by the target app or route process. HarnessAmp should not write provider API keys into reports, job payloads, or logs.
+
+## Diagnostics And Failure Classes
+
+Every adapter invocation produces a normalized diagnostics envelope in the run metadata and worker job result. The envelope records:
+
+- adapter type and safe target route
+- request and response timestamps
+- latency
+- HTTP status when a `Response` is returned
+- timeout status
+- retry attempt
+- worker id and job id
+- benchmark id/version
+- scenario id
+- mutation id/family
+- normalized failure class
+- safely truncated raw error message
+- phase: `before_dispatch`, `during_adapter_call`, `during_parsing`, `during_scoring`, `during_report_creation`, or `completion`
+
+Failure classes are deterministic:
+
+- `execution_target_missing`
+- `execution_target_invalid`
+- `execution_target_unsupported`
+- `registered_runner_missing`
+- `vercel_ai_sdk_route_missing`
+- `hosted_provider_disabled`
+- `hosted_provider_secret_missing`
+- `hosted_provider_secret_disabled`
+- `hosted_provider_secret_provider_mismatch`
+- `hosted_provider_auth_error`
+- `hosted_provider_rate_limited`
+- `hosted_provider_timeout`
+- `hosted_provider_invalid_response`
+- `hosted_provider_model_missing`
+- `hosted_provider_unknown_error`
+- `adapter_target_missing`
+- `adapter_timeout`
+- `adapter_http_error`
+- `adapter_invalid_response`
+- `adapter_schema_mismatch`
+- `adapter_execution_error`
+- `adapter_auth_error`
+- `adapter_rate_limited`
+- `adapter_worker_canceled`
+- `adapter_unknown_error`
+
+`adapter_target_missing`, `adapter_invalid_response`, `adapter_schema_mismatch`, and `adapter_worker_canceled` are non-retryable by default. Timeout, HTTP, rate-limit, auth, execution, and unknown failures can retry until the job reaches `maxAttempts`.
+
+Debug failed worker-backed adapter jobs from:
+
+- `GET /api/jobs/<job-id>`: inspect `result.diagnostics`, `lastError`, `retryReason`, `attempts`, and `workerId`
+- the dashboard job detail panel: execution path, target route, lifecycle state, failure class, last error, retry schedule, and report state
+- worker CLI logs: one-line job status with adapter/runner, target, report state, and failure class
+- generated reports: observation metadata includes adapter diagnostics when a report is created
 
 ## Generic HTTP Runner vs Vercel AI SDK Adapter
 
