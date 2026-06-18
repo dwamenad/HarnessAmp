@@ -74,9 +74,17 @@ export function localRunReportPayload(run, context = {}) {
     observations: numericRunValue(run.observations),
     runnerObservations: observations,
     adapterMode: run.adapterMode || adapterModeFromObservations(observations),
-    status: critical > 0 ? 'review_required' : 'passing',
+    status: run.status === 'failed' || critical > 0 ? 'review_required' : 'passing',
+    runStatus: run.status,
+    executionTarget: run.executionTarget ?? run.target ?? null,
+    workerId: run.workerId ?? run.jobId ?? '',
+    attempts: run.attempts ?? 1,
+    completedAt: run.completedAt ?? '',
+    agentVersion: run.agentVersion ?? run.metadata?.agentVersion ?? '',
     summary: critical > 0
       ? `${critical} critical failure${critical === 1 ? '' : 's'} require owner review before release.`
+      : run.status === 'failed'
+        ? 'Worker, adapter, or execution target state failed before a releasable benchmark result was produced.'
       : 'No critical failures found in this local run.',
     recommendations: critical > 0
       ? ['Review local run summary', 'Pin reproducible RetrievalGuard failures', 'Rerun the same harness after remediation']
@@ -93,17 +101,32 @@ export function enrichReportPayload(report, context = {}) {
   const benchmark = report.benchmark ?? null;
   const releaseDecision = benchmark?.releaseDecision ?? (failed ? 'Block release' : 'Safe to release');
   const environment = reportEnvironment(report);
-  const gate = gateForReport(report, releaseDecision);
   const failureEvidence = failureEvidenceForReport(report, context);
+  const targetReliability = targetReliabilityForReport(report, context);
+  const lifecycle = lifecycleSummaryForReport(report);
+  const releaseGate = releaseGateForReport(report, {
+    releaseDecision,
+    failureEvidence,
+    targetReliability,
+    lifecycle,
+  });
+  const gate = gateForReport(report, releaseGate.decision, releaseGate);
   const retrievalEvidence = isRetrievalReport(report) ? retrievalEvidenceForReport(report) : null;
+  const failureTriage = failureTriageForReport(report, failureEvidence, releaseGate);
+  const historicalComparison = historicalComparisonForReport(report, context);
   return {
     ...report,
     evidenceMode: report.evidenceMode ?? 'seeded-sample',
-    status: failed ? 'review_required' : 'passing',
-    releaseDecision,
+    status: releaseGate.canRelease ? 'passing' : 'review_required',
+    releaseDecision: releaseGate.decision,
     environment,
     owner: packOwner(report.pack),
     gate,
+    releaseGate,
+    targetReliability,
+    lifecycleSummary: lifecycle,
+    failureTriage,
+    historicalComparison,
     benchmark,
     benchmarkResult: benchmark ? {
       benchmarkId: benchmark.id ?? '',
@@ -135,7 +158,7 @@ export function enrichReportPayload(report, context = {}) {
 
 export function reportCsv(report) {
   const rows = [
-    ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'recommended_control'],
+    ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'release_gate_status', 'can_release', 'gate_reasons', 'blocking_failures', 'warnings', 'target_used', 'target_readiness', 'target_validation_state', 'target_run_success_rate', 'target_validation_success_rate', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'failure_class', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'triage_class', 'recommended_control'],
     ...(report.failureEvidence.length ? report.failureEvidence : [{}]).map((failure) => [
       report.id,
       report.name,
@@ -152,6 +175,16 @@ export function reportCsv(report) {
       report.benchmark?.tier ?? '',
       report.benchmark?.score ?? '',
       report.benchmark?.gateResult ?? '',
+      report.releaseGate?.status ?? '',
+      report.releaseGate?.canRelease ? 'yes' : 'no',
+      (report.releaseGate?.reasons ?? []).join('; '),
+      report.releaseGate?.blockingFailures ?? '',
+      report.releaseGate?.warningCount ?? '',
+      report.targetReliability?.targetUsed ?? '',
+      report.targetReliability?.readinessStatus ?? '',
+      report.targetReliability?.validationState ?? '',
+      report.targetReliability?.runSuccessRate ?? '',
+      report.targetReliability?.validationSuccessRate ?? '',
       report.runDate,
       report.score,
       report.criticalFailures,
@@ -160,11 +193,13 @@ export function reportCsv(report) {
       report.adapterMode ?? '',
       (report.benchmark?.failedContracts ?? []).join('; '),
       (report.benchmark?.failedMutationFamilies ?? []).join('; '),
+      failure.failureClass ?? '',
       failure.id ?? '',
       failure.severity ?? '',
       failure.contract ?? '',
       failure.scenarioId ?? '',
       failure.mutationId ?? '',
+      failure.triageClass ?? '',
       failure.recommendedControl ?? '',
     ]),
   ];
@@ -192,9 +227,18 @@ export function reportMarkdown(report) {
 - Score: ${report.score}
 - Critical failures: ${report.criticalFailures}
 - Decision: ${report.releaseDecision}
+- Release gate status: ${report.releaseGate.status}
+- Can release: ${report.releaseGate.canRelease ? 'yes' : 'no'}
+- Blocking failures: ${report.releaseGate.blockingFailures}
+- Warnings: ${report.releaseGate.warningCount}
 - Owner: ${report.owner}
 - Evidence mode: ${report.evidenceMode}
 - Adapter mode: ${report.adapterMode ?? 'not recorded'}
+- Target used: ${report.targetReliability.targetUsed}
+- Target readiness: ${report.targetReliability.readinessStatus}
+- Target validation state: ${report.targetReliability.validationState}
+- Target reliability: validation ${report.targetReliability.validationSuccessRate}; run ${report.targetReliability.runSuccessRate}
+- Lifecycle summary: ${report.lifecycleSummary.summary}
 
 ## Summary
 
@@ -202,7 +246,31 @@ ${report.summary}
 
 ## Release gate
 
+${report.releaseGate.answer}
+
+${markdownTable(['Reason type', 'Reason'], report.releaseGate.reasonDetails.map((item) => [item.severity, item.message]))}
+
 ${markdownTable(['Metric', 'Required', 'Actual', 'Result'], report.gate.thresholds.map((item) => [item.metric, item.required, item.actual, item.result]))}
+
+## Target reliability
+
+${markdownTable(['Metric', 'Value'], [
+  ['Target', report.targetReliability.targetUsed],
+  ['Readiness', report.targetReliability.readinessStatus],
+  ['Validation state at run time', report.targetReliability.validationState],
+  ['Contract version', report.targetReliability.contractVersion],
+  ['Validation success rate', report.targetReliability.validationSuccessRate],
+  ['Run success rate', report.targetReliability.runSuccessRate],
+  ['Failure classes', report.targetReliability.failureClasses.join(', ') || 'none'],
+])}
+
+## Failure triage
+
+${markdownTable(['Class', 'Count', 'Top reasons'], report.failureTriage.buckets.map((bucket) => [bucket.label, bucket.count, bucket.reasons.join('; ') || 'none']))}
+
+## Historical comparison
+
+${report.historicalComparison.summary}
 
 ## Failure evidence
 
@@ -277,6 +345,7 @@ export function reportPrintHtml(report) {
     <div class="score-card"><span>Score</span><strong>${escapeHtml(report.score)}</strong></div>
     <div class="score-card"><span>Benchmark</span><strong>${escapeHtml(report.benchmark?.score ?? report.score)}</strong></div>
     <div class="score-card"><span>Critical</span><strong>${escapeHtml(report.criticalFailures)}</strong></div>
+    <div class="score-card"><span>Gate</span><strong>${escapeHtml(report.releaseGate.status)}</strong></div>
     <div class="score-card"><span>Environment</span><strong>${escapeHtml(report.environment)}</strong></div>
     <div class="score-card"><span>Owner</span><strong>${escapeHtml(report.owner)}</strong></div>
   </section>
@@ -294,19 +363,49 @@ export function reportPrintHtml(report) {
       <dt>Scoring profile version</dt><dd>${escapeHtml(report.benchmark?.scoringProfileVersion ?? 'not recorded')}</dd>
       <dt>Gate profile version</dt><dd>${escapeHtml(report.benchmark?.gateProfileVersion ?? 'not recorded')}</dd>
       <dt>Benchmark gate</dt><dd>${escapeHtml(report.benchmark?.gateResult ?? 'not recorded')}</dd>
+      <dt>Release gate status</dt><dd>${escapeHtml(report.releaseGate.status)}</dd>
+      <dt>Can release</dt><dd>${escapeHtml(report.releaseGate.canRelease ? 'yes' : 'no')}</dd>
+      <dt>Blocking failures</dt><dd>${escapeHtml(report.releaseGate.blockingFailures)}</dd>
+      <dt>Warnings</dt><dd>${escapeHtml(report.releaseGate.warningCount)}</dd>
       <dt>Failed contracts</dt><dd>${escapeHtml((report.benchmark?.failedContracts ?? []).join(', ') || 'none')}</dd>
       <dt>Failed mutation families</dt><dd>${escapeHtml((report.benchmark?.failedMutationFamilies ?? []).join(', ') || 'none')}</dd>
       <dt>Run date</dt><dd>${escapeHtml(report.runDate)}</dd>
       <dt>Status</dt><dd>${escapeHtml(report.status)}</dd>
       <dt>Evidence mode</dt><dd>${escapeHtml(report.evidenceMode)}</dd>
       <dt>Adapter mode</dt><dd>${escapeHtml(report.adapterMode ?? 'not recorded')}</dd>
+      <dt>Target used</dt><dd>${escapeHtml(report.targetReliability.targetUsed)}</dd>
+      <dt>Target readiness</dt><dd>${escapeHtml(report.targetReliability.readinessStatus)}</dd>
+      <dt>Validation at run time</dt><dd>${escapeHtml(report.targetReliability.validationState)}</dd>
+      <dt>Lifecycle summary</dt><dd>${escapeHtml(report.lifecycleSummary.summary)}</dd>
       <dt>Weakest surface</dt><dd>${escapeHtml(report.failureSummary.weakestSurface)}</dd>
     </dl>
   </section>
   <section>
     <h2>Release Gate</h2>
+    <p><strong>${escapeHtml(report.releaseGate.answer)}</strong></p>
     <p>${escapeHtml(report.gate.failCondition)}</p>
+    ${reportHtmlList(report.releaseGate.reasons)}
     ${reportHtmlTable(['Metric', 'Required', 'Actual', 'Result'], report.gate.thresholds.map((item) => [item.metric, item.required, item.actual, item.result]))}
+  </section>
+  <section>
+    <h2>Target Reliability</h2>
+    ${reportHtmlTable(['Metric', 'Value'], [
+      ['Target', report.targetReliability.targetUsed],
+      ['Readiness', report.targetReliability.readinessStatus],
+      ['Validation state at run time', report.targetReliability.validationState],
+      ['Contract version', report.targetReliability.contractVersion],
+      ['Validation success rate', report.targetReliability.validationSuccessRate],
+      ['Run success rate', report.targetReliability.runSuccessRate],
+      ['Failure classes', report.targetReliability.failureClasses.join(', ') || 'none'],
+    ])}
+  </section>
+  <section>
+    <h2>Failure Triage</h2>
+    ${reportHtmlTable(['Class', 'Count', 'Top reasons'], report.failureTriage.buckets.map((bucket) => [bucket.label, bucket.count, bucket.reasons.join('; ') || 'none']))}
+  </section>
+  <section>
+    <h2>Historical Comparison</h2>
+    <p>${escapeHtml(report.historicalComparison.summary)}</p>
   </section>
   <section class="page-break">
     <h2>Failure Evidence</h2>
@@ -593,13 +692,15 @@ function failureSummaryForReport(report, failureEvidence) {
   };
 }
 
-function gateForReport(report, releaseDecision) {
+function gateForReport(report, releaseDecision, releaseGate = null) {
   const score = numericRunValue(report.score);
   const critical = numericRunValue(report.criticalFailures);
   const minimumScore = 86;
+  const invalidTarget = releaseGate?.reasonDetails?.some((item) => item.category === 'target' && item.blocking) ?? false;
+  const invalidLifecycle = releaseGate?.reasonDetails?.some((item) => item.category === 'lifecycle' && item.blocking) ?? false;
   return {
     decision: releaseDecision,
-    failCondition: 'block on critical failures or score below baseline',
+    failCondition: 'block on critical failures, score below baseline, invalid worker lifecycle, adapter, target, validation, or contract state',
     reviewer: packOwner(report.pack),
     thresholds: [
       {
@@ -620,8 +721,229 @@ function gateForReport(report, releaseDecision) {
         actual: critical > 0 ? 'attached' : 'not required',
         result: 'pass',
       },
+      {
+        metric: 'Execution target',
+        required: 'validated and contract-compatible',
+        actual: report.targetReliability?.readinessStatus ?? releaseGate?.target?.readinessStatus ?? 'unknown',
+        result: invalidTarget ? 'fail' : 'pass',
+      },
+      {
+        metric: 'Worker lifecycle',
+        required: 'completed without worker or adapter failure',
+        actual: report.lifecycleSummary?.status ?? releaseGate?.lifecycle?.status ?? 'unknown',
+        result: invalidLifecycle ? 'fail' : 'pass',
+      },
     ],
   };
+}
+
+function releaseGateForReport(report, { releaseDecision, failureEvidence, targetReliability, lifecycle }) {
+  const critical = numericRunValue(report.criticalFailures);
+  const score = numericRunValue(report.score);
+  const benchmarkGate = String(report.benchmark?.gateResult ?? '').toLowerCase();
+  const failedContracts = report.benchmark?.failedContracts ?? [];
+  const reasonDetails = [];
+
+  if (critical > 0) {
+    reasonDetails.push(blockingReason('benchmark', `${critical} critical benchmark failure${critical === 1 ? '' : 's'} recorded.`));
+  }
+  if (score > 0 && score < 86) {
+    reasonDetails.push(blockingReason('benchmark', `Robustness score ${score} is below the 86 baseline.`));
+  }
+  if (['block', 'fail', 'failed'].includes(benchmarkGate)) {
+    reasonDetails.push(blockingReason('benchmark', `Benchmark gate result is ${benchmarkGate}.`));
+  } else if (benchmarkGate === 'warn') {
+    reasonDetails.push(warningReason('benchmark', 'Benchmark gate returned warn.'));
+  }
+  if (failedContracts.length) {
+    reasonDetails.push(blockingReason('contract', `Failed contracts: ${failedContracts.join(', ')}.`));
+  }
+  if (['failed', 'canceled', 'cancelled'].includes(lifecycle.status)) {
+    reasonDetails.push(blockingReason('lifecycle', `Worker lifecycle ended as ${lifecycle.status}.`));
+  }
+  if (/adapter|schema|contract|invalid|unsupported/iu.test(`${report.adapterMode} ${targetReliability.failureClasses.join(' ')}`)) {
+    reasonDetails.push(blockingReason('adapter', 'Adapter or contract diagnostics indicate an invalid execution path.'));
+  }
+  if (['Recently failing', 'Unstable', 'Contract mismatch', 'Expired'].includes(targetReliability.readinessStatus)) {
+    reasonDetails.push(blockingReason('target', `Execution target readiness is ${targetReliability.readinessStatus}.`));
+  }
+  if (['failed', 'blocked'].includes(targetReliability.validationState)) {
+    reasonDetails.push(blockingReason('validation', `Target validation state at run time is ${targetReliability.validationState}.`));
+  }
+  if (targetReliability.readinessStatus === 'Needs validation') {
+    reasonDetails.push(warningReason('validation', 'Execution target needs validation before production release.'));
+  }
+  if (targetReliability.ephemeral) {
+    reasonDetails.push(warningReason('target', 'Local tunnel target is ephemeral and keeps limited session history.'));
+  }
+  if (!failureEvidence.length && !reasonDetails.some((item) => item.blocking)) {
+    reasonDetails.push({
+      category: 'release',
+      severity: 'pass',
+      blocking: false,
+      message: 'Passed all required benchmark, worker, adapter, target, validation, and contract checks available for this report.',
+    });
+  }
+
+  const blockingFailures = reasonDetails.filter((item) => item.blocking).length;
+  const warningCount = reasonDetails.filter((item) => item.severity === 'warning').length;
+  const canRelease = blockingFailures === 0 && !['block', 'fail', 'failed'].includes(benchmarkGate);
+  const decision = canRelease ? releaseDecision : 'Block release';
+  const status = canRelease ? (warningCount ? 'warning' : 'passed') : 'failed';
+  return {
+    status,
+    canRelease,
+    decision,
+    answer: canRelease
+      ? (warningCount ? 'Can this agent be released? Yes, with warnings.' : 'Can this agent be released? Yes.')
+      : 'Can this agent be released? No.',
+    blockingFailures,
+    warningCount,
+    failedContracts,
+    reasons: reasonDetails.map((item) => item.message),
+    reasonDetails,
+    target: targetReliability,
+    lifecycle,
+  };
+}
+
+function blockingReason(category, message) {
+  return { category, severity: 'blocking', blocking: true, message };
+}
+
+function warningReason(category, message) {
+  return { category, severity: 'warning', blocking: false, message };
+}
+
+function targetReliabilityForReport(report, context) {
+  const fromContext = context.targetReliabilityByRunId?.[report.runId] ?? context.targetReliability ?? report.targetReliability ?? null;
+  const executionTarget = report.executionTarget ?? fromContext ?? {};
+  const failureClasses = uniqueStrings([
+    ...(Array.isArray(fromContext?.failureClasses) ? fromContext.failureClasses : []),
+    executionTarget.failureClass,
+    report.failureClass,
+  ]).filter((item) => item !== 'none');
+  const validationState = fromContext?.validationState ?? executionTarget.validationState ?? 'not recorded';
+  const readinessStatus = fromContext?.readinessStatus
+    ?? readinessFromTargetContext({ validationState, failureClasses, ephemeral: Boolean(executionTarget.ephemeral) });
+  return {
+    targetUsed: fromContext?.targetUsed ?? executionTarget.name ?? executionTarget.id ?? report.targetUsed ?? 'not recorded',
+    targetType: fromContext?.targetType ?? executionTarget.typeLabel ?? executionTarget.type ?? 'not recorded',
+    readinessStatus,
+    validationState,
+    validationSuccessRate: fromContext?.validationSuccessRate ?? 'not recorded',
+    runSuccessRate: fromContext?.runSuccessRate ?? 'not recorded',
+    lastPass: fromContext?.lastPass ?? 'not recorded',
+    lastFail: fromContext?.lastFail ?? 'not recorded',
+    failureClasses,
+    latency: fromContext?.latency ?? 'not recorded',
+    contractVersion: fromContext?.contractVersion ?? executionTarget.contractVersion ?? report.benchmark?.benchmarkSnapshot?.schemaVersion ?? 'unknown',
+    ephemeral: Boolean(fromContext?.ephemeral ?? executionTarget.ephemeral),
+  };
+}
+
+function readinessFromTargetContext({ validationState, failureClasses, ephemeral }) {
+  if (failureClasses.some((item) => /contract|schema|version/iu.test(item))) return 'Contract mismatch';
+  if (failureClasses.length) return 'Recently failing';
+  if (validationState === 'passed') return ephemeral ? 'Ephemeral' : 'Healthy';
+  if (validationState === 'failed' || validationState === 'blocked') return 'Recently failing';
+  return 'Needs validation';
+}
+
+function lifecycleSummaryForReport(report) {
+  const timeline = Array.isArray(report.timeline) ? report.timeline : [];
+  const status = report.runStatus ?? (report.status === 'review_required' ? 'completed' : report.status) ?? 'completed';
+  const summary = timeline.length
+    ? `${timeline[0]} -> ${timeline[timeline.length - 1]}`
+    : `Lifecycle status ${status}.`;
+  return {
+    status,
+    startedAt: report.runDate ?? 'not recorded',
+    completedAt: report.completedAt ?? 'not recorded',
+    workerId: report.workerId ?? 'not recorded',
+    attempts: report.attempts ?? 1,
+    summary,
+  };
+}
+
+function failureTriageForReport(report, failureEvidence, releaseGate) {
+  const buckets = [
+    ['agent_behavior', 'Agent behavior failures'],
+    ['adapter_contract', 'Adapter contract failures'],
+    ['execution_target', 'Execution target failures'],
+    ['validation', 'Validation failures'],
+    ['worker_lifecycle', 'Worker lifecycle failures'],
+  ].map(([id, label]) => ({ id, label, count: 0, reasons: [] }));
+  const bucketById = Object.fromEntries(buckets.map((bucket) => [bucket.id, bucket]));
+
+  failureEvidence.forEach((failure) => {
+    const triageClass = classifyFailureCause(failure);
+    failure.triageClass = triageClass;
+    bucketById[triageClass].count += 1;
+    bucketById[triageClass].reasons.push(failure.contract || failure.why || failure.id || 'failure evidence');
+  });
+  releaseGate.reasonDetails.forEach((reason) => {
+    const bucketId = reason.category === 'adapter' || reason.category === 'contract'
+      ? 'adapter_contract'
+      : reason.category === 'target'
+        ? 'execution_target'
+        : reason.category === 'validation'
+          ? 'validation'
+          : reason.category === 'lifecycle'
+            ? 'worker_lifecycle'
+            : null;
+    if (!bucketId) return;
+    bucketById[bucketId].count += reason.blocking ? 1 : 0;
+    bucketById[bucketId].reasons.push(reason.message);
+  });
+
+  return { buckets: buckets.map((bucket) => ({ ...bucket, reasons: uniqueStrings(bucket.reasons).slice(0, 3) })) };
+}
+
+function classifyFailureCause(failure) {
+  const text = `${failure.failureClass ?? ''} ${failure.contract ?? ''} ${failure.mutationId ?? ''} ${failure.why ?? ''}`;
+  if (/validation|private|reachability|token|auth/iu.test(text)) return 'validation';
+  if (/worker|queue|claim|retry|timeout|lifecycle/iu.test(text)) return 'worker_lifecycle';
+  if (/target|endpoint|network|tunnel|unavailable/iu.test(text)) return 'execution_target';
+  if (/adapter|schema|contract|json|unsupported|version/iu.test(text)) return 'adapter_contract';
+  return 'agent_behavior';
+}
+
+function historicalComparisonForReport(report, context) {
+  const runs = context.localRuns ?? [];
+  const currentIndex = runs.findIndex((run) => run.id === report.runId);
+  const currentRun = currentIndex >= 0 ? runs[currentIndex] : null;
+  const benchmarkSlug = report.benchmark?.slug ?? report.pack;
+  const agentVersion = agentVersionForReport(report, currentRun);
+  const targetKey = context.targetReliabilityByRunId?.[report.runId]?.targetUsed ?? report.targetReliability?.targetUsed ?? '';
+  const previous = runs
+    .slice(currentIndex + 1)
+    .find((run) => {
+      const runBenchmark = benchmarkPayloadForRun(run);
+      const runTarget = context.targetReliabilityByRunId?.[run.id]?.targetUsed ?? '';
+      return (runBenchmark?.slug ?? run.pack) === benchmarkSlug
+        && agentVersionForReport(report, run) === agentVersion
+        && (!targetKey || !runTarget || runTarget === targetKey);
+    });
+  if (!currentRun || !previous) {
+    return {
+      status: 'not_available',
+      summary: 'Historical comparison requires a previous run for the same target, benchmark, and agent version.',
+    };
+  }
+  const scoreDelta = numericRunValue(currentRun.score) - numericRunValue(previous.score);
+  const criticalDelta = numericRunValue(currentRun.critical) - numericRunValue(previous.critical);
+  const status = scoreDelta >= 0 && criticalDelta <= 0 ? 'improved' : 'regressed';
+  return {
+    status,
+    scoreDelta,
+    criticalDelta,
+    summary: `${status === 'improved' ? 'Improved' : 'Regressed'} versus ${previous.name}: score ${formatSigned(scoreDelta)}, critical failures ${formatSigned(criticalDelta)}.`,
+  };
+}
+
+function agentVersionForReport(report, run) {
+  return run?.agentVersion ?? report.agentVersion ?? run?.metadata?.agentVersion ?? 'unknown-agent';
 }
 
 function remediationForReport(report, failureEvidence) {
@@ -706,6 +1028,16 @@ function standardControlFix(contract) {
 function numericRunValue(value) {
   const number = Number.parseInt(String(value).replace(/,/gu, ''), 10);
   return Number.isFinite(number) ? number : 0;
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean)));
+}
+
+function formatSigned(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return '0';
+  return number > 0 ? `+${number}` : String(number);
 }
 
 function markdownTable(headers, rows) {

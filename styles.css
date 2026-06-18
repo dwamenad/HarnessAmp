@@ -3943,6 +3943,21 @@ section[id] {
   gap: 8px;
 }
 
+.target-card__readiness {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.target-card__readiness span:not(.ha-badge) {
+  border: 1px solid var(--ha-line);
+  border-radius: 999px;
+  color: var(--ha-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+}
+
 .target-card__meta div {
   display: grid;
   gap: 3px;
@@ -3978,6 +3993,18 @@ section[id] {
   display: grid;
   gap: 4px;
   margin-top: 10px;
+}
+
+.ha-compact-list {
+  margin: 12px 0 0 18px;
+  padding: 0;
+}
+
+.ha-compact-list li {
+  color: var(--ha-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 4px 0;
 }
 
 .execution-target-details {
