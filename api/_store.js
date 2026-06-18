@@ -28,6 +28,7 @@ import {
   normalizeExecutionTarget,
 } from '../src/adapters/execution-targets.js';
 import { executeHostedProviderBenchmark } from '../src/adapters/hosted-provider.js';
+import { dispatchLocalHttpTunnelJob, localTunnelRunTokenForNonce } from '../src/adapters/local-http-tunnel.js';
 import {
   assertHostedByokEnabled,
   decryptSecretValue,
@@ -718,6 +719,8 @@ export async function createRunnerJob({
   retryBackoffMs = 0,
   adapter = null,
   executionTarget = null,
+  localTunnelTokenNonce = null,
+  localTunnelMaxResponseBytes = null,
 }) {
   const membership = await getProjectMembership(userId, projectId);
   if (!membership || !canMutateProject(membership.role)) {
@@ -744,6 +747,8 @@ export async function createRunnerJob({
     adapter: adapterConfig,
     executionTarget: {
       ...target,
+      ...(target.type === 'local_http_tunnel' ? { tokenNonce: localTunnelTokenNonce } : {}),
+      ...(target.type === 'local_http_tunnel' && localTunnelMaxResponseBytes ? { maxResponseBytes: localTunnelMaxResponseBytes } : {}),
       adapter: adapterConfig,
       safeMetadata: executionTargetSafeMetadata(target),
     },
@@ -1446,7 +1451,7 @@ async function dispatchRunnerJob(job) {
       execution: executionDescriptor(current),
       diagnostics: normalizeAdapterDiagnostics({}, {
         adapterType: current.payload?.executionTarget?.type ?? current.payload?.adapter?.type ?? 'registered-http-runner',
-        target: current.payload?.executionTarget?.routeUrl ?? current.payload?.adapter?.target ?? '',
+        target: current.payload?.executionTarget?.endpointUrl ?? current.payload?.executionTarget?.routeUrl ?? current.payload?.adapter?.target ?? '',
         runnerId: current.runnerId ?? '',
         requestTimestamp: runningAt,
         workerId: current.workerId ?? current.claimedBy ?? '',
@@ -1469,9 +1474,11 @@ async function dispatchRunnerJob(job) {
     ? await runAdapterBackedJob(running, adapterConfig)
     : executionTarget.type === 'registered_runner'
       ? await runHttpRunnerBackedJob(running)
-      : executionTarget.type === 'hosted_provider'
-        ? await runHostedProviderBackedJob(running, executionTarget)
-        : failUnsupportedExecutionTarget(running, executionTarget);
+      : executionTarget.type === 'local_http_tunnel'
+        ? await runLocalHttpTunnelBackedJob(running, executionTarget)
+        : executionTarget.type === 'hosted_provider'
+          ? await runHostedProviderBackedJob(running, executionTarget)
+          : failUnsupportedExecutionTarget(running, executionTarget);
 
   if (await isJobCanceled(job.id)) return readJob(job.id);
   const analysis = analyzeBundle(running.payload.pack, observations, {
@@ -1585,7 +1592,26 @@ async function runHttpRunnerBackedJob(job) {
     });
   }
 
-  const payload = await response.json();
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new AdapterExecutionError('Runner response must be JSON.', {
+      adapterType: 'registered-http-runner',
+      runnerId: runner.id,
+      target: runner.endpointUrl,
+      requestTimestamp,
+      responseTimestamp: new Date().toISOString(),
+      workerId: job.workerId ?? job.claimedBy ?? '',
+      jobId: job.id,
+      retryAttempt: job.attempts,
+      benchmarkId: job.payload?.pack?.id ?? job.payload?.pack?.project ?? '',
+      benchmarkVersion: job.payload?.pack?.version ?? null,
+      failureClass: 'adapter_invalid_response',
+      rawErrorMessage: 'Runner response must be JSON.',
+      phase: 'during_parsing',
+    });
+  }
   if (await isJobCanceled(job.id)) return [];
   const observations = Array.isArray(payload) ? payload : payload.observations;
   if (!Array.isArray(observations)) {
@@ -1605,6 +1631,18 @@ async function runHttpRunnerBackedJob(job) {
       phase: 'during_parsing',
     });
   }
+  return observations;
+}
+
+async function runLocalHttpTunnelBackedJob(job, executionTarget) {
+  const observations = await dispatchLocalHttpTunnelJob({
+    job,
+    executionTarget,
+    runToken: localTunnelRunTokenForNonce(executionTarget.tokenNonce),
+    timeoutMs: job.timeoutMs,
+    maxResponseBytes: executionTarget.maxResponseBytes,
+  });
+  if (await isJobCanceled(job.id)) return [];
   return observations;
 }
 
@@ -1687,7 +1725,7 @@ async function markRunnerJobFailure(jobId, error) {
   const message = error instanceof Error ? error.message : String(error);
   const diagnostics = normalizeAdapterDiagnostics(error?.diagnostics, {
     adapterType: current.payload?.executionTarget?.type ?? current.payload?.adapter?.type ?? (current.runnerId ? 'registered-http-runner' : ''),
-    target: current.payload?.executionTarget?.routeUrl ?? current.payload?.adapter?.target ?? '',
+    target: current.payload?.executionTarget?.endpointUrl ?? current.payload?.executionTarget?.routeUrl ?? current.payload?.adapter?.target ?? '',
     runnerId: current.runnerId ?? '',
     workerId: current.workerId ?? current.claimedBy ?? '',
     jobId: current.id,
@@ -2362,6 +2400,16 @@ function executionDescriptor(job) {
       provider: target.provider,
       model: target.model,
       secretRef: target.secretRef,
+      timeoutMs: job.timeoutMs,
+    };
+  }
+  if (target.type === 'local_http_tunnel') {
+    return {
+      kind: 'http-tunnel',
+      type: target.type,
+      label: 'Local tunnel',
+      target: safeTarget.endpointUrl ?? target.endpointUrl ?? '',
+      endpointUrl: safeTarget.endpointUrl ?? target.endpointUrl ?? '',
       timeoutMs: job.timeoutMs,
     };
   }

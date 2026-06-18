@@ -19,6 +19,7 @@ import { formatMarkdownReport, formatMarkdownSuiteReport } from '../src/v2/repor
 import { runV2Scenario } from '../src/v2/runner.js';
 import { loadScenarioFile } from '../src/v2/scenario-loader.js';
 import { runGeneratedV2Suite, runV2Suite } from '../src/v2/suite-runner.js';
+import { runLocalTunnelDoctor } from '../src/adapters/local-http-tunnel.js';
 
 const [command = 'diagnose', ...rest] = process.argv.slice(2);
 const options = parseArgs(rest);
@@ -139,6 +140,8 @@ if (command === 'validate') {
   console.log(JSON.stringify(getMutationRegistry(), null, 2));
 } else if (command === 'worker') {
   await runWorkerCommand(options);
+} else if (command === 'doctor') {
+  await runDoctorCommand(options);
 } else if (command === 'secrets') {
   await runSecretsCommand(options);
 } else if (command === 'benchmark') {
@@ -200,6 +203,26 @@ async function runWorkerCommand(parsedOptions) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
   }
+}
+
+async function runDoctorCommand(parsedOptions) {
+  const url = parsedOptions.url ?? parsedOptions.targetUrl ?? parsedOptions.runnerOptions.target ?? parsedOptions.positional[0] ?? '';
+  const result = await runLocalTunnelDoctor({
+    url,
+    timeoutMs: parsedOptions.timeoutMs || 5000,
+    maxResponseBytes: parsedOptions.maxResponseBytes,
+  });
+  const lines = [
+    `HarnessAmp adapter doctor: ${result.ok ? 'pass' : 'fail'}`,
+    ...result.checks.map((check) => {
+      const status = check.ok ? 'pass' : 'fail';
+      const failure = check.failureClass ? ` ${check.failureClass}` : '';
+      const action = check.action ? `\n  action: ${check.action}` : '';
+      return `- ${status} ${check.check}:${failure} ${check.message}${action}`;
+    }),
+  ];
+  console.log(lines.join('\n'));
+  if (!result.ok) process.exitCode = 2;
 }
 
 async function runBenchmarkCommand(parsedOptions) {
@@ -332,6 +355,8 @@ function parseArgs(args) {
     secretName: null,
     secretRef: null,
     model: null,
+    url: null,
+    maxResponseBytes: 0,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -368,6 +393,11 @@ function parseArgs(args) {
     if (arg === '--target-url') {
       parsed.targetUrl = args[index + 1] ?? '';
       parsed.runnerOptions.target = parsed.targetUrl;
+      index += 1;
+      continue;
+    }
+    if (arg === '--url') {
+      parsed.url = args[index + 1] ?? '';
       index += 1;
       continue;
     }
@@ -463,6 +493,11 @@ function parseArgs(args) {
     if (arg === '--timeout-ms') {
       parsed.timeoutMs = Number(args[index + 1] ?? parsed.timeoutMs);
       parsed.runnerOptions.timeoutMs = parsed.timeoutMs;
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-response-bytes') {
+      parsed.maxResponseBytes = Number(args[index + 1] ?? parsed.maxResponseBytes);
       index += 1;
       continue;
     }

@@ -49,6 +49,32 @@ export function normalizeExecutionTarget(input = {}, legacy = {}) {
     };
   }
 
+  if (type === 'local_http_tunnel') {
+    const endpointUrl = normalizeHttpsEndpointUrl(
+      source.endpointUrl
+        ?? source.endpoint_url
+        ?? source.url
+        ?? source.routeUrl
+        ?? source.route_url
+        ?? source.target
+        ?? source.targetUrl
+        ?? source.target_url,
+    );
+    return {
+      type,
+      endpointUrl,
+      tokenNonce: stringOr(source.tokenNonce ?? source.token_nonce, ''),
+      maxResponseBytes: positiveNumberOrNull(source.maxResponseBytes ?? source.max_response_bytes),
+      safeMetadata: {
+        type,
+        endpointUrl,
+        label: 'Local tunnel',
+        transport: 'http',
+        ephemeral: true,
+      },
+    };
+  }
+
   if (type === 'hosted_provider') {
     if (process.env.HARNESSAMP_ENABLE_HOSTED_BYOK !== '1') {
       throw new Error('Unsupported execution target type: hosted_provider. Encrypted project secret storage is not enabled.');
@@ -94,6 +120,10 @@ export function executionTargetSafeMetadata(target) {
     type: target.type,
     runnerId: target.runnerId ?? null,
     routeUrl: target.routeUrl ?? null,
+    endpointUrl: target.endpointUrl ?? null,
+    label: target.type === 'local_http_tunnel' ? 'Local tunnel' : null,
+    transport: target.type === 'local_http_tunnel' ? 'http' : null,
+    ephemeral: target.type === 'local_http_tunnel' ? true : null,
     provider: target.provider ?? null,
     model: target.model ?? null,
     secretRef: target.secretRef ?? null,
@@ -114,7 +144,23 @@ function normalizeTargetType(value) {
   if (text === 'vercel_ai_sdk') return 'vercel_ai_sdk';
   if (text === 'vercel_ai_sdk_route') return 'vercel_ai_sdk';
   if (text === 'hosted_provider') return 'hosted_provider';
+  if (text === 'local_http_tunnel' || text === 'local_tunnel' || text === 'http_tunnel') return 'local_http_tunnel';
   return text;
+}
+
+function normalizeHttpsEndpointUrl(value) {
+  const raw = stringOr(value, '');
+  if (!raw) throw new Error('local_http_tunnel execution target requires endpointUrl.');
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error('local_http_tunnel execution target requires a valid URL.');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error('local_http_tunnel execution target requires an HTTPS endpoint URL.');
+  }
+  return parsed.href;
 }
 
 function rejectInlineSecrets(source) {
@@ -127,4 +173,9 @@ function rejectInlineSecrets(source) {
 
 function stringOr(value, fallback) {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function positiveNumberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }

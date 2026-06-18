@@ -18,6 +18,7 @@ node scripts/harnessamp.mjs run examples/demo-bundle.json --adapter vercel-ai-sd
 node scripts/harnessamp.mjs run examples/demo-bundle.json --target-type vercel-ai-sdk --target-url http://localhost:3000/api/harnessamp/agent --json
 HARNESSAMP_PROVIDER_API_KEY=sk-... node scripts/harnessamp.mjs secrets create --project-id <project-id> --provider openai --name "OpenAI dev key"
 node scripts/harnessamp.mjs run examples/demo-bundle.json --target-type hosted-provider --provider openai --model gpt-4.1-mini --secret-ref sec_123 --json
+npm run harnessamp:doctor -- --url https://example.ngrok.app/api/agent
 node scripts/harnessamp.mjs worker --project-id <project-id> --api-url http://127.0.0.1:3000
 node scripts/harnessamp.mjs benchmark import examples/benchmarks/support-mvp/benchmark-pack.json --out benchmark.lifecycle.json
 node scripts/harnessamp.mjs benchmark edit benchmark.lifecycle.json --edits benchmark-edits.json --out benchmark.lifecycle.json
@@ -74,6 +75,16 @@ node scripts/harnessamp.mjs run examples/demo-bundle.json \
 ```
 
 Registered runners are created and executed through the API/dashboard worker lifecycle. Use `POST /api/projects/<project-id>/jobs` with `executionTarget.type = "registered_runner"` to enqueue a registered runner job.
+
+Local tunnel jobs are also created and executed through the API/dashboard worker lifecycle. Run your local agent app, run `ngrok http <port>` or another HTTPS tunnel, then enqueue with `executionTarget.type = "local_http_tunnel"` and `endpointUrl` set to the forwarding URL. The local adapter must accept preflight `POST` requests, return `{ "ok": true }` or `{ "ready": true }`, read `x-harnessamp-run-token`, and require the same header value on scenario dispatch requests for that run. Keep the tunnel open while the worker runs the benchmark, do not expose sensitive local services, and rotate or close the tunnel after testing. This target is for local testing, not production execution.
+
+Run the adapter doctor before enqueueing:
+
+```bash
+npm run harnessamp:doctor -- --url https://example.ngrok.app/api/agent
+```
+
+The doctor sends preflight and dispatch checks with a temporary run token, verifies JSON contract shape, verifies the endpoint rejects a wrong token, and prints actionable diagnostics without printing the token.
 
 Hosted provider BYOK:
 
@@ -158,9 +169,10 @@ Typical local worker flow:
 
 1. Start the local app/API with `npm run dev`.
 2. Register a runner and enqueue jobs from the console.
-3. Run `node scripts/harnessamp.mjs worker --project-id <project-id> --once` to process currently queued jobs.
-4. Watch worker logs for adapter or runner target, report id or `no-report-yet`, and failure class on failed adapter-backed jobs.
-5. Omit `--once` to keep polling for new queued or retrying jobs.
+3. For local agent testing, choose “Local tunnel”, run `ngrok http <port>` or another HTTPS tunnel, and paste the forwarding URL before enqueueing.
+4. Run `node scripts/harnessamp.mjs worker --project-id <project-id> --once` to process currently queued jobs.
+5. Watch worker logs for adapter or runner target, report id or `no-report-yet`, and failure class on failed adapter-backed jobs.
+6. Omit `--once` to keep polling for new queued or retrying jobs.
 
 Docker workflow:
 

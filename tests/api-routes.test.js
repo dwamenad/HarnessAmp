@@ -44,6 +44,42 @@ function createMockResponse() {
   return response;
 }
 
+function createFetchResponse({
+  ok = true,
+  status = 200,
+  body = {},
+  headers = {},
+  url = '',
+} = {}) {
+  const normalizedHeaders = new Map(Object.entries({ 'content-type': 'application/json', ...headers }).map(([key, value]) => [key.toLowerCase(), String(value)]));
+  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  return {
+    ok,
+    status,
+    url,
+    headers: {
+      get(name) {
+        return normalizedHeaders.get(String(name).toLowerCase()) ?? null;
+      },
+    },
+    async text() {
+      return text;
+    },
+    async json() {
+      return JSON.parse(text);
+    },
+  };
+}
+
+function installLocalTunnelDns(address = '203.0.113.10') {
+  const previous = globalThis.__harnessAmpLocalTunnelDnsLookup;
+  globalThis.__harnessAmpLocalTunnelDnsLookup = async () => [{ address, family: address.includes(':') ? 6 : 4 }];
+  return () => {
+    if (previous === undefined) delete globalThis.__harnessAmpLocalTunnelDnsLookup;
+    else globalThis.__harnessAmpLocalTunnelDnsLookup = previous;
+  };
+}
+
 test('report writes require authentication', async () => {
   delete process.env.HARNESSAMP_DEV_AUTH;
 
@@ -983,6 +1019,594 @@ test('project jobs accept normalized execution target payloads', async () => {
   assert.equal(adapterJobResponse.body.executionTarget.type, 'vercel_ai_sdk');
   assert.equal(adapterJobResponse.body.executionTarget.routeUrl, './examples/vercel-ai-sdk/app/api/chat/route.mjs');
   assert.equal(adapterJobResponse.body.execution.type, 'vercel_ai_sdk');
+});
+
+test('project job creation rejects invalid local tunnel URL before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const createResponse = createMockResponse();
+
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'local_http_tunnel',
+        endpointUrl: 'not a url',
+      },
+      pack: createDemoBundle(),
+      idempotencyKey: 'local-tunnel-invalid-url-001',
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 400);
+  assert.match(createResponse.body.error, /valid URL/);
+});
+
+test('project job creation rejects non-HTTPS local tunnel URL before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const createResponse = createMockResponse();
+
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'local_http_tunnel',
+        endpointUrl: 'http://localhost:3000/harnessamp',
+      },
+      pack: createDemoBundle(),
+      idempotencyKey: 'local-tunnel-http-url-001',
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 400);
+  assert.match(createResponse.body.error, /HTTPS endpoint URL/);
+});
+
+test('project job creation rejects localhost local tunnel URL before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const createResponse = createMockResponse();
+
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'local_http_tunnel',
+        endpointUrl: 'https://localhost:3000/harnessamp',
+      },
+      pack: createDemoBundle(),
+      idempotencyKey: 'local-tunnel-localhost-001',
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 400);
+  assert.match(createResponse.body.error, /private|metadata|blocked/i);
+});
+
+test('project job creation rejects private IP local tunnel URL before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const createResponse = createMockResponse();
+
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'local_http_tunnel',
+        endpointUrl: 'https://192.168.1.20/harnessamp',
+      },
+      pack: createDemoBundle(),
+      idempotencyKey: 'local-tunnel-private-ip-001',
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 400);
+  assert.match(createResponse.body.error, /private|metadata|blocked/i);
+});
+
+test('project job creation rejects metadata IP local tunnel URL before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const createResponse = createMockResponse();
+
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'local_http_tunnel',
+        endpointUrl: 'https://169.254.169.254/latest/meta-data',
+      },
+      pack: createDemoBundle(),
+      idempotencyKey: 'local-tunnel-metadata-ip-001',
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 400);
+  assert.match(createResponse.body.error, /private|metadata|blocked/i);
+});
+
+test('project job creation rejects local tunnel DNS resolution to private IP before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const restoreDns = installLocalTunnelDns('10.0.0.8');
+
+  try {
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-dns-private-001',
+      },
+    }, createResponse);
+
+    assert.equal(createResponse.statusCode, 400);
+    assert.match(createResponse.body.error, /DNS resolved to a private|metadata/i);
+  } finally {
+    restoreDns();
+  }
+});
+
+test('project job creation blocks local tunnel redirect to private IP before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+
+  try {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, 'https://local-agent.example.test/harnessamp');
+      return createFetchResponse({
+        ok: false,
+        status: 302,
+        headers: { location: 'https://127.0.0.1:3000/harnessamp' },
+        body: '',
+      });
+    };
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-redirect-private-001',
+      },
+    }, createResponse);
+
+    assert.equal(createResponse.statusCode, 400);
+    assert.match(createResponse.body.error, /redirect.*unsafe|redirect.*blocked/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('project job creation rejects unreachable local tunnel before enqueueing', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+
+  try {
+    globalThis.fetch = async () => {
+      throw new Error('connect ECONNREFUSED');
+    };
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-unreachable-001',
+      },
+    }, createResponse);
+
+    assert.equal(createResponse.statusCode, 400);
+    assert.match(createResponse.body.error, /unreachable/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('project job creation rejects failed local tunnel adapter preflight', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+
+  try {
+    globalThis.fetch = async () => createFetchResponse({ body: { ok: false } });
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-failed-preflight-001',
+      },
+    }, createResponse);
+
+    assert.equal(createResponse.statusCode, 400);
+    assert.match(createResponse.body.error, /endpoint must return/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('project job creation rejects local tunnel preflight timeout', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+
+  try {
+    globalThis.fetch = async () => new Promise(() => {});
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-preflight-timeout-001',
+        preflightTimeoutMs: 10,
+      },
+    }, createResponse);
+
+    assert.equal(createResponse.statusCode, 400);
+    assert.match(createResponse.body.error, /timed out/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('local tunnel jobs preflight and dispatch with run token authentication', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const bundle = createDemoBundle();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+  const calls = [];
+
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({ url, body: JSON.parse(init.body), token: init.headers['x-harnessamp-run-token'] });
+      assert.equal(url, 'https://local-agent.example.test/harnessamp');
+      assert.ok(init.headers['x-harnessamp-run-token']);
+      const body = JSON.parse(init.body);
+      if (body.preflight) {
+        return createFetchResponse({ body: { ok: true } });
+      }
+      assert.equal(body.jobId, createResponse.body.jobId);
+      assert.equal(body.profile, 'support-agent');
+      assert.equal(body.preset, 'local-tunnel-test');
+      return createFetchResponse({ body: { observations: [] } });
+    };
+
+    var createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: bundle,
+        profileId: 'support-agent',
+        presetId: 'local-tunnel-test',
+        idempotencyKey: 'local-tunnel-dispatch-001',
+        timeoutMs: 1000,
+      },
+    }, createResponse);
+
+    assert.equal(createResponse.statusCode, 200);
+    assert.equal(createResponse.body.executionTarget.type, 'local_http_tunnel');
+    assert.equal(createResponse.body.executionTarget.label, 'Local tunnel');
+    assert.equal(createResponse.body.executionTarget.transport, 'http');
+    assert.equal(createResponse.body.execution.kind, 'http-tunnel');
+
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'local-tunnel-worker' },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'completed');
+    assert.equal(runResponse.body.result.execution.type, 'local_http_tunnel');
+    assert.equal(runResponse.body.result.execution.label, 'Local tunnel');
+    assert.equal(runResponse.body.result.execution.endpointUrl, 'https://local-agent.example.test/harnessamp');
+    assert.doesNotMatch(JSON.stringify(runResponse.body), /runToken|tokenNonce|x-harnessamp-run-token/);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].body.preflight, true);
+    assert.equal(calls[0].token, calls[1].token);
+    assert.equal(calls[1].body.jobId, createResponse.body.jobId);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('local tunnel worker dispatch timeout fails with normalized class', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+  let calls = 0;
+
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      calls += 1;
+      const body = JSON.parse(init.body);
+      return body.preflight
+        ? createFetchResponse({ body: { ok: true } })
+        : new Promise(() => {});
+    };
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-dispatch-timeout-001',
+        timeoutMs: 10,
+      },
+    }, createResponse);
+    assert.equal(createResponse.statusCode, 200);
+
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'local-tunnel-worker' },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'failed');
+    assert.equal(runResponse.body.result.failureClass, 'local_tunnel_timeout');
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('local tunnel worker dispatch rejects invalid JSON response', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const body = JSON.parse(init.body);
+      return body.preflight
+        ? createFetchResponse({ body: { ok: true } })
+        : createFetchResponse({ body: '{not-json' });
+    };
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-invalid-json-001',
+      },
+    }, createResponse);
+    assert.equal(createResponse.statusCode, 200);
+
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'local-tunnel-worker' },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'failed');
+    assert.equal(runResponse.body.result.failureClass, 'local_tunnel_invalid_json');
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('local tunnel worker dispatch rejects oversized response with truncated diagnostics', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const body = JSON.parse(init.body);
+      return body.preflight
+        ? createFetchResponse({ body: { ok: true } })
+        : createFetchResponse({
+          body: JSON.stringify({ observations: [], padding: 'x'.repeat(128) }),
+          headers: { 'content-length': '160' },
+        });
+    };
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-oversized-response-001',
+        maxResponseBytes: 32,
+      },
+    }, createResponse);
+    assert.equal(createResponse.statusCode, 200);
+
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'local-tunnel-worker' },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'failed');
+    assert.equal(runResponse.body.result.failureClass, 'local_tunnel_contract_mismatch');
+    assert.ok(runResponse.body.result.diagnostics.rawErrorMessage.length <= 600);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('local tunnel closed endpoint fails with closed-or-expired class', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const body = JSON.parse(init.body);
+      return body.preflight
+        ? createFetchResponse({ body: { ok: true } })
+        : createFetchResponse({ ok: false, status: 410, body: { error: 'gone' } });
+    };
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-closed-001',
+      },
+    }, createResponse);
+    assert.equal(createResponse.statusCode, 200);
+
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'local-tunnel-worker' },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'failed');
+    assert.equal(runResponse.body.result.failureClass, 'local_tunnel_closed_or_expired');
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('local tunnel missing or incorrect run token fails cleanly', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const body = JSON.parse(init.body);
+      if (body.preflight) return createFetchResponse({ body: { ok: true } });
+      return createFetchResponse({ ok: false, status: 403, body: { error: 'bad token' } });
+    };
+    const createResponse = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-bad-token-001',
+      },
+    }, createResponse);
+    assert.equal(createResponse.statusCode, 200);
+
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'local-tunnel-worker' },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'failed');
+    assert.equal(runResponse.body.result.failureClass, 'local_tunnel_contract_mismatch');
+    assert.doesNotMatch(JSON.stringify(runResponse.body), /runToken|tokenNonce|x-harnessamp-run-token/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
 });
 
 test('project job creation rejects hosted provider BYOK without secret infrastructure', async () => {
