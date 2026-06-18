@@ -12,7 +12,7 @@ app.post('/api/harnessamp/agent', async (request, response) => {
   const body = request.body;
   if (body?.preflight === true && body?.type === 'harnessamp_preflight') {
     runTokens.add(token);
-    return response.json({ ok: true });
+    return response.json({ ok: true, contractVersion: 'harnessamp_http_runner_v1' });
   }
 
   if (!runTokens.has(token)) return response.status(403).json({ error: 'invalid_run_token', retryable: false });

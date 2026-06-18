@@ -1435,6 +1435,39 @@ export async function saveEvent(event, session = {}) {
   return { storage: 'postgres' };
 }
 
+export async function listEventsForProject({ projectId, userId, name = null }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership) throw new Error('Project membership not found');
+  if (useMemory()) {
+    return memory.events
+      .filter((event) => event.projectId === projectId)
+      .filter((event) => !name || event.name === name)
+      .slice()
+      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+  }
+
+  await ensureSchema();
+  const params = [projectId];
+  const nameClause = name ? 'and name = $2' : '';
+  if (name) params.push(name);
+  const result = await query(
+    `select id, name, user_id, workspace_id, project_id, payload, created_at
+     from events
+     where project_id = $1 ${nameClause}
+     order by created_at desc`,
+    params,
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    userId: row.user_id ?? null,
+    workspaceId: row.workspace_id ?? null,
+    projectId: row.project_id ?? null,
+    payload: row.payload ?? {},
+    createdAt: row.created_at?.toISOString?.() ?? row.created_at,
+  }));
+}
+
 async function dispatchRunnerJob(job) {
   const current = await readJob(job.id);
   if (!current || RUNNER_JOB_TERMINAL_STATUSES.has(current.status)) return current;
@@ -2407,7 +2440,9 @@ function executionDescriptor(job) {
     return {
       kind: 'http-tunnel',
       type: target.type,
-      label: 'Local tunnel',
+      label: 'Ephemeral local test target',
+      reuseLabel: 'Not reusable',
+      lifecycle: 'run-scoped',
       target: safeTarget.endpointUrl ?? target.endpointUrl ?? '',
       endpointUrl: safeTarget.endpointUrl ?? target.endpointUrl ?? '',
       timeoutMs: job.timeoutMs,

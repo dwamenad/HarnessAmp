@@ -76,7 +76,7 @@ node scripts/harnessamp.mjs run examples/demo-bundle.json \
 
 Registered runners are created and executed through the API/dashboard worker lifecycle. Use `POST /api/projects/<project-id>/jobs` with `executionTarget.type = "registered_runner"` to enqueue a registered runner job.
 
-Local tunnel jobs are also created and executed through the API/dashboard worker lifecycle. Run your local agent app, run `ngrok http <port>` or another HTTPS tunnel, then enqueue with `executionTarget.type = "local_http_tunnel"` and `endpointUrl` set to the forwarding URL. The local adapter must accept preflight `POST` requests, return `{ "ok": true }` or `{ "ready": true }`, read `x-harnessamp-run-token`, and require the same header value on scenario dispatch requests for that run. Keep the tunnel open while the worker runs the benchmark, do not expose sensitive local services, and rotate or close the tunnel after testing. This target is for local testing, not production execution.
+Local tunnel jobs are also created and executed through the API/dashboard worker lifecycle. Run your local agent app, run `ngrok http <port>` or another HTTPS tunnel, then enqueue with `executionTarget.type = "local_http_tunnel"` and `endpointUrl` set to the forwarding URL. The local adapter must accept preflight `POST` requests, return `{ "ok": true, "contractVersion": "harnessamp_http_runner_v1" }` or `{ "ready": true, "contractVersion": "harnessamp_http_runner_v1" }`, read `x-harnessamp-run-token`, require the same header value on scenario dispatch requests for that run, and map observations to requested scenario ids. Keep the tunnel open while the worker runs the benchmark, do not expose sensitive local services, and rotate or close the tunnel after testing. This target is for local testing, not production execution. In production-like environments, configure `HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET` or local tunnel job creation fails closed.
 
 Run the adapter doctor before enqueueing:
 
@@ -84,9 +84,9 @@ Run the adapter doctor before enqueueing:
 npm run harnessamp:doctor -- --url https://example.ngrok.app/api/agent
 ```
 
-The doctor sends preflight and dispatch checks with a temporary run token, verifies JSON contract shape, verifies the endpoint rejects a wrong token, and prints actionable diagnostics without printing the token.
+The doctor sends preflight and a tiny benchmark-shaped dispatch check with a temporary run token, verifies JSON contract shape, supported contract version, observation scenario mapping, wrong-token rejection, and prints actionable diagnostics without printing the token.
 
-Hosted provider BYOK:
+Hosted provider BYOK is gated:
 
 1. Configure `HARNESSAMP_ENABLE_HOSTED_BYOK=1` and `HARNESSAMP_SECRET_ENCRYPTION_KEY` on the API/worker.
 2. Save a key:

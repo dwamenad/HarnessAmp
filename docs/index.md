@@ -5,6 +5,7 @@ Start here when you want the structure of the project without reading the whole 
 - [Architecture](architecture.md)
 - [Concepts](concepts/index.md)
 - [Adapter Guide](adapters/index.md)
+- [Execution Target Control Plane](adapters/execution-targets.md)
 - [CI Diagnose Gate](ci-diagnose.md)
 - [Docker](docker.md)
 - [API and Worker Deployment](deployment.md)

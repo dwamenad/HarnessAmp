@@ -5,6 +5,7 @@ HarnessAmp should wrap agent systems without becoming another agent framework.
 The adapter layer is the boundary between HarnessAmp and external infrastructure such as agent frameworks, graph workflows, model SDKs, crew-style workflows, multi-agent runtimes, MCP servers, or custom HTTP agents.
 
 - [Runner Contract](runner-contract.md)
+- [Execution Target Control Plane](execution-targets.md)
 - [HarnessAmp Adapter Contract](adapter-contract.md)
 - [Harness-1 Search Adapter](harness-1.md)
 - [Vercel AI SDK Adapter](vercel-ai-sdk.md)

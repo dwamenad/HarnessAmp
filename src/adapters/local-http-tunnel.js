@@ -6,7 +6,10 @@ import {
   HARNESSAMP_RUN_TOKEN_HEADER,
   buildPreflightRequest,
   buildDoctorScenarioRequest,
+  inferContractVersion,
+  isSupportedContractVersion,
   summarizeValidation,
+  validateDoctorObservationScenarioMapping,
   validateObservationResponse,
   validatePreflightResponse,
 } from './harnessamp-contract.js';
@@ -29,10 +32,7 @@ export function createLocalTunnelTokenNonce() {
 export function localTunnelRunTokenForNonce(nonce) {
   const normalizedNonce = String(nonce ?? '');
   if (!normalizedNonce) return '';
-  const secret = process.env.HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET
-    ?? process.env.HARNESSAMP_SECRET_ENCRYPTION_KEY
-    ?? process.env.WORKER_SERVICE_TOKEN
-    ?? 'harnessamp-local-tunnel-dev-secret';
+  const secret = localTunnelTokenSecret();
   return crypto
     .createHmac('sha256', secret)
     .update(`local_http_tunnel:${normalizedNonce}`)
@@ -65,12 +65,16 @@ export async function preflightLocalHttpTunnelTarget(target, options = {}) {
     fetchImpl: options.fetchImpl,
   });
 
+  const contractVersion = inferContractVersion(result.payload);
   const validation = validatePreflightResponse(result.payload);
   if (!validation.valid) {
-    throw localTunnelError('Local tunnel preflight failed: endpoint must return { "ok": true }, { "ready": true }, an observation array, or { "observations": [] }.', {
+    throw localTunnelError('Local tunnel preflight failed: endpoint must return readiness with supported contractVersion.', {
       target: result.url,
       httpStatus: result.status,
-      failureClass: ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_CONTRACT_MISMATCH,
+      failureClass: isSupportedContractVersion(contractVersion)
+        ? ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_CONTRACT_MISMATCH
+        : ADAPTER_FAILURE_CLASSES.CONTRACT_VERSION_UNSUPPORTED,
+      contractVersion,
       rawErrorMessage: `Local tunnel preflight failed: ${summarizeValidation(validation)}`,
       phase: 'preflight',
       startedAtMs,
@@ -83,6 +87,7 @@ export async function preflightLocalHttpTunnelTarget(target, options = {}) {
     startedAt: new Date(startedAtMs).toISOString(),
     completedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAtMs,
+    contractVersion,
   };
 }
 
@@ -115,7 +120,10 @@ export async function dispatchLocalHttpTunnelJob({
       thresholds: job.payload.thresholds,
       pack: job.payload.pack,
     },
-    diagnosticsDefaults: jobDiagnostics(job, executionTarget.endpointUrl),
+    diagnosticsDefaults: {
+      ...jobDiagnostics(job, executionTarget.endpointUrl),
+      contractVersion: executionTarget.contractVersion ?? '',
+    },
     resolver,
     fetchImpl,
   });
@@ -139,13 +147,13 @@ export async function runLocalTunnelDoctor({
   url,
   timeoutMs = DEFAULT_PREFLIGHT_TIMEOUT_MS,
   maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
+  runToken = createLocalTunnelRunToken(),
   fetchImpl,
   resolver,
 } = {}) {
   const normalizedTimeoutMs = positiveNumber(timeoutMs, DEFAULT_PREFLIGHT_TIMEOUT_MS);
   const normalizedMaxResponseBytes = positiveNumber(maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES);
   const diagnostics = [];
-  const runToken = createLocalTunnelRunToken();
   const target = {
     type: 'local_http_tunnel',
     endpointUrl: url,
@@ -162,7 +170,7 @@ export async function runLocalTunnelDoctor({
   }
 
   try {
-    await preflightLocalHttpTunnelTarget(target, {
+    const preflight = await preflightLocalHttpTunnelTarget(target, {
       runToken,
       timeoutMs: normalizedTimeoutMs,
       maxResponseBytes: normalizedMaxResponseBytes,
@@ -172,7 +180,8 @@ export async function runLocalTunnelDoctor({
     diagnostics.push({
       check: 'preflight',
       ok: true,
-      message: 'Preflight returned valid JSON readiness.',
+      contractVersion: preflight?.contractVersion ?? '',
+      message: 'Preflight returned valid JSON readiness and a supported contract version.',
     });
   } catch (error) {
     diagnostics.push(diagnosticFromError('preflight', error, guidanceForFailure(error?.failureClass)));
@@ -201,10 +210,21 @@ export async function runLocalTunnelDoctor({
       });
       return doctorResult(false, diagnostics);
     }
+    const mapping = validateDoctorObservationScenarioMapping(response.payload);
+    if (!mapping.valid) {
+      diagnostics.push({
+        check: 'scenario_mapping',
+        ok: false,
+        failureClass: ADAPTER_FAILURE_CLASSES.OBSERVATION_SCENARIO_MISMATCH,
+        message: summarizeValidation(mapping),
+        action: 'Map at least one observation taskId, scenarioId, or metadata.scenarioId to the requested doctor scenario id.',
+      });
+      return doctorResult(false, diagnostics);
+    }
     diagnostics.push({
       check: 'dispatch',
       ok: true,
-      message: 'Dispatch returned a valid observation response.',
+      message: 'Dispatch returned valid observations mapped to the requested scenario id.',
     });
   } catch (error) {
     diagnostics.push(diagnosticFromError('dispatch', error, guidanceForFailure(error?.failureClass)));
@@ -624,6 +644,12 @@ function diagnosticFromError(check, error, action) {
 
 function guidanceForFailure(failureClass) {
   switch (failureClass) {
+    case ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_TOKEN_SECRET_MISSING:
+      return 'Set HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET before enabling local tunnels in production-like environments.';
+    case ADAPTER_FAILURE_CLASSES.CONTRACT_VERSION_UNSUPPORTED:
+      return 'Return a supported adapter contract version from preflight before dispatching benchmarks.';
+    case ADAPTER_FAILURE_CLASSES.OBSERVATION_SCENARIO_MISMATCH:
+      return 'Return at least one observation whose scenario/task metadata maps to the requested scenario id.';
     case ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_PRIVATE_IP_BLOCKED:
       return 'Use a public HTTPS tunnel URL. HarnessAmp blocks localhost, private IPs, link-local ranges, and metadata endpoints.';
     case ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_REDIRECT_BLOCKED:
@@ -633,7 +659,7 @@ function guidanceForFailure(failureClass) {
     case ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_INVALID_JSON:
       return 'Return JSON only with content that matches the HarnessAmp adapter contract.';
     case ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_CONTRACT_MISMATCH:
-      return `Validate ${LOCAL_TUNNEL_HEADER} and return { "ok": true } for preflight or { "observations": [] } for dispatch.`;
+      return `Validate ${LOCAL_TUNNEL_HEADER}, return { "ok": true, "contractVersion": "harnessamp_http_runner_v1" } for preflight, and return observations for dispatch.`;
     case ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_CLOSED_OR_EXPIRED:
       return 'Restart or rotate the tunnel, then rerun the doctor command with the new forwarding URL.';
     case ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_DNS_ERROR:
@@ -723,6 +749,25 @@ function localTunnelError(message, diagnostics = {}) {
     rawErrorMessage: diagnostics.rawErrorMessage ?? message,
     phase: diagnostics.phase ?? '',
   }));
+}
+
+function localTunnelTokenSecret() {
+  const configured = process.env.HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET;
+  if (configured) return configured;
+  if (isProductionLikeEnvironment()) {
+    throw localTunnelError('Local tunnel token secret is missing in this production-like environment.', {
+      failureClass: ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_TOKEN_SECRET_MISSING,
+      phase: 'before_dispatch',
+      rawErrorMessage: 'Local tunnel token secret is missing in this production-like environment.',
+    });
+  }
+  return process.env.HARNESSAMP_SECRET_ENCRYPTION_KEY
+    ?? process.env.WORKER_SERVICE_TOKEN
+    ?? 'harnessamp-local-tunnel-dev-secret';
+}
+
+function isProductionLikeEnvironment() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
 }
 
 function jobDiagnostics(job, target) {
