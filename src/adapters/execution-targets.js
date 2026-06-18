@@ -64,13 +64,17 @@ export function normalizeExecutionTarget(input = {}, legacy = {}) {
       type,
       endpointUrl,
       tokenNonce: stringOr(source.tokenNonce ?? source.token_nonce, ''),
+      contractVersion: stringOr(source.contractVersion ?? source.contract_version, ''),
       maxResponseBytes: positiveNumberOrNull(source.maxResponseBytes ?? source.max_response_bytes),
       safeMetadata: {
         type,
-        endpointUrl,
-        label: 'Local tunnel',
+        endpointUrl: sanitizeTargetUrl(endpointUrl),
+        label: 'Ephemeral local test target',
         transport: 'http',
         ephemeral: true,
+        reusable: false,
+        lifecycle: 'run-scoped',
+        reuseLabel: 'Not reusable',
       },
     };
   }
@@ -120,10 +124,13 @@ export function executionTargetSafeMetadata(target) {
     type: target.type,
     runnerId: target.runnerId ?? null,
     routeUrl: target.routeUrl ?? null,
-    endpointUrl: target.endpointUrl ?? null,
-    label: target.type === 'local_http_tunnel' ? 'Local tunnel' : null,
+    endpointUrl: target.type === 'local_http_tunnel' ? sanitizeTargetUrl(target.endpointUrl) : target.endpointUrl ?? null,
+    label: target.type === 'local_http_tunnel' ? 'Ephemeral local test target' : null,
     transport: target.type === 'local_http_tunnel' ? 'http' : null,
     ephemeral: target.type === 'local_http_tunnel' ? true : null,
+    reusable: target.type === 'local_http_tunnel' ? false : null,
+    lifecycle: target.type === 'local_http_tunnel' ? 'run-scoped' : null,
+    reuseLabel: target.type === 'local_http_tunnel' ? 'Not reusable' : null,
     provider: target.provider ?? null,
     model: target.model ?? null,
     secretRef: target.secretRef ?? null,
@@ -161,6 +168,21 @@ function normalizeHttpsEndpointUrl(value) {
     throw new Error('local_http_tunnel execution target requires an HTTPS endpoint URL.');
   }
   return parsed.href;
+}
+
+function sanitizeTargetUrl(value) {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (/token|secret|key|password|credential|authorization/i.test(key)) {
+        parsed.searchParams.set(key, '[redacted]');
+      }
+    }
+    return parsed.href;
+  } catch {
+    return String(value).replace(/(token|secret|key|password|credential|authorization)=([^&\s]+)/gi, '$1=[redacted]');
+  }
 }
 
 function rejectInlineSecrets(source) {

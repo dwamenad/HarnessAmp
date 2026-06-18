@@ -1,86 +1,88 @@
 # HarnessAmp
 
-Production-ready mutation testing and release gates for AI agents.
+HarnessAmp tests whether AI agents preserve required behavior under realistic mutations before release.
 
-HarnessAmp wraps an existing agent harness, mutates the operating envelope around it, runs baseline and mutated tasks through the same runner, and turns wrapper fragility into a clear release verdict: `pass`, `warn`, or `block`.
-
-```text
-Wrap -> Mutate -> Run -> Diagnose -> Gate
-```
-
-<p align="center">
-  <img src="docs/screenshots/readme-dashboard-current.jpg" alt="HarnessAmp dashboard showing CI gate status, active harnesses, failure counts, and generated pack coverage" width="900">
-</p>
-
-## Why It Exists
-
-Agent demos often pass while production wrappers drift: prompts change, tools return different shapes, permissions loosen, stale context appears, and users apply pressure. HarnessAmp makes those wrapper failures repeatable and reviewable.
-
-| Production problem | HarnessAmp gives you |
-| --- | --- |
-| Agents pass happy-path demos but fail under pressure. | Deterministic mutations for prompts, tools, context, memory, permissions, network sinks, and domain-specific safety boundaries. |
-| Eval scores do not explain what broke. | Behavioral diffs, failure taxonomy, violated contracts, and recommended fixes. |
-| CI needs a release decision. | A robustness gate that emits Markdown, JSON, failure corpus artifacts, and non-zero exits for blocking failures. |
-| Teams already have their own runtime. | A runner contract for mock, HTTP, Replit demo, worker, and future adapter paths. |
-
-## Quick Start
-
-```bash
-git clone https://github.com/dwamenad/HarnessAmp.git
-cd HarnessAmp
-npm install
-npm run dev
-```
-
-Open the local console at:
+It connects to the agent runtime you already operate, runs benchmark scenarios through the same execution path, and returns a release verdict with reproducible diagnostics.
 
 ```text
-http://127.0.0.1:4174/dashboard
+Connect target -> Run mutations -> Diagnose failures -> Gate release
 ```
 
-For seeded local auth:
+## Problem
 
-```bash
-HARNESSAMP_DEV_AUTH=1 npm run dev
-```
+Agent demos can pass while production wrappers fail: prompts drift, tools change shape, context goes stale, permissions loosen, and users apply pressure. HarnessAmp turns those wrapper failures into repeatable benchmark evidence.
 
-Run the CLI gate:
+## What It Does
 
-```bash
-node scripts/harnessamp.mjs validate examples/demo-bundle.json
-node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --json
-```
-
-Run a generated v2 smoke suite:
-
-```bash
-node scripts/harnessamp.mjs run --pack healthguard-core --generated smoke --fail-on high
-```
-
-## Product Console
-
-HarnessAmp includes a web console for operating robustness work: harness inventory, mutation packs, new runs, failures, reports, CI runners, usage, and team settings.
-
-<p align="center">
-  <img src="docs/screenshots/readme-packs-current.jpg" alt="HarnessAmp mutation pack catalog showing HealthGuard, FinanceGuard, CustomerCareGuard, LegalGuard, and generated suite scale" width="900">
-</p>
-
-Key routes:
-
-| Route | Purpose |
+| Need | HarnessAmp gives you |
 | --- | --- |
-| `/dashboard` | Operator overview and CI gate status |
-| `/harnesses` | Harness inventory |
-| `/runs/new` | Start a robustness run |
-| `/packs` | Domain mutation packs and generated suite scale |
-| `/failures` | Failure evidence and triage |
-| `/reports` | Exportable reports |
-| `/ci` | CI runner setup |
-| `/usage` | Estimated usage and run volume |
+| Validate real AI agents before release | Mutation benchmarks for prompts, tools, context, permissions, memory, network sinks, and domain safety boundaries |
+| Keep provider keys out of HarnessAmp | Registered runners and deployed adapter routes call models from your own infrastructure |
+| Understand why a run failed | Failed contracts, mutation failures, failure classes, evidence, and recommended fixes |
+| Block risky releases | Pass/warn/block gates, JSON/Markdown/CSV/HTML reports, and CI artifacts |
 
-## Domain Packs
+## Screenshots
 
-HarnessAmp v2 ships runnable contract-based packs for high-stakes assistants.
+Screenshots below use seeded/demo data only. They do not include real secrets, tokens, private URLs, or customer data.
+
+![HarnessAmp homepage](docs/screenshots/homepage.png)
+
+![Execution targets registry](docs/screenshots/execution-targets.png)
+
+![Endpoint validation panel](docs/screenshots/target-validation.png)
+
+![Guided new run workflow](docs/screenshots/new-run-workflow.png)
+
+![Worker lifecycle run detail](docs/screenshots/run-lifecycle.png)
+
+![Report summary](docs/screenshots/report-summary.png)
+
+![Project secrets hosted BYOK panel](docs/screenshots/project-secrets.png)
+
+## How Execution Works
+
+HarnessAmp is the control plane. Customer workloads stay on your runner, deployed adapter route, or approved hosted execution path.
+
+1. Choose a versioned benchmark pack.
+2. Select an execution target.
+3. Validate the target.
+4. Start a worker-backed run.
+5. Review lifecycle, diagnostics, and release gate output.
+
+## Execution Targets
+
+Recommended production path:
+
+- Use a registered runner for deployed agents, RAG systems, enterprise copilots, and production apps.
+- Use a deployed Vercel AI SDK route when your Next.js/Vercel app already owns the provider credentials.
+- Keep OpenAI, Anthropic, Gemini, Mistral, Groq, Together, or other provider keys in your own runner or app environment.
+- Use local HTTPS tunnels only for short-lived local testing.
+
+| Target | Intended use |
+| --- | --- |
+| `registered_runner` | Production-grade reusable runner endpoint |
+| `vercel_ai_sdk` | Deployed HTTPS adapter route or local route module during development |
+| `local_http_tunnel` | Ephemeral, run-scoped local test target. Not reusable |
+| `hosted_provider` | Hosted BYOK for approved projects via encrypted project secrets |
+| `mock` | Local deterministic development |
+
+Hosted BYOK is gated. Use wording and product behavior like "Encrypted BYOK gated", "Hosted BYOK for approved projects", or "BYOK via encrypted project secrets". Registered runners and deployed adapter routes remain the recommended production paths.
+
+## Run Workflow
+
+The console separates seeded demos from real execution:
+
+- `/targets` is the execution target registry and validation surface.
+- `/runs/new` launches a benchmark against a selected execution target.
+- Project secrets save encrypted provider keys for gated hosted runs only.
+- Reports show benchmark outcomes, not setup instructions.
+- Docs hold deeper implementation details.
+
+Worker-backed runs expose queue state, retries, cancellation, report links, and normalized failure classes such as `adapter_timeout`, `adapter_http_error`, `adapter_invalid_response`, `local_tunnel_private_ip_blocked`, and `hosted_provider_disabled`.
+
+## Benchmark Packs
+
+HarnessAmp ships contract-based packs for high-stakes assistants:
 
 | Pack | Domain | Contracts | Smoke | Core | Deep | Nightly |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -90,176 +92,59 @@ HarnessAmp v2 ships runnable contract-based packs for high-stakes assistants.
 | CustomerCareGuard | Customer support | 10 | 400 | 3,600 | 18,000 | 54,000 |
 | LegalGuard | Legal | 10 | 400 | 4,200 | 21,000 | 63,000 |
 
-Run them:
+Example:
 
 ```bash
-node scripts/harnessamp.mjs run --pack financeguard-core --generated smoke --fail-on high
 node scripts/harnessamp.mjs run --pack healthguard-core --generated smoke --fail-on high
-node scripts/harnessamp.mjs run --pack retrievalguard-core --generated smoke --fail-on high
-node scripts/harnessamp.mjs run --pack customercareguard-core --generated smoke --fail-on high
-node scripts/harnessamp.mjs run --pack legalguard-core --generated smoke --fail-on high
 ```
 
-RetrievalGuard covers source-grounded answers, citation fidelity, provenance preservation, query intent, paraphrase recall, distractor resistance, contradiction handling, abstention, multi-hop evidence, and retrieval tool failure transparency.
+## Reports
 
-The curated RetrievalGuard suite is fixture-backed: qrels and expected-claim files define required sources, required citations, forbidden citations, citation spans, bridge documents, and abstention behavior.
+Reports emphasize:
 
-All v2 domain packs now emit pack-specific evaluation metrics in reports. FinanceGuard, HealthGuard, CustomerCareGuard, and LegalGuard include expected-behavior fixtures for their static entry scenarios, generated suites include provenance samples, and failed v2 pack cases can be promoted into regression-corpus candidates.
+- pass/fail release gate
+- robustness gap
+- failed contracts
+- mutation failures
+- reproducible diagnostics
+- exportable Markdown, JSON, CSV, and Print HTML evidence
 
-CustomerCareGuard covers policy fidelity, refund authority, authentication before account action, privacy minimization, mandatory escalation, abuse containment, and ethical cancellation.
-
-LegalGuard covers legal-information boundaries, jurisdiction discipline, deadline safety, source fidelity, confidentiality, counsel escalation, and unlawful-evasion refusal.
-
-## Failure Evidence
-
-HarnessAmp reports are designed for engineering review. A failure names the scenario, mutation, behavioral delta, violated contract, severity, failure type, evidence, and recommended fix.
-
-<p align="center">
-  <img src="docs/screenshots/readme-failure-current.jpg" alt="HarnessAmp failure evidence page showing expected behavior, observed behavior, scenario input, mutated scenario, and workflow actions" width="900">
-</p>
-
-## Generated v1 Engine
-
-The generic v1 mutation engine is still available for broad robustness testing.
-
-| Engine | Smoke | Core | Deep | Nightly |
-| --- | ---: | ---: | ---: | ---: |
-| v1 generic mutation engine | 400 | 3,400 | 17,000 | 51,000 |
-
-Useful generated v1 commands:
+## Local Development
 
 ```bash
-node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated smoke
-node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated nightly --shard 1/10
-node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --generated core --severity critical,high --surface permission,network
+git clone https://github.com/dwamenad/HarnessAmp.git
+cd HarnessAmp
+npm install
+npm run dev
 ```
 
-## Runner Contract
+Open:
 
-HarnessAmp keeps customer workloads outside the product. It sends baseline and mutated payloads to a runner and expects a normalized `AgentRunResult` back.
+```text
+http://127.0.0.1:4174/dashboard
+```
 
-## Bring Your Own Model
-
-Users can bring their own model or agent to HarnessAmp by exposing an execution target. HarnessAmp sends mutation-pack scenarios to that target, the target calls the user's model using the user's own provider credentials, and HarnessAmp scores the returned behavior. HarnessAmp does not need direct access to provider API keys when using registered runners, Vercel AI SDK routes, or local HTTPS tunnels.
-
-Recommended production path:
-
-- use a registered runner for deployed agents, RAG systems, enterprise copilots, and production apps
-- use a Vercel AI SDK route when a Next.js/Vercel app already owns the provider credentials
-- use a local HTTPS tunnel for short-lived tests against an agent running on your machine
-- keep OpenAI, Anthropic, Gemini, Mistral, Groq, Together, or other provider keys inside your infrastructure
-- do not send raw provider API keys to HarnessAmp job creation endpoints
-
-Hosted provider BYOK is available as a convenience execution target when `HARNESSAMP_ENABLE_HOSTED_BYOK=1` and encrypted project secrets are configured. It stores provider keys encrypted at rest, references them by `secretRef` in jobs, and decrypts only inside worker/provider execution. Registered runners and Vercel AI SDK routes remain the recommended production paths.
-
-Supported paths:
-
-| Runner | Use |
-| --- | --- |
-| `mock` | Local end-to-end testing |
-| `custom_http` | Production agent endpoints |
-| `vercel-ai-sdk` | Next.js/Vercel AI SDK routes and handlers |
-| `local_http_tunnel` | Short-lived HTTPS tunnel to a local HarnessAmp-compatible agent endpoint |
-| `hosted_provider` | Convenience BYOK execution through encrypted project secrets |
-| Replit demo runner | Public demo deployments |
-| Worker service | Durable queued project jobs |
-
-Vercel AI SDK adapter and local tunnel jobs run through the worker lifecycle, not the browser. Job status, API responses, CLI worker logs, dashboard job details, and report metadata expose a normalized diagnostics envelope with adapter type, target route or endpoint, latency, HTTP status, worker/job ids, retry attempt, phase, safely truncated error text, and deterministic failure classes such as `adapter_timeout`, `adapter_http_error`, `adapter_invalid_response`, and `adapter_target_missing`.
-
-Local tunnel flow:
-
-1. Run the local app that serves your HarnessAmp-compatible agent endpoint.
-2. Run `ngrok http <port>` or another HTTPS tunneling tool.
-3. Paste the HTTPS forwarding URL into the dashboard execution target picker.
-4. Implement the HarnessAmp HTTP contract: preflight returns `{ "ok": true }` or `{ "ready": true }`, and dispatch returns an observation array or `{ "observations": [] }`.
-5. Read `x-harnessamp-run-token` on preflight and require the same header on scenario dispatch requests for that run.
-6. Keep the tunnel open while the benchmark runs, do not expose sensitive local services, and close or rotate the tunnel after testing.
-
-Local tunnel targets are ephemeral. HarnessAmp validates HTTPS URLs, rejects localhost/private/metadata targets, checks DNS resolution before preflight and dispatch, blocks unsafe redirects, applies timeouts and response-size limits, and stores only safe target metadata.
-
-Validate an adapter endpoint before running a benchmark:
+Seeded local auth:
 
 ```bash
-npm run harnessamp:doctor -- --url https://example.ngrok.app/api/agent
+HARNESSAMP_DEV_AUTH=1 npm run dev
 ```
 
-See [docs/adapters/adapter-contract.md](docs/adapters/adapter-contract.md) for the formal contract, common failures, and copy-paste Next.js, Express, Vercel AI SDK, and fetch-handler examples.
-
-Custom HTTP example:
-
-```bash
-node scripts/harnessamp.mjs diagnose examples/demo-bundle.json \
-  --runner-kind custom_http \
-  --runner-endpoint https://runner.example.com/harnessamp \
-  --concurrency 8 \
-  --run-attempts 2 \
-  --timeout-ms 30000
-```
-
-See [docs/adapters/runner-contract.md](docs/adapters/runner-contract.md).
-
-Vercel AI SDK route example:
-
-```bash
-node scripts/harnessamp.mjs run examples/demo-bundle.json \
-  --adapter vercel-ai-sdk \
-  --target ./examples/vercel-ai-sdk/app/api/chat/route.mjs \
-  --mode sample \
-  --json
-```
-
-See [docs/adapters/vercel-ai-sdk.md](docs/adapters/vercel-ai-sdk.md).
-
-## CI Gate
-
-The reusable GitHub Action at `action.yml` turns HarnessAmp into a PR-blocking robustness gate.
-
-```yaml
-name: HarnessAmp robustness gate
-
-on:
-  pull_request:
-
-jobs:
-  robustness:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - uses: ./
-        with:
-          bundle: examples/demo-bundle.json
-          max-mutations: 24
-          max-robustness-gap: 20
-          output-dir: harnessamp-artifacts
-```
-
-Artifacts:
-
-- `harnessamp-report.md`
-- `harnessamp-report.json`
-- `harnessamp-failure-corpus.json`
-
-The PR-facing metric is `Robustness Gap`: original pass rate minus mutated pass rate.
-
-## Useful Commands
+Useful commands:
 
 | Task | Command |
 | --- | --- |
 | Start local app | `npm run dev` |
 | Build production app | `npm run build` |
-| Preview production build | `npm run preview` |
 | Run tests | `npm test` |
+| Run E2E tests | `npm run test:e2e` |
 | Validate a bundle | `node scripts/harnessamp.mjs validate examples/demo-bundle.json` |
 | Run release gate | `node scripts/harnessamp.mjs diagnose examples/demo-bundle.json --json` |
-| Inspect mutations | `node scripts/harnessamp.mjs mutate examples/demo-bundle.json --max-mutations 20` |
 | Run local worker | `node scripts/harnessamp.mjs worker --project-id <project-id> --api-url http://127.0.0.1:3000 --stale-after-ms 120000` |
 
-## Configuration
+## Environment Variables
 
-Durable API-backed users, workspaces, reports, runner jobs, and benchmark versions require Postgres:
+Durable API-backed users, workspaces, reports, runner jobs, and benchmark versions:
 
 ```text
 DATABASE_URL
@@ -267,7 +152,14 @@ DATABASE_URL
 POSTGRES_URL
 ```
 
-Optional runner environment:
+Worker service:
+
+```text
+WORKER_SERVICE_TOKEN
+HARNESSAMP_WORKER_STALE_AFTER_MS
+```
+
+Registered runners:
 
 ```text
 HARNESSAMP_RUNNER_ENDPOINT
@@ -275,11 +167,17 @@ HARNESSAMP_RUNNER_TOKEN
 HARNESSAMP_RUNNER_TIMEOUT_MS
 ```
 
-Worker service authentication:
+Local tunnel safety in production-like environments:
 
 ```text
-WORKER_SERVICE_TOKEN
-HARNESSAMP_WORKER_STALE_AFTER_MS
+HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET
+```
+
+Gated Hosted BYOK:
+
+```text
+HARNESSAMP_ENABLE_HOSTED_BYOK=1
+HARNESSAMP_SECRET_ENCRYPTION_KEY
 ```
 
 Local seeded auth:
@@ -288,6 +186,15 @@ Local seeded auth:
 HARNESSAMP_DEV_AUTH=1
 ```
 
+## Security Model
+
+- Registered runners and deployed adapter routes keep provider keys in user-controlled infrastructure.
+- Local tunnel targets are ephemeral, run-scoped, and not reusable production targets.
+- HarnessAmp blocks localhost, private IP ranges, link-local ranges, cloud metadata endpoints, unsafe redirects, unsupported contract versions, oversized responses, and non-JSON preflight responses for local tunnel targets.
+- Hosted BYOK is gated and uses encrypted project secrets for approved projects.
+- Raw provider keys are not returned by API responses and should not be sent to job creation endpoints for registered runner or deployed adapter execution.
+- Validation audit events store safe metadata only: target type, phase, status, duration, failure class, contract version, and timestamp.
+
 ## Repository Map
 
 | Path | Role |
@@ -295,24 +202,39 @@ HARNESSAMP_DEV_AUTH=1
 | `src/core/` | Bundle normalization, diagnosis, jobs, trace compiler, failure taxonomy |
 | `src/mutations/` | v1 mutation registry, generated tiers, sharding, risk filters |
 | `src/v2/` | Domain packs, contract checkers, generated scenario engines, v2 runner |
-| `api/` | Local/Vercel report, auth, project, workspace, job, and event endpoints |
-| `docs/` | Concepts, usage, deployment, CI, runner contract, architecture |
-| `examples/` | Demo bundles, benchmark packs, domain scenarios, Replit runner, Vercel AI SDK fixture |
-| `tests/` | Engine, mutation, diagnosis, conformance, v2, web, and E2E coverage |
+| `src/adapters/` | Execution target adapters and contracts |
+| `api/` | Auth, projects, runners, jobs, reports, secrets, and event endpoints |
+| `docs/` | Concepts, adapters, deployment, API reference, and screenshots |
+| `examples/` | Demo bundles, benchmark packs, Replit runner, Vercel AI SDK fixture |
+| `tests/` | Engine, adapter, API, UI, and E2E coverage |
 
 ## Docs
 
-- [Installation](docs/installation.md)
-- [Usage](docs/usage.md)
-- [CLI](docs/cli.md)
-- [Deployment](docs/deployment.md)
-- [Mutation engine](docs/mutation-engine.md)
+- [Execution targets](docs/adapters/execution-targets.md)
+- [Adapter contract](docs/adapters/adapter-contract.md)
 - [Runner contract](docs/adapters/runner-contract.md)
 - [Vercel AI SDK adapter](docs/adapters/vercel-ai-sdk.md)
+- [Deployment](docs/deployment.md)
+- [API reference](docs/reference/api.md)
 - [CI gates](docs/ci-gates.md)
-- [GitHub OAuth](docs/github-oauth.md)
-- [Replit demo](docs/replit.md)
 - [Testing](docs/testing.md)
+
+## Current Status / Roadmap
+
+Current:
+
+- execution target registry and validation
+- guided `/runs/new` launch flow
+- worker-backed registered runner, Vercel AI SDK, local tunnel, and gated hosted BYOK paths
+- encrypted project secrets for hosted BYOK
+- benchmark reports and release gates
+
+Next:
+
+- deeper production runner observability
+- richer adapter setup docs
+- more benchmark pack governance workflows
+- broader hosted BYOK approval and audit tooling
 
 ## Contributing
 

@@ -24,7 +24,10 @@ export const ADAPTER_FAILURE_CLASSES = Object.freeze({
   LOCAL_TUNNEL_INVALID_JSON: 'local_tunnel_invalid_json',
   LOCAL_TUNNEL_HTTP_ERROR: 'local_tunnel_http_error',
   LOCAL_TUNNEL_CLOSED_OR_EXPIRED: 'local_tunnel_closed_or_expired',
+  LOCAL_TUNNEL_TOKEN_SECRET_MISSING: 'local_tunnel_token_secret_missing',
   TARGET_MISSING: 'adapter_target_missing',
+  CONTRACT_VERSION_UNSUPPORTED: 'adapter_contract_version_unsupported',
+  OBSERVATION_SCENARIO_MISMATCH: 'adapter_observation_scenario_mismatch',
   TIMEOUT: 'adapter_timeout',
   HTTP_ERROR: 'adapter_http_error',
   INVALID_RESPONSE: 'adapter_invalid_response',
@@ -52,7 +55,10 @@ const NON_RETRYABLE_FAILURES = new Set([
   ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_PRIVATE_IP_BLOCKED,
   ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_CONTRACT_MISMATCH,
   ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_INVALID_JSON,
+  ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_TOKEN_SECRET_MISSING,
   ADAPTER_FAILURE_CLASSES.TARGET_MISSING,
+  ADAPTER_FAILURE_CLASSES.CONTRACT_VERSION_UNSUPPORTED,
+  ADAPTER_FAILURE_CLASSES.OBSERVATION_SCENARIO_MISMATCH,
   ADAPTER_FAILURE_CLASSES.INVALID_RESPONSE,
   ADAPTER_FAILURE_CLASSES.SCHEMA_MISMATCH,
   ADAPTER_FAILURE_CLASSES.WORKER_CANCELED,
@@ -97,7 +103,10 @@ export function classifyAdapterError(error, context = {}) {
   if (/local tunnel.*contract|x-harnessamp-run-token/i.test(message)) return ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_CONTRACT_MISMATCH;
   if (/local tunnel.*json|local tunnel.*parse/i.test(message)) return ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_INVALID_JSON;
   if (/local tunnel.*closed|local tunnel.*expired/i.test(message)) return ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_CLOSED_OR_EXPIRED;
+  if (/local tunnel.*token secret|token secret.*missing/i.test(message)) return ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_TOKEN_SECRET_MISSING;
   if (/local tunnel.*http|local tunnel.*returned/i.test(message)) return ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_HTTP_ERROR;
+  if (/contract version.*unsupported|unsupported.*contract version|contract.*unsupported/i.test(message)) return ADAPTER_FAILURE_CLASSES.CONTRACT_VERSION_UNSUPPORTED;
+  if (/scenario.*mismatch|observation.*scenario/i.test(message)) return ADAPTER_FAILURE_CLASSES.OBSERVATION_SCENARIO_MISMATCH;
   if (status === 401 || status === 403) return ADAPTER_FAILURE_CLASSES.AUTH_ERROR;
   if (status === 429) return ADAPTER_FAILURE_CLASSES.RATE_LIMITED;
   if (status >= 400) return ADAPTER_FAILURE_CLASSES.HTTP_ERROR;
@@ -128,6 +137,7 @@ export function normalizeAdapterDiagnostics(input = {}, defaults = {}) {
     jobId: stringOr(source.jobId ?? defaults.jobId, ''),
     benchmarkId: stringOr(source.benchmarkId ?? defaults.benchmarkId, ''),
     benchmarkVersion: source.benchmarkVersion ?? defaults.benchmarkVersion ?? null,
+    contractVersion: stringOr(source.contractVersion ?? defaults.contractVersion, ''),
     scenarioId: stringOr(source.scenarioId ?? defaults.scenarioId, ''),
     mutationId: stringOr(source.mutationId ?? defaults.mutationId, ''),
     mutationFamily: stringOr(source.mutationFamily ?? defaults.mutationFamily, ''),

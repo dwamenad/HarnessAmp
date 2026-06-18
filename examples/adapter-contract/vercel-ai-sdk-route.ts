@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
   if (body?.preflight === true && body?.type === 'harnessamp_preflight') {
     runTokens.add(token);
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, contractVersion: 'harnessamp_http_runner_v1' });
   }
 
   if (!runTokens.has(token)) return Response.json({ error: 'invalid_run_token', retryable: false }, { status: 403 });

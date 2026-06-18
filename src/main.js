@@ -213,7 +213,7 @@ const proofStats = [
   ['4', 'execution targets'],
   ['doctor', 'adapter validation'],
   ['local', 'tunnel testing'],
-  ['BYOK', 'supported'],
+  ['BYOK', 'gated'],
   ['worker', 'backed runs'],
 ];
 
@@ -223,6 +223,7 @@ const saasRouteLabels = {
   '/harnesses/new': 'New Harness',
   '/packs': 'Mutation Packs',
   '/contracts': 'Contracts',
+  '/targets': 'Execution Targets',
   '/runs/new': 'New Run',
   '/runs/run-healthguard-2419': 'Run Progress',
   '/runs/run-healthguard-2419/summary': 'Run Summary',
@@ -240,6 +241,7 @@ const saasNav = [
   ['/harnesses', 'Harnesses', 'HA'],
   ['/packs', 'Mutation Packs', 'MP'],
   ['/contracts', 'Contracts', 'BC'],
+  ['/targets', 'Execution Targets', 'ET'],
   ['/runs/new', 'New Run', 'NR'],
   ['/failures', 'Failures', 'FE'],
   ['/compare', 'Compare', 'CR'],
@@ -452,6 +454,7 @@ const defaultState = {
   executionTarget: 'runner',
   vercelAiSdkTarget: './examples/vercel-ai-sdk/app/api/chat/route.mjs',
   localTunnelUrl: '',
+  endpointValidation: null,
   hostedProvider: 'openai',
   hostedProviderModel: 'gpt-4.1-mini',
   selectedSecretRef: '',
@@ -651,6 +654,7 @@ function renderSaasRoute(route) {
   if (route.routeType === 'pack-detail') return renderSaasPackDetail(route.packSlug);
   if (route.pathname === '/packs') return renderSaasPacks();
   if (route.pathname === '/contracts') return renderSaasContracts();
+  if (route.pathname === '/targets') return renderExecutionTargets();
   if (route.pathname === '/runs/new') return renderSaasNewRun();
   if (route.routeType === 'run-summary') return renderSaasRunSummary(route.runId);
   if (route.routeType === 'run-progress') return renderSaasRunProgress(route.runId);
@@ -899,13 +903,15 @@ function renderSaasNewRun() {
   const preflight = runPreflightItems({ benchmark: selectedBenchmark, harness: selectedHarness, eligibility, draft });
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Configure Run</h2><p>Select a versioned benchmark, confirm the runner, and start a comparable result.</p></div>${renderDataSourceStrip(state.sessionStatus === 'authenticated' ? 'Live project data' : 'Local preview', state.sessionStatus === 'authenticated' ? 'Uses API-backed job queue.' : 'Persists run draft and preview runs in this browser.')}</div>
+      <div class="ha-section-head"><div><h2>Configure Run</h2><p>Choose a benchmark, select an execution target, validate it, then launch a worker-backed run.</p></div>${renderDataSourceStrip(state.sessionStatus === 'authenticated' ? 'Live project data' : 'Local preview', state.sessionStatus === 'authenticated' ? 'Uses API-backed job queue.' : 'Persists run draft and preview runs in this browser.')}</div>
+      ${renderRunLaunchWorkflow()}
       <div class="ha-grid ha-grid--split">
         <form class="ha-panel ha-form" id="run-config-form">
-          ${renderSelectFromObjects('Harness', harnesses.map((harness) => ({ value: harness.id, label: `${harness.name} / ${harness.environment}` })), selectedHarness?.id, 'run-harness-select')}
           ${renderSelectFromObjects('Benchmark', benchmarkRunOptions(), selectedBenchmark?.id ?? '', 'run-benchmark-select')}
           ${renderRunModeControl(draft.runMode)}
           ${renderBenchmarkAuthority(selectedBenchmark, selectedPack, selectedTier)}
+          ${renderSelectFromObjects('Harness', harnesses.map((harness) => ({ value: harness.id, label: `${harness.name} / ${harness.environment}` })), selectedHarness?.id, 'run-harness-select')}
+          ${renderRunExecutionTargetStep()}
           ${renderField('Max observations', String(draft.maxObservations), 'run-max-observations', 'number')}
           ${renderField('Agent version', draft.agentVersion || selectedHarness?.agentVersion || 'unknown', 'run-agent-version')}
           ${renderBenchmarkContents(selectedBenchmark)}
@@ -917,6 +923,7 @@ function renderSaasNewRun() {
           </details>
           <div class="ha-form-actions">
             <button class="ha-primary" id="start-configured-run" type="button">Start Run</button>
+            <a class="ha-secondary" href="/targets">Manage targets</a>
             <a class="ha-secondary" href="/runs/${escapeHtml(consoleState.activeRunId || 'run-healthguard-2419')}">View active run</a>
           </div>
           <p class="ha-form-feedback" id="run-config-feedback">${escapeHtml(consoleState.runFeedback)}</p>
@@ -928,6 +935,7 @@ function renderSaasNewRun() {
           ${renderSaasMetric('Estimated scenarios', estimated.scenarios, `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
           ${renderSaasMetric('Estimated evaluated observations', estimated.observations, 'response x contract checks', 'neutral')}
           ${renderPreflightChecklist(preflight)}
+          ${renderRunTargetReadiness()}
           ${renderGatePreview(selectedBenchmark)}
           ${renderHarnessReadiness(selectedHarness)}
           ${renderExpectedArtifacts()}
@@ -960,6 +968,140 @@ function renderBenchmarkAuthority(benchmark, pack, tier) {
       <p>${escapeHtml(benchmark.description)}</p>
     </div>
   `;
+}
+
+function renderRunLaunchWorkflow() {
+  const validation = state.endpointValidation;
+  const validationState = validation?.ok ? 'passed' : validation?.status === 'failed' ? 'failed' : 'pending';
+  const steps = [
+    ['1', 'Benchmark', selectedBenchmarkForDraft(consoleState.runDraft)?.name ?? 'Choose benchmark'],
+    ['2', 'Execution target', executionTargetDisplayName(state.executionTarget)],
+    ['3', 'Validate', validationState],
+    ['4', 'Start run', state.activeJobId ? `job ${state.activeJobId}` : 'worker-backed'],
+  ];
+  return `
+    <ol class="run-workflow" aria-label="Run launch workflow">
+      ${steps.map(([index, label, value]) => `
+        <li>
+          <span>${escapeHtml(index)}</span>
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(value)}</small>
+        </li>
+      `).join('')}
+    </ol>
+  `;
+}
+
+function renderRunExecutionTargetStep() {
+  return `
+    <section class="run-target-step" aria-labelledby="run-target-heading">
+      <div class="ha-panel__head"><h3 id="run-target-heading">Execution target</h3><a href="/targets">Open registry</a></div>
+      <div class="target-choice-grid">
+        ${renderTargetChoice('runner', 'Registered runner', 'Production-grade', 'Reusable runner endpoint. Provider keys stay in your infrastructure.')}
+        ${renderTargetChoice('vercel-ai-sdk', 'Vercel AI SDK route', 'Production-grade when deployed HTTPS', 'Adapter route that owns provider keys in your app environment.')}
+        ${renderTargetChoice('local-http-tunnel', 'Local HTTPS tunnel', 'Ephemeral · Run-scoped · Not reusable', 'Short-lived local validation target.')}
+        ${renderTargetChoice('hosted-provider', 'Hosted BYOK (gated)', 'Encrypted BYOK gated', 'Approved projects only, using encrypted project secrets.')}
+      </div>
+      ${state.executionTarget === 'runner' ? `<label><span>Runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>` : ''}
+      ${state.executionTarget === 'vercel-ai-sdk' ? `<label><span>Route URL or path</span><input id="vercel-ai-sdk-target" type="text" value="${escapeHtml(state.vercelAiSdkTarget)}" placeholder="https://app.example.com/api/harnessamp/agent" /></label>` : ''}
+      ${state.executionTarget === 'local-http-tunnel' ? `
+        <div class="local-tunnel-controls">
+          <label><span>Forwarding URL</span><input id="local-tunnel-url" type="url" value="${escapeHtml(state.localTunnelUrl)}" placeholder="https://example.ngrok-free.app/harnessamp" /></label>
+          <p class="session-muted">Ephemeral local test target · Run-scoped · Not reusable after completion or expiration.</p>
+        </div>
+      ` : ''}
+      ${state.executionTarget === 'hosted-provider' ? `
+        <div class="hosted-provider-controls">
+          <label><span>Provider</span><select id="hosted-provider-select">${renderProviderOptions(state.hostedProvider)}</select></label>
+          <label><span>Model</span><input id="hosted-provider-model" type="text" value="${escapeHtml(state.hostedProviderModel)}" placeholder="gpt-4.1-mini" /></label>
+          <label><span>Saved key</span><select id="secret-select">${renderSecretOptions()}</select></label>
+          <p class="session-muted">${escapeHtml(hostedByokAvailabilityMessage())}</p>
+        </div>
+      ` : ''}
+      <div class="inline-actions">
+        <button class="button button--secondary" id="validate-endpoint" type="button">Validate endpoint</button>
+      </div>
+      ${renderEndpointValidationPanel()}
+    </section>
+  `;
+}
+
+function renderTargetChoice(value, title, badge, description) {
+  const checked = state.executionTarget === value;
+  return `
+    <label class="target-choice ${checked ? 'target-choice--selected' : ''}">
+      <input type="radio" name="execution-target" value="${escapeHtml(value)}" ${checked ? 'checked' : ''} />
+      <span>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(description)}</small>
+        <em>${escapeHtml(badge)}</em>
+      </span>
+    </label>
+  `;
+}
+
+function renderRunTargetReadiness() {
+  const target = currentExecutionTargetSummary();
+  const validation = state.endpointValidation;
+  return `
+    <div class="ha-preflight">
+      <strong>Target readiness</strong>
+      <ol>
+        <li><span>${escapeHtml(target.name)}</span><small>${escapeHtml(target.grade)} / ${escapeHtml(target.reuse)}</small></li>
+        <li><span>${escapeHtml(validation?.ok ? 'Validation passed' : validation?.status === 'failed' ? 'Validation failed' : 'Validation pending')}</span><small>${escapeHtml(validation?.message ?? target.reason)}</small></li>
+        <li><span>Worker lifecycle</span><small>queued -> claimed -> running -> retrying -> completed / failed / canceled</small></li>
+      </ol>
+    </div>
+  `;
+}
+
+function currentExecutionTargetSummary() {
+  if (state.executionTarget === 'local-http-tunnel') {
+    return {
+      name: 'Ephemeral local test target',
+      grade: 'Local testing only',
+      reuse: 'Run-scoped / Not reusable',
+      reason: state.localTunnelUrl ? 'Validate before enqueueing.' : 'Paste the HTTPS forwarding URL.',
+    };
+  }
+  if (state.executionTarget === 'vercel-ai-sdk') {
+    const isHttps = /^https:\/\//i.test(state.vercelAiSdkTarget);
+    return {
+      name: 'Vercel AI SDK route',
+      grade: isHttps ? 'Production-grade candidate' : 'Local or file target',
+      reuse: isHttps ? 'Reusable when contract-valid' : 'Validate route before production use',
+      reason: state.vercelAiSdkTarget ? 'Validate endpoint before launch.' : 'Add a route URL or handler path.',
+    };
+  }
+  if (state.executionTarget === 'hosted-provider') {
+    return {
+      name: 'Hosted BYOK (gated)',
+      grade: 'Encrypted BYOK gated',
+      reuse: state.selectedSecretRef ? 'Configured saved key' : 'Unavailable until saved key is selected',
+      reason: hostedByokAvailabilityMessage(),
+    };
+  }
+  const runner = state.projectRunners.find((item) => item.id === state.selectedRunnerId);
+  return {
+    name: runner?.name ?? 'Registered runner',
+    grade: 'Production-grade',
+    reuse: 'Durable reusable target',
+    reason: runner ? 'Runner selected.' : 'Register or select a runner.',
+  };
+}
+
+function executionTargetDisplayName(value) {
+  if (value === 'vercel-ai-sdk') return 'Vercel AI SDK route';
+  if (value === 'local-http-tunnel') return 'Local HTTPS tunnel';
+  if (value === 'hosted-provider') return 'Hosted BYOK';
+  return 'Registered runner';
+}
+
+function hostedByokAvailabilityMessage() {
+  if (state.projectSecrets.some((secret) => secret.status === 'active')) {
+    return 'Encrypted BYOK gated; select a saved project key before launch.';
+  }
+  return 'Hosted BYOK unavailable until encrypted project secret storage is enabled and a project key is saved.';
 }
 
 function renderBenchmarkContents(benchmark) {
@@ -1368,7 +1510,7 @@ function renderSaasReports() {
   const reportRows = reportTableRows();
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Run reports</h2><p>Export release evidence from completed runs. Real local reports appear before seeded samples.</p></div>${renderDataSourceStrip('Local preview', 'Exports are generated from current browser report state.')}</div>
+      <div class="ha-section-head"><div><h2>Run reports</h2><p>Pass/fail gates, robustness gap, failed contracts, mutation failures, and reproducible diagnostics.</p></div>${renderDataSourceStrip('Local preview', 'Real local reports appear before seeded samples.')}</div>
       ${renderNextActions([
         ['Export executive report', '#reports-table', 'Share release decision and failure evidence'],
         ['Create CI gate', '/ci', 'Use report thresholds in pull requests'],
@@ -1376,11 +1518,232 @@ function renderSaasReports() {
       ])}
       <article class="ha-panel ha-report-status" id="report-export-status" aria-live="polite">
         <strong>Exports ready</strong>
-        <span>Choose a format. Seeded sample - not a real benchmark result rows stay labeled.</span>
+        <span>Seeded sample rows stay labeled. Choose a format for review.</span>
       </article>
       <article class="ha-panel" id="reports-table">${renderReportsTable(reportRows)}</article>
     </section>
   `;
+}
+
+function renderExecutionTargets() {
+  const targets = executionTargetRegistryRows();
+  const productionTargets = targets.filter((target) => target.grade === 'Production-grade');
+  const ephemeralTargets = targets.filter((target) => target.ephemeral);
+  const failingTargets = targets.filter((target) => target.failureClass && target.failureClass !== 'none');
+  return `
+    <section class="ha-page">
+      <div class="ha-section-head">
+        <div><h2>Execution Targets</h2><p>Registry and validation surface for worker-backed runs.</p></div>
+        <div class="ha-run-links"><a class="ha-primary" href="/runs/new">Start run</a><a href="/docs/adapters/adapter-contract">Adapter contract</a></div>
+      </div>
+      <div class="ha-metrics ha-metrics--priority">
+        ${renderSaasMetric('Targets', String(targets.length), `${productionTargets.length} production-grade`, 'neutral')}
+        ${renderSaasMetric('Ephemeral', String(ephemeralTargets.length), 'run-scoped, not reusable', ephemeralTargets.length ? 'warn' : 'neutral')}
+        ${renderSaasMetric('Attention', String(failingTargets.length), 'failure class present', failingTargets.length ? 'critical' : 'passed')}
+      </div>
+      <div class="target-registry">
+        ${targets.map(renderExecutionTargetCard).join('')}
+      </div>
+      <article class="ha-panel ha-panel--wide">
+        <div class="ha-panel__head"><h3>Validation controls</h3><span>safe diagnostics only</span></div>
+        <p class="ha-section-note">Validate reachability, tokens, JSON, contract version, scenario mapping, and private-network blocking before enqueueing real runs.</p>
+        ${renderEndpointValidationPanel()}
+      </article>
+    </section>
+  `;
+}
+
+function renderExecutionTargetCard(target) {
+  const stateClass = target.validationState === 'passed'
+    ? 'passed'
+    : target.validationState === 'failed' || target.validationState === 'blocked'
+      ? 'failed'
+      : 'pending';
+  return `
+    <article class="target-card ${target.ephemeral ? 'target-card--ephemeral' : ''}">
+      <div class="target-card__head">
+        <div><span>${escapeHtml(target.typeLabel)}</span><strong>${escapeHtml(target.name)}</strong></div>
+        <span class="ha-badge ${statusClass(stateClass)}">${escapeHtml(target.validationState)}</span>
+      </div>
+      <div class="target-card__meta">
+        <div><span>Status</span><strong>${escapeHtml(target.status)}</strong></div>
+        <div><span>Type</span><strong>${escapeHtml(target.grade)}</strong></div>
+        <div><span>Reuse</span><strong>${escapeHtml(target.reuse)}</strong></div>
+        <div><span>Last validated</span><strong>${escapeHtml(target.lastValidatedAt)}</strong></div>
+        <div><span>Last run</span><strong>${escapeHtml(target.lastRunAt)}</strong></div>
+        <div><span>Failure class</span><strong>${escapeHtml(target.failureClass)}</strong></div>
+      </div>
+      <details class="target-card__details">
+        <summary>Diagnostics</summary>
+        <p>${escapeHtml(target.diagnosticsSummary)}</p>
+        <div><span>Contract</span><strong>${escapeHtml(target.contractVersion)}</strong></div>
+      </details>
+      ${target.ephemeral ? '<small class="target-card__warning">Ephemeral · Run-scoped · Not reusable</small>' : ''}
+    </article>
+  `;
+}
+
+function executionTargetRegistryRows() {
+  const rows = [];
+  if (!state.projectRunners.length) {
+    rows.push({
+      name: 'No registered runners',
+      typeLabel: 'Registered runner',
+      status: 'not configured',
+      grade: 'Production-grade',
+      reuse: 'Durable reusable target once registered',
+      ephemeral: false,
+      lastValidatedAt: 'not validated',
+      lastRunAt: 'no runs',
+      failureClass: 'none',
+      contractVersion: 'unknown',
+      validationState: 'pending',
+      diagnosticsSummary: 'Add a registered runner or deployed adapter route to run real benchmarks.',
+    });
+  }
+  for (const runner of state.projectRunners) {
+    const job = latestJobForTarget((item) => item.runnerId === runner.id || item.payload?.executionTarget?.runnerId === runner.id);
+    rows.push({
+      name: runner.name,
+      typeLabel: 'Registered runner',
+      status: runner.status ?? 'unknown',
+      grade: 'Production-grade',
+      reuse: 'Durable reusable target',
+      ephemeral: false,
+      lastValidatedAt: formatJobDate(runner.updatedAt ?? runner.createdAt) ?? 'not validated',
+      lastRunAt: formatJobDate(job?.updatedAt ?? job?.createdAt) ?? runner.lastRun ?? 'no runs',
+      failureClass: jobFailureClass(job),
+      contractVersion: jobContractVersion(job),
+      validationState: runner.status === 'active' ? 'passed' : 'warning',
+      diagnosticsSummary: runner.status === 'active' ? 'Registered runner is available for worker-backed dispatch.' : 'Runner is not active.',
+    });
+  }
+
+  if (state.vercelAiSdkTarget) {
+    const job = latestJobForTarget((item) => {
+      const execution = item.result?.execution ?? {};
+      const payloadTarget = item.payload?.executionTarget ?? {};
+      return payloadTarget.type === 'vercel_ai_sdk' || execution.type === 'vercel_ai_sdk' || item.payload?.adapter?.type === 'vercel-ai-sdk';
+    });
+    const deployedHttps = /^https:\/\//i.test(state.vercelAiSdkTarget);
+    rows.push({
+      name: safeTargetLabel(state.vercelAiSdkTarget),
+      typeLabel: 'Vercel AI SDK route',
+      status: deployedHttps ? 'configured' : 'draft/local',
+      grade: deployedHttps ? 'Production-grade' : 'Local/development',
+      reuse: deployedHttps ? 'Durable when contract-valid' : 'Not production-grade until deployed HTTPS',
+      ephemeral: false,
+      lastValidatedAt: validationTimestampFor('vercel-ai-sdk'),
+      lastRunAt: formatJobDate(job?.updatedAt ?? job?.createdAt) ?? 'no runs',
+      failureClass: jobFailureClass(job),
+      contractVersion: jobContractVersion(job),
+      validationState: deployedHttps ? validationStateFor('vercel-ai-sdk') : 'warning',
+      diagnosticsSummary: deployedHttps ? 'Deployed route candidate. Validate contract before launch.' : 'Route path or local URL is useful for development but not production-grade.',
+    });
+  }
+
+  const localJobs = state.projectJobs.filter((job) => job.payload?.executionTarget?.type === 'local_http_tunnel' || job.result?.execution?.type === 'local_http_tunnel');
+  const latestLocalJob = localJobs[0] ?? null;
+  rows.push({
+    name: 'Ephemeral local test target',
+    typeLabel: 'Local HTTPS tunnel',
+    status: latestLocalJob && ['completed', 'failed', 'canceled', 'cancelled'].includes(latestLocalJob.status) ? 'expired' : state.localTunnelUrl ? 'configured' : 'not configured',
+    grade: 'Local testing only',
+    reuse: 'Run-scoped / Not reusable',
+    ephemeral: true,
+    lastValidatedAt: validationTimestampFor('local-http-tunnel'),
+    lastRunAt: formatJobDate(latestLocalJob?.updatedAt ?? latestLocalJob?.createdAt) ?? 'no runs',
+    failureClass: latestLocalJob ? jobFailureClass(latestLocalJob) || validationFailureClass() : validationFailureClass(),
+    contractVersion: latestLocalJob ? jobContractVersion(latestLocalJob) || validationContractVersion() : validationContractVersion(),
+    validationState: state.localTunnelUrl || latestLocalJob ? validationStateFor('local-http-tunnel') : 'pending',
+    diagnosticsSummary: validationMessageForLocalTunnel(latestLocalJob),
+  });
+
+  const byokSecrets = state.projectSecrets.filter((secret) => secret.status === 'active');
+  if (byokSecrets.length) {
+    for (const secret of byokSecrets) {
+      rows.push({
+        name: `${secret.displayName} / ${secret.provider}`,
+        typeLabel: 'Hosted BYOK',
+        status: 'gated',
+        grade: 'Encrypted BYOK gated',
+        reuse: 'Reusable only while secret is active and feature flag is enabled',
+        ephemeral: false,
+        lastValidatedAt: formatJobDate(secret.updatedAt) ?? 'not validated',
+        lastRunAt: 'no runs',
+        failureClass: secret.lastValidationErrorClass ?? 'none',
+        contractVersion: 'not applicable',
+        validationState: secret.validationStatus ?? 'warning',
+        diagnosticsSummary: 'Encrypted project secret. Hosted execution remains gated by feature flag and project approval.',
+      });
+    }
+  } else {
+    rows.push({
+      name: 'Hosted BYOK unavailable',
+      typeLabel: 'Hosted BYOK',
+      status: 'unavailable',
+      grade: 'Encrypted BYOK gated',
+      reuse: 'Unavailable until encrypted project secret storage is enabled',
+      ephemeral: false,
+      lastValidatedAt: 'not validated',
+      lastRunAt: 'no runs',
+      failureClass: 'hosted_provider_disabled',
+      contractVersion: 'not applicable',
+      validationState: 'blocked',
+      diagnosticsSummary: 'Hosted BYOK for approved projects only. Use registered runners or deployed adapter routes for production.',
+    });
+  }
+  return rows;
+}
+
+function latestJobForTarget(predicate) {
+  return state.projectJobs.find(predicate) ?? null;
+}
+
+function jobFailureClass(job) {
+  return job?.result?.failureClass ?? job?.result?.diagnostics?.failureClass ?? 'none';
+}
+
+function jobContractVersion(job) {
+  return job?.result?.diagnostics?.contractVersion ?? job?.payload?.executionTarget?.contractVersion ?? 'unknown';
+}
+
+function validationStateFor(targetType) {
+  const validation = state.endpointValidation;
+  if (!validation) return 'pending';
+  if (targetType === 'local-http-tunnel' && validation.target !== state.localTunnelUrl) return 'pending';
+  if (targetType !== 'local-http-tunnel' && validation.target !== targetType) return 'pending';
+  if (validation.ok) return 'passed';
+  if (validation.message?.includes('private or internal')) return 'blocked';
+  return validation.status === 'failed' ? 'failed' : 'pending';
+}
+
+function validationTimestampFor(targetType) {
+  const validation = state.endpointValidation;
+  if (!validation) return 'not validated';
+  if (targetType === 'local-http-tunnel' && validation.target !== state.localTunnelUrl) return 'not validated';
+  if (targetType !== 'local-http-tunnel' && validation.target !== targetType) return 'not validated';
+  return validation.updatedAt ? formatJobDate(validation.updatedAt) ?? validation.updatedAt : 'current session';
+}
+
+function validationFailureClass() {
+  return state.endpointValidation?.checks?.find((check) => !check.ok)?.failureClass || 'none';
+}
+
+function validationContractVersion() {
+  return state.endpointValidation?.checks?.find((check) => check.contractVersion)?.contractVersion || 'unknown';
+}
+
+function validationMessageForLocalTunnel(job) {
+  if (state.endpointValidation?.message) return state.endpointValidation.message;
+  if (job?.status === 'failed') return job.lastError ?? job.error ?? 'Local tunnel run failed with safe diagnostics.';
+  if (job && ['completed', 'canceled', 'cancelled'].includes(job.status)) return 'Historical local tunnel run retained; target is expired and not reusable.';
+  return state.localTunnelUrl ? 'Validate this run-scoped local tunnel before enqueueing.' : 'No current tunnel URL configured.';
+}
+
+function safeTargetLabel(value) {
+  if (!value) return 'not configured';
+  return String(value).replace(/(token|secret|key|password|credential|authorization)=([^&\s]+)/gi, '$1=[redacted]');
 }
 
 function renderReportsTable(reportRows) {
@@ -1716,11 +2079,25 @@ function renderUsageBar(label, value, max) {
 }
 
 function renderSaasTeam() {
+  const isAuthed = state.sessionStatus === 'authenticated';
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Team</h2><p>Manage review roles.</p></div></div>
+      <div class="ha-section-head"><div><h2>Team & Settings</h2><p>Manage review roles and gated hosted execution settings.</p></div></div>
       <article class="ha-panel"><table class="ha-table"><thead><tr><th>Member</th><th>Role</th><th>Team</th><th>Recent activity</th></tr></thead><tbody>${saasTeam.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table></article>
       <div class="ha-card-grid">${['Admin', 'Engineer', 'Domain Reviewer', 'Product Owner', 'Compliance Reviewer', 'Viewer'].map((role) => `<article class="ha-panel"><h3>${role}</h3><p>Failure workflow access tailored for ${role.toLowerCase()} responsibilities.</p></article>`).join('')}</div>
+      <article class="ha-panel ha-panel--wide project-secrets project-secrets--console">
+        <div class="ha-panel__head"><h3>Project secrets</h3><span>Hosted BYOK for approved projects</span></div>
+        <p class="session-muted">Save encrypted provider keys for gated hosted runs. For production adapters, keep provider keys in your own runner or app environment.</p>
+        ${isAuthed ? `
+          <div class="hosted-provider-controls">
+            <label><span>Name</span><input id="secret-draft-name" type="text" value="${escapeHtml(state.secretDraftName)}" /></label>
+            <label><span>Provider</span><select id="secret-draft-provider">${renderProviderOptions(state.secretDraftProvider)}</select></label>
+            <label><span>API key</span><input id="secret-draft-value" type="password" value="${escapeHtml(state.secretDraftValue)}" placeholder="Saved encrypted; never displayed again" /></label>
+            <button class="button button--secondary" id="create-project-secret" type="button">Save encrypted key</button>
+          </div>
+          <div class="project-secret-list">${renderProjectSecretList()}</div>
+        ` : '<p class="session-muted">Sign in to manage encrypted project secrets.</p>'}
+      </article>
       <article class="ha-panel ha-panel--wide"><h3>Governance ownership</h3>${renderGovernanceList([['Policy registry', 'Compliance Reviewer owns release-gate policy updates'], ['Benchmark approvals', 'Domain Reviewer approves benchmark truth versions'], ['Regression suites', 'Safety Review owns release blockers'], ['Risk acceptance', 'Product Owner signs accepted-risk notes']])}</article>
     </section>
   `;
@@ -2337,6 +2714,16 @@ function updateRunBenchmark(benchmarkId) {
 }
 
 async function startConfiguredRun() {
+  if (state.sessionStatus === 'authenticated' && state.selectedProjectId && canDispatchExecutionTarget()) {
+    const currentTargetKey = state.executionTarget === 'local-http-tunnel' ? state.localTunnelUrl : state.executionTarget;
+    const matchesCurrentTarget = state.endpointValidation?.target === currentTargetKey;
+    if (!matchesCurrentTarget || !state.endpointValidation?.ok) {
+      showFeedback('Validate endpoint before starting a worker-backed run.');
+      await validateExecutionEndpoint();
+      if (!state.endpointValidation?.ok || state.endpointValidation?.target !== currentTargetKey) return;
+    }
+  }
+
   const run = createLocalRunRecord();
   consoleState.activeRunId = run.id;
   upsertConsoleRun(run);
@@ -2410,6 +2797,46 @@ async function startConfiguredRun() {
   await ensureRunnerObservationCaptured(consoleState.runs.find((item) => item.id === run.id) ?? run);
 
   window.location.href = `/runs/${encodeURIComponent(run.id)}`;
+}
+
+async function validateExecutionEndpoint() {
+  if (!state.selectedProjectId) {
+    showFeedback('Select a project before validating an execution target.');
+    return;
+  }
+  if (state.executionTarget === 'local-http-tunnel' && !state.localTunnelUrl.trim()) {
+    showFeedback('Paste a local tunnel HTTPS forwarding URL before validation.');
+    return;
+  }
+  state.endpointValidation = {
+    status: 'validating',
+    ok: false,
+    target: state.executionTarget === 'local-http-tunnel' ? state.localTunnelUrl : state.executionTarget,
+    checks: [],
+    message: 'Validation pending.',
+  };
+  rerenderTargetSurface();
+  try {
+    const payload = await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/validate-target`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(projectJobExecutionPayload()),
+    });
+    state.endpointValidation = normalizeEndpointValidation(payload.validation, true);
+  } catch (error) {
+    state.endpointValidation = normalizeEndpointValidation(error.validation, false, error.message);
+  }
+  persistState();
+  rerenderTargetSurface();
+}
+
+function rerenderTargetSurface() {
+  const path = window.location.pathname;
+  if (path === '/runs/new' || path === '/targets') {
+    render();
+    return;
+  }
+  renderWorkspacePanels();
 }
 
 function createLocalRunRecord() {
@@ -2891,8 +3318,8 @@ function renderHomeHero() {
   return `
     <section class="hero reveal">
       <div class="hero__copy">
-        <h1>Test your real agent through secure execution targets.</h1>
-        <p class="hero__lede">HarnessAmp runs benchmark scenarios against registered runners, deployed adapter routes, local HTTPS tunnels, or gated BYOK targets, then returns normalized diagnostics and release evidence for the behavior that changed.</p>
+        <h1>Validate real AI agents before release.</h1>
+        <p class="hero__lede">Connect your runner or deployed adapter, run mutation benchmarks, and ship with clear failure diagnostics and release gates.</p>
         <div class="hero__actions">
           <a class="button button--primary" href="/dashboard">Open console</a>
           <a class="button button--secondary" href="/app#demo">Try seeded demo</a>
@@ -2922,8 +3349,8 @@ function renderExecutionTargetsSection() {
     <section id="execution-targets" class="section reveal">
       <div class="section__intro">
         <p class="eyebrow">Execution targets</p>
-        <h2>Connect the agent you actually operate.</h2>
-        <p>HarnessAmp treats the target as the boundary between the benchmark control plane and your agent runtime. Production-grade testing should use registered runners or deployed adapter endpoints; local tunnels are only for short-lived local testing.</p>
+        <h2>Connect the agent you operate.</h2>
+        <p>Use registered runners or deployed HTTPS routes for production. Local tunnels are short-lived test targets. Hosted BYOK is gated and uses encrypted project secrets.</p>
       </div>
       ${renderExecutionTargetGrid()}
     </section>
@@ -2948,7 +3375,7 @@ function renderExecutionTargetGrid() {
 function renderProductSection() {
   return `
     <section id="product" class="section reveal">
-      <div class="section__intro"><p class="eyebrow">Core product</p><h2>Reliability modules for agents that already run.</h2><p>HarnessAmp does not ask teams to adopt a new agent framework. It tests how the system behaves when real operating conditions shift.</p></div>
+      <div class="section__intro"><p class="eyebrow">Core product</p><h2>Mutation benchmarks for agents that already run.</h2><p>See pass/fail gates, failed contracts, mutation failures, and reproducible diagnostics without changing frameworks.</p></div>
       <div class="module-grid">${modules.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
     </section>
   `;
@@ -2959,8 +3386,8 @@ function renderHomeReportPreview(activeReportUrl) {
     <section id="report" class="section section--split reveal">
       <div class="section__intro">
         <p class="eyebrow">Report outputs</p>
-        <h2>Every run produces release evidence.</h2>
-        <p>HarnessAmp turns a completed run into a release decision, failure evidence, source-fidelity notes when available, and export artifacts for review.</p>
+        <h2>Reports that explain the gate.</h2>
+        <p>Every completed run captures pass/fail status, robustness gap, failed contracts, mutation failures, and exportable diagnostics.</p>
         <div class="hero__actions">
           <a class="button button--primary" href="/reports">Open reports</a>
           <a class="button button--secondary" href="/app#demo">Try seeded demo</a>
@@ -2986,8 +3413,8 @@ function renderDemoSection({ preset, profile, profileLocked }) {
     <section id="demo" class="section demo-section reveal">
       <div class="section__intro">
         <p class="eyebrow">Product preview</p>
-        <h2>Seeded demo first, real-agent evaluation when connected.</h2>
-        <p>Explore the HarnessAmp workflow with a seeded demo, then connect your own agent through a secure execution target when you are ready to run real evaluations.</p>
+        <h2>Seeded demo first. Real execution when connected.</h2>
+        <p>Preview the workflow with sample data, then validate your target and run through the worker queue.</p>
         <div class="try-path">
           <span>01 Try seeded demo</span>
           <span>02 Validate adapter</span>
@@ -3234,35 +3661,40 @@ function renderWorkspaceSection(isAuthed) {
               <h4>Choose execution target</h4>
               <label class="execution-target-option">
                 <input type="radio" name="execution-target" value="runner" ${state.executionTarget === 'runner' ? 'checked' : ''} />
-                <span><strong>Use a registered runner</strong><small>Recommended for deployed agents, RAG systems, enterprise copilots, and production apps. Your provider API keys stay in your own infrastructure.</small></span>
+                <span><strong>Registered runner</strong><small>Recommended production path. Provider keys stay in your infrastructure.</small></span>
               </label>
               <label><span>Runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>
               <label class="execution-target-option">
                 <input type="radio" name="execution-target" value="vercel-ai-sdk" ${state.executionTarget === 'vercel-ai-sdk' ? 'checked' : ''} />
-                <span><strong>Use a Vercel AI SDK route</strong><small>Point HarnessAmp to a Next.js/Vercel route that calls your agent. Your OpenAI, Anthropic, Gemini, or other provider keys remain in your app environment.</small></span>
+                <span><strong>Vercel AI SDK route</strong><small>Production-grade when deployed over HTTPS. Provider keys remain in your app environment.</small></span>
               </label>
               <label><span>Route URL or path</span><input id="vercel-ai-sdk-target" type="text" value="${escapeHtml(state.vercelAiSdkTarget)}" placeholder="./app/api/chat/route.mjs or http://localhost:3000/api/harnessamp/agent" /></label>
               <label class="execution-target-option">
                 <input type="radio" name="execution-target" value="local-http-tunnel" ${state.executionTarget === 'local-http-tunnel' ? 'checked' : ''} />
-                <span><strong>Use a local tunnel</strong><small>Expose a local HarnessAmp-compatible agent endpoint with an HTTPS tunnel. This is for short-lived local testing, not durable production execution.</small></span>
+                <span><strong>Local tunnel</strong><small>Ephemeral · Run-scoped · Not reusable. For short-lived local testing only.</small></span>
               </label>
               <div class="local-tunnel-controls">
                 <label><span>Forwarding URL</span><input id="local-tunnel-url" type="url" value="${escapeHtml(state.localTunnelUrl)}" placeholder="https://example.ngrok-free.app/harnessamp" /></label>
-                <ol class="execution-target-help">
-                  <li>Run the local app that serves your HarnessAmp adapter endpoint.</li>
-                  <li>Run <code>ngrok http &lt;port&gt;</code>.</li>
-                  <li>Paste the HTTPS forwarding URL here.</li>
-                  <li>Read <code>x-harnessamp-run-token</code> on preflight and require the same header during dispatch.</li>
-                </ol>
-                <ul class="execution-target-warnings">
-                  <li>Do not expose sensitive local services.</li>
-                  <li>Keep the tunnel open while the benchmark runs.</li>
-                  <li>Rotate or close the tunnel after testing.</li>
-                </ul>
+                <button class="button button--secondary" id="validate-endpoint" type="button">Validate endpoint</button>
+                ${renderEndpointValidationPanel()}
+                <details class="execution-target-details">
+                  <summary>Local tunnel requirements</summary>
+                  <ol class="execution-target-help">
+                    <li>Expose a HarnessAmp-compatible local adapter with HTTPS.</li>
+                    <li>Return the supported contract version on preflight.</li>
+                    <li>Require the run token during dispatch.</li>
+                    <li>Close or rotate the tunnel after the run.</li>
+                  </ol>
+                  <ul class="execution-target-warnings">
+                    <li>Do not expose sensitive local services.</li>
+                    <li>Keep the tunnel open while the benchmark runs.</li>
+                    <li>Expired or completed tunnels are not reusable.</li>
+                  </ul>
+                </details>
               </div>
               <label class="execution-target-option">
                 <input type="radio" name="execution-target" value="hosted-provider" ${state.executionTarget === 'hosted-provider' ? 'checked' : ''} />
-                <span><strong>Hosted BYOK (gated)</strong><small>Feature-flagged convenience path for quick tests when encrypted project secret storage is enabled. Registered runners and deployed adapter endpoints remain the production paths.</small></span>
+                <span><strong>Hosted BYOK (gated)</strong><small>Approved projects only. Uses encrypted project secrets. Not the default production path.</small></span>
               </label>
               <div class="hosted-provider-controls">
                 <label><span>Provider</span><select id="hosted-provider-select">${renderProviderOptions(state.hostedProvider)}</select></label>
@@ -3272,7 +3704,7 @@ function renderWorkspaceSection(isAuthed) {
             </div>
             <div class="project-secrets">
               <h4>Project secrets</h4>
-              <p class="session-muted">Registered runners and Vercel AI SDK routes keep keys in your infrastructure. Hosted BYOK is gated and stores provider keys only when encrypted project secret storage is enabled.</p>
+              <p class="session-muted">Save encrypted provider keys for gated hosted runs. For production adapters, keep provider keys in your own runner or app environment.</p>
               <div class="hosted-provider-controls">
                 <label><span>Name</span><input id="secret-draft-name" type="text" value="${escapeHtml(state.secretDraftName)}" /></label>
                 <label><span>Provider</span><select id="secret-draft-provider">${renderProviderOptions(state.secretDraftProvider)}</select></label>
@@ -3630,8 +4062,9 @@ function bindEvents() {
   });
   document.querySelectorAll('input[name="execution-target"]').forEach((control) => control.addEventListener('change', (event) => {
     state.executionTarget = event.target.value;
+    state.endpointValidation = null;
     persistState();
-    renderWorkspacePanels();
+    rerenderTargetSurface();
   }));
   bindIfPresent('#vercel-ai-sdk-target', 'input', (event) => {
     state.vercelAiSdkTarget = event.target.value;
@@ -3639,13 +4072,15 @@ function bindEvents() {
   });
   bindIfPresent('#local-tunnel-url', 'input', (event) => {
     state.localTunnelUrl = event.target.value;
+    state.endpointValidation = null;
     persistState();
   });
+  bindIfPresent('#validate-endpoint', 'click', validateExecutionEndpoint);
   bindIfPresent('#hosted-provider-select', 'change', (event) => {
     state.hostedProvider = event.target.value;
     state.selectedSecretRef = '';
     persistState();
-    renderWorkspacePanels();
+    rerenderTargetSurface();
   });
   bindIfPresent('#hosted-provider-model', 'input', (event) => {
     state.hostedProviderModel = event.target.value;
@@ -4889,7 +5324,7 @@ function renderJobObservability() {
   const adapterType = execution.type ?? execution.adapterType ?? diagnostics.adapterType ?? executionTarget.type ?? job.payload?.adapter?.type ?? (job.runnerId ? 'registered-http-runner' : 'unknown');
   const target = execution.target ?? execution.endpointUrl ?? execution.routeUrl ?? diagnostics.target ?? executionTarget.endpointUrl ?? executionTarget.routeUrl ?? job.payload?.adapter?.target ?? execution.runnerId ?? diagnostics.runnerId ?? executionTarget.runnerId ?? job.runnerId ?? '';
   const executionLabel = adapterType === 'local_http_tunnel'
-    ? 'Local tunnel'
+    ? 'Ephemeral local test target'
     : ['vercel-ai-sdk', 'vercel_ai_sdk'].includes(adapterType)
       ? 'Vercel AI SDK route'
       : adapterType === 'hosted_provider'
@@ -4902,6 +5337,9 @@ function renderJobObservability() {
       : ['queued', 'claimed', 'running', 'retrying'].includes(job.status)
         ? 'worker lifecycle active'
         : job.status;
+  const reuseLabel = adapterType === 'local_http_tunnel'
+    ? (execution.reuseLabel ?? executionTarget.reuseLabel ?? 'Not reusable')
+    : 'Reusable';
   const reportLink = job.reportId
     ? `<a class="job-report-link" href="${escapeHtml(reportPathFor(state.selectedProjectId, job.reportId))}">Open linked report</a>`
     : '<span>No report yet</span>';
@@ -4916,6 +5354,7 @@ function renderJobObservability() {
     <div class="job-metrics">
       <div><span>Execution</span><strong>${escapeHtml(executionLabel)}</strong></div>
       <div><span>Target</span><strong>${escapeHtml(target || 'not recorded')}</strong></div>
+      <div><span>Reuse</span><strong>${escapeHtml(reuseLabel)}</strong></div>
       <div><span>Lifecycle</span><strong>${escapeHtml(lifecycleState)}</strong></div>
       <div><span>Failure class</span><strong>${escapeHtml(diagnostics.failureClass ?? job.result?.failureClass ?? 'none')}</strong></div>
       <div><span>Last error</span><strong>${escapeHtml(job.lastError ?? job.error ?? diagnostics.rawErrorMessage ?? 'none')}</strong></div>
@@ -5492,6 +5931,50 @@ function projectJobExecutionPayload() {
   };
 }
 
+function renderEndpointValidationPanel() {
+  const validation = state.endpointValidation;
+  const items = endpointValidationItems(validation);
+  return `
+    <div class="endpoint-validation" id="endpoint-validation-panel" data-state="${escapeHtml(validation?.status ?? 'pending')}">
+      <div class="endpoint-validation__head">
+        <strong>Endpoint validation</strong>
+        <span>${escapeHtml(validationLabel(validation))}</span>
+      </div>
+      <ul>
+        ${items.map((item) => `
+          <li class="endpoint-validation__item endpoint-validation__item--${escapeHtml(item.state)}">
+            <span>${escapeHtml(item.label)}</span>
+            <strong>${escapeHtml(item.state)}</strong>
+          </li>
+        `).join('')}
+      </ul>
+      ${validation?.message ? `<p>${escapeHtml(validation.message)}</p>` : ''}
+    </div>
+  `;
+}
+
+function endpointValidationItems(validation) {
+  const checks = validation?.checks ?? [];
+  const hasFailure = (failureClass) => checks.some((check) => check.failureClass === failureClass);
+  const checkOk = (name) => checks.some((check) => check.check === name && check.ok);
+  const checkFailed = (name) => checks.some((check) => check.check === name && !check.ok);
+  const stateFor = (name) => checkOk(name) ? 'pass' : checkFailed(name) ? 'fail' : 'pending';
+  return [
+    { label: 'reachable', state: validation?.ok || checks.length ? stateFor('preflight') : 'pending' },
+    { label: 'token accepted', state: checkOk('token') ? 'pass' : checkFailed('token') ? 'fail' : validation?.ok ? 'pass' : 'pending' },
+    { label: 'JSON valid', state: hasFailure('local_tunnel_invalid_json') ? 'fail' : validation?.ok || checkOk('preflight') ? 'pass' : 'pending' },
+    { label: 'observation contract valid', state: stateFor('dispatch') },
+    { label: 'private/internal URL blocked', state: hasFailure('local_tunnel_private_ip_blocked') || hasFailure('local_tunnel_redirect_blocked') ? 'fail' : validation?.ok ? 'pass' : 'pending' },
+    { label: 'contract version supported', state: hasFailure('adapter_contract_version_unsupported') ? 'fail' : checkOk('preflight') ? 'pass' : 'pending' },
+  ];
+}
+
+function validationLabel(validation) {
+  if (!validation) return 'pending';
+  if (validation.status === 'validating') return 'pending';
+  return validation.ok ? 'pass' : 'fail';
+}
+
 function canDispatchExecutionTarget() {
   return state.executionTarget === 'vercel-ai-sdk'
     ? Boolean(state.vercelAiSdkTarget)
@@ -5959,9 +6442,40 @@ async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error ?? `HTTP ${response.status}`);
+    const error = new Error(payload.error ?? `HTTP ${response.status}`);
+    error.payload = payload;
+    error.validation = payload.validation ?? null;
+    throw error;
   }
   return payload;
+}
+
+function normalizeEndpointValidation(validation, ok, fallbackMessage = '') {
+  const checks = Array.isArray(validation?.checks) ? validation.checks.map((check) => ({
+    check: String(check.check ?? 'validation'),
+    ok: Boolean(check.ok),
+    failureClass: String(check.failureClass ?? ''),
+    message: safeValidationMessage(check.message),
+    action: safeValidationMessage(check.action),
+    contractVersion: String(check.contractVersion ?? ''),
+  })) : [];
+  const failing = checks.find((check) => !check.ok);
+  return {
+    status: ok && validation?.ok ? 'passed' : 'failed',
+    ok: Boolean(ok && validation?.ok),
+    target: state.executionTarget === 'local-http-tunnel' ? state.localTunnelUrl : state.executionTarget,
+    updatedAt: new Date().toISOString(),
+    checks,
+    message: failing?.failureClass === 'local_tunnel_private_ip_blocked' || failing?.failureClass === 'local_tunnel_redirect_blocked'
+      ? 'This endpoint was blocked because it resolves to a private or internal network address.'
+      : safeValidationMessage(failing?.message ?? fallbackMessage ?? (validation?.ok ? 'Endpoint validation passed.' : 'Endpoint validation failed.')),
+  };
+}
+
+function safeValidationMessage(message) {
+  return String(message ?? '')
+    .replace(/x-harnessamp-run-token\s*[:=]\s*[^&\s]+/gi, 'x-harnessamp-run-token=[redacted]')
+    .replace(/(authorization|token|secret|key|password|credential)=([^&\s]+)/gi, '$1=[redacted]');
 }
 
 function localTunnelSetupGuidance(message) {
@@ -5974,7 +6488,7 @@ function localTunnelSetupGuidance(message) {
     return 'Local tunnel preflight failed: return JSON only, for example { "ok": true }.';
   }
   if (/observations|ok.*true|ready.*true|contract|must return/i.test(text)) {
-    return 'Local tunnel preflight failed: return { "ok": true } or { "ready": true } for preflight, and { "observations": [] } for dispatch.';
+    return 'Local tunnel preflight failed: return readiness with contractVersion "harnessamp_http_runner_v1", then return observations mapped to requested scenario ids for dispatch.';
   }
   if (/unreachable|ECONNREFUSED|closed|expired/i.test(text)) {
     return 'Local tunnel unreachable: start the local app, keep the tunnel open, and paste the current HTTPS forwarding URL.';

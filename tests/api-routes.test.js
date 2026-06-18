@@ -12,7 +12,8 @@ import reportsHandler from '../api/reports.js';
 import secretsHandler from '../api/secrets.js';
 import { analyzeBundle, createDemoBundle } from '../src/core/engine.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
-import { seedDevSession } from '../api/_store.js';
+import { listEventsForProject, seedDevSession } from '../api/_store.js';
+import { HARNESSAMP_ADAPTER_CONTRACT_VERSION } from '../src/adapters/harnessamp-contract.js';
 
 const supportMvpPack = JSON.parse(
   await readFile(new URL('../examples/benchmarks/support-mvp/benchmark-pack.json', import.meta.url), 'utf8'),
@@ -52,7 +53,10 @@ function createFetchResponse({
   url = '',
 } = {}) {
   const normalizedHeaders = new Map(Object.entries({ 'content-type': 'application/json', ...headers }).map(([key, value]) => [key.toLowerCase(), String(value)]));
-  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  const safeBody = body && typeof body === 'object' && !Array.isArray(body) && (body.ok === true || body.ready === true)
+    ? { contractVersion: HARNESSAMP_ADAPTER_CONTRACT_VERSION, ...body }
+    : body;
+  const text = typeof safeBody === 'string' ? safeBody : JSON.stringify(safeBody);
   return {
     ok,
     status,
@@ -78,6 +82,11 @@ function installLocalTunnelDns(address = '203.0.113.10') {
     if (previous === undefined) delete globalThis.__harnessAmpLocalTunnelDnsLookup;
     else globalThis.__harnessAmpLocalTunnelDnsLookup = previous;
   };
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
 
 test('report writes require authentication', async () => {
@@ -1342,7 +1351,8 @@ test('local tunnel jobs preflight and dispatch with run token authentication', a
 
     assert.equal(createResponse.statusCode, 200);
     assert.equal(createResponse.body.executionTarget.type, 'local_http_tunnel');
-    assert.equal(createResponse.body.executionTarget.label, 'Local tunnel');
+    assert.equal(createResponse.body.executionTarget.label, 'Ephemeral local test target');
+    assert.equal(createResponse.body.executionTarget.reuseLabel, 'Not reusable');
     assert.equal(createResponse.body.executionTarget.transport, 'http');
     assert.equal(createResponse.body.execution.kind, 'http-tunnel');
 
@@ -1357,7 +1367,8 @@ test('local tunnel jobs preflight and dispatch with run token authentication', a
     assert.equal(runResponse.statusCode, 200);
     assert.equal(runResponse.body.status, 'completed');
     assert.equal(runResponse.body.result.execution.type, 'local_http_tunnel');
-    assert.equal(runResponse.body.result.execution.label, 'Local tunnel');
+    assert.equal(runResponse.body.result.execution.label, 'Ephemeral local test target');
+    assert.equal(runResponse.body.result.execution.reuseLabel, 'Not reusable');
     assert.equal(runResponse.body.result.execution.endpointUrl, 'https://local-agent.example.test/harnessamp');
     assert.doesNotMatch(JSON.stringify(runResponse.body), /runToken|tokenNonce|x-harnessamp-run-token/);
     assert.equal(calls.length, 2);
@@ -1367,6 +1378,142 @@ test('local tunnel jobs preflight and dispatch with run token authentication', a
   } finally {
     globalThis.fetch = originalFetch;
     restoreDns();
+  }
+});
+
+test('project target validation records safe audit events without secrets', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+  const restoreDns = installLocalTunnelDns();
+  let expectedToken = '';
+
+  try {
+    globalThis.fetch = async (_url, init = {}) => {
+      const body = JSON.parse(init.body);
+      const token = init.headers['x-harnessamp-run-token'];
+      assert.ok(token);
+      if (body.preflight) {
+        expectedToken = token;
+        return createFetchResponse({ body: { ok: true } });
+      }
+      if (token !== expectedToken) {
+        return createFetchResponse({ ok: false, status: 403, body: { error: 'invalid_run_token', retryable: false } });
+      }
+      return createFetchResponse({
+        body: {
+          observations: [{
+            taskId: 'doctor-scenario-001',
+            outputText: 'ok',
+            metadata: { passed: true },
+          }],
+        },
+      });
+    };
+
+    const response = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'validate-target' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp?token=should-redact',
+        },
+      },
+    }, response);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.validation.ok, true);
+    assert.doesNotMatch(JSON.stringify(response.body), /expectedToken|tokenNonce|x-harnessamp-run-token/);
+
+    const events = await listEventsForProject({
+      projectId: session.defaultProjectId,
+      userId: session.user.id,
+      name: 'execution_target_validation',
+    });
+    const event = events[0];
+    assert.equal(event.name, 'execution_target_validation');
+    assert.equal(event.targetType, 'local_http_tunnel');
+    assert.equal(event.status, 'passed');
+    assert.equal(event.failureClass, null);
+    assert.equal(event.contractVersion, HARNESSAMP_ADAPTER_CONTRACT_VERSION);
+    assert.doesNotMatch(JSON.stringify(event), /should-redact|x-harnessamp-run-token|secret|authorization/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreDns();
+  }
+});
+
+test('project target validation fails closed in production without local tunnel token secret', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousSecret = process.env.HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET;
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET;
+    const response = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'validate-target' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp?secret=never-store',
+        },
+      },
+    }, response);
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.body.validation.ok, false);
+    assert.equal(response.body.validation.checks[0].failureClass, 'local_tunnel_token_secret_missing');
+
+    const events = await listEventsForProject({
+      projectId: session.defaultProjectId,
+      userId: session.user.id,
+      name: 'execution_target_validation',
+    });
+    const event = events.find((item) => item.failureClass === 'local_tunnel_token_secret_missing');
+    assert.ok(event);
+    assert.equal(event.status, 'failed');
+    assert.doesNotMatch(JSON.stringify(event), /never-store|x-harnessamp-run-token|secret=/i);
+  } finally {
+    restoreEnv('NODE_ENV', previousNodeEnv);
+    restoreEnv('HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET', previousSecret);
+  }
+});
+
+test('project job creation fails closed in production without local tunnel token secret', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousSecret = process.env.HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET;
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET;
+    const response = createMockResponse();
+    await projectsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, resource: 'jobs' },
+      body: {
+        executionTarget: {
+          type: 'local_http_tunnel',
+          endpointUrl: 'https://local-agent.example.test/harnessamp',
+        },
+        pack: createDemoBundle(),
+        idempotencyKey: 'local-tunnel-prod-secret-missing-001',
+      },
+    }, response);
+
+    assert.equal(response.statusCode, 400);
+    assert.match(response.body.error, /token secret.*missing/i);
+  } finally {
+    restoreEnv('NODE_ENV', previousNodeEnv);
+    restoreEnv('HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET', previousSecret);
   }
 });
 
@@ -1494,7 +1641,7 @@ test('local tunnel worker dispatch rejects oversized response with truncated dia
         },
         pack: createDemoBundle(),
         idempotencyKey: 'local-tunnel-oversized-response-001',
-        maxResponseBytes: 32,
+        maxResponseBytes: 96,
       },
     }, createResponse);
     assert.equal(createResponse.statusCode, 200);

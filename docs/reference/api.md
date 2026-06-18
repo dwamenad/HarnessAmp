@@ -236,7 +236,11 @@ Body:
 
 `executionTarget`, `runnerId`, or `adapter.type` is required. Adapter-backed jobs use the same queue, claim, retry, cancellation, and report-linking lifecycle as registered HTTP runners.
 
-Execution targets are validated before enqueueing when possible. Local tunnel job creation rejects invalid URLs, non-HTTPS URLs, localhost, private IP ranges, link-local ranges, cloud metadata endpoints, DNS resolutions to private/internal IPs, unsafe redirects, unreachable tunnel endpoints, preflight timeouts, oversized responses, non-2xx preflight responses, non-JSON preflight responses, and preflight responses that do not confirm readiness with `{ "ok": true }`, `{ "ready": true }`, an observation array, or `{ "observations": [] }`. The same URL and redirect safety checks run during worker dispatch. Hosted provider job creation rejects disabled BYOK, missing `secretRef`, missing model, unsupported provider, provider mismatch, disabled/deleted secrets, cross-project secrets, and raw provider API keys in job payloads.
+Execution targets are validated before enqueueing when possible. Local tunnel job creation rejects invalid URLs, non-HTTPS URLs, localhost, private IP ranges, link-local ranges, cloud metadata endpoints, DNS resolutions to private/internal IPs, unsafe redirects, unreachable tunnel endpoints, preflight timeouts, oversized responses, non-2xx preflight responses, non-JSON preflight responses, missing production token secrets, unsupported contract versions, and preflight responses that do not confirm readiness with `{ "ok": true, "contractVersion": "harnessamp_http_runner_v1" }` or `{ "ready": true, "contractVersion": "harnessamp_http_runner_v1" }`. The same URL and redirect safety checks run during worker dispatch. Hosted provider job creation rejects disabled gated BYOK, missing `secretRef`, missing model, unsupported provider, provider mismatch, disabled/deleted secrets, cross-project secrets, and raw provider API keys in job payloads.
+
+### `POST /api/projects/<project-id>/validate-target`
+
+Runs safe execution target validation before launch. Local tunnel validation uses the adapter doctor path and returns pass/fail checks for reachability, token acceptance, JSON validity, observation contract validity, private/internal URL blocking, and supported contract version. Validation writes a safe `execution_target_validation` audit event with project id, actor id, target id when available, target type, phase, pass/fail status, failure class, status code, duration, contract version when available, and created timestamp. It does not store tokens, nonces, secrets, authorization headers, full sensitive URLs, or request/response bodies.
 
 Returns:
 
@@ -263,7 +267,7 @@ Returns:
 
 Returns the current job document, including `status`, `attempts`, `maxAttempts`, `reportId`, `result`, `error`, `lastError`, `retryReason`, `history`, `claimedBy`, `workerId`, `lockedAt`, `claimedAt`, `nextRunAt`, `nextRetryAt`, `startedAt`, `completedAt`, `failedAt`, `cancelledAt`, and `finishedAt`.
 
-For adapter-backed and hosted-provider jobs, `result.diagnostics` contains the normalized adapter envelope: adapter type, safe target, timestamps, latency, HTTP status, timeout flag, retry attempt, worker id, job id, benchmark id/version, scenario id, mutation id/family, failure class, safely truncated raw error, retryability, usage metadata where available, and execution phase.
+For adapter-backed and hosted-provider jobs, `result.diagnostics` contains the normalized adapter envelope: adapter type, safe target, timestamps, latency, HTTP status, timeout flag, retry attempt, worker id, job id, benchmark id/version, scenario id, mutation id/family, contract version when available, failure class, safely truncated raw error, retryability, usage metadata where available, and execution phase.
 
 ### `GET /api/jobs?projectId=<project-id>&status=queued,retrying&staleAfterMs=120000`
 
@@ -284,9 +288,9 @@ Body:
 
 Claims and executes a job through the registered runner or configured adapter. The action moves the job from `claimed` to `running`, dispatches execution from the worker/API process, writes exactly one report on success, and links it through `reportId`. On retryable failure it marks the job `retrying` until attempts are exhausted, then `failed`.
 
-Non-retryable execution classes currently stop immediately: `execution_target_missing`, `execution_target_invalid`, `execution_target_unsupported`, `registered_runner_missing`, `vercel_ai_sdk_route_missing`, `hosted_provider_disabled`, `hosted_provider_secret_missing`, `hosted_provider_secret_disabled`, `hosted_provider_secret_provider_mismatch`, `hosted_provider_auth_error`, `hosted_provider_model_missing`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `adapter_target_missing`, `adapter_invalid_response`, `adapter_schema_mismatch`, and `adapter_worker_canceled`.
+Non-retryable execution classes currently stop immediately: `execution_target_missing`, `execution_target_invalid`, `execution_target_unsupported`, `registered_runner_missing`, `vercel_ai_sdk_route_missing`, `hosted_provider_disabled`, `hosted_provider_secret_missing`, `hosted_provider_secret_disabled`, `hosted_provider_secret_provider_mismatch`, `hosted_provider_auth_error`, `hosted_provider_model_missing`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `local_tunnel_token_secret_missing`, `adapter_contract_version_unsupported`, `adapter_observation_scenario_mismatch`, `adapter_target_missing`, `adapter_invalid_response`, `adapter_schema_mismatch`, and `adapter_worker_canceled`.
 
-Local tunnel-specific failure classes include `local_tunnel_unreachable`, `local_tunnel_timeout`, `local_tunnel_tls_error`, `local_tunnel_dns_error`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `local_tunnel_http_error`, and `local_tunnel_closed_or_expired`.
+Local tunnel-specific failure classes include `local_tunnel_unreachable`, `local_tunnel_timeout`, `local_tunnel_tls_error`, `local_tunnel_dns_error`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `local_tunnel_token_secret_missing`, `local_tunnel_http_error`, and `local_tunnel_closed_or_expired`.
 
 Worker services may call this action with `Authorization: Bearer <WORKER_SERVICE_TOKEN>` and a matching `projectId` in the JSON body.
 

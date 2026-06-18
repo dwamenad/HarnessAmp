@@ -195,7 +195,7 @@ Recommended target options:
 - `registered_runner`: deploy your own runner endpoint near the agent or model. The runner calls OpenAI, Anthropic, Gemini, Mistral, Groq, Together, a self-hosted model, or an internal agent service with credentials stored in your infrastructure.
 - `vercel_ai_sdk`: point HarnessAmp at a Next.js/Vercel route that calls your agent. Provider keys stay in the app or worker environment.
 - `local_http_tunnel`: expose a local HarnessAmp-compatible agent endpoint through a short-lived public HTTPS tunnel for testing. ngrok is the common path, but any compatible HTTPS tunnel works. Do not use this as a durable production execution target.
-- `hosted_provider`: convenience BYOK mode. Enable only with encrypted project secret storage and explicit team acceptance of that security model.
+- `hosted_provider`: gated encrypted BYOK mode. Enable only with encrypted project secret storage, feature flag approval, and explicit team acceptance of that security model.
 
 HarnessAmp stores only safe execution-target metadata such as target type, runner id, route URL/path, tunnel endpoint URL, provider, model label, masked secret preview, and timing/error diagnostics. Hosted BYOK stores encrypted provider keys in `project_secrets`; job records reference `secretRef` only. Raw provider keys must not appear in job records, dashboard views, worker logs, API responses, CLI output, or reports.
 
@@ -204,13 +204,13 @@ For local tunnel testing:
 1. Run the local agent app.
 2. Run `ngrok http <port>` or an equivalent HTTPS tunnel.
 3. Paste the forwarding URL as `executionTarget.endpointUrl` or choose “Local tunnel” in the dashboard.
-4. Implement the HTTP contract: preflight returns `{ "ok": true }` or `{ "ready": true }`, and dispatch returns an observation array or `{ "observations": [] }`.
+4. Implement the HTTP contract: preflight returns `{ "ok": true, "contractVersion": "harnessamp_http_runner_v1" }` or `{ "ready": true, "contractVersion": "harnessamp_http_runner_v1" }`, and dispatch returns observations mapped to the requested scenario id.
 5. Read `x-harnessamp-run-token` on preflight and require the same header value for scenario dispatch requests in that run.
 6. Run `npm run harnessamp:doctor -- --url <forwarding-url>` before enqueueing a benchmark.
 7. Keep the tunnel open while the worker runs the benchmark.
 8. Do not expose sensitive local services. Rotate or close the tunnel after testing.
 
-HarnessAmp enforces HTTPS-only tunnel URLs, rejects localhost/private/link-local/metadata targets, resolves hostnames before preflight and dispatch, blocks redirects to unsafe targets, sends a per-run `x-harnessamp-run-token`, applies request timeouts and response-size limits, and redacts token-like values from diagnostics.
+HarnessAmp enforces HTTPS-only tunnel URLs, rejects localhost/private/link-local/metadata targets, resolves hostnames before preflight and dispatch, blocks redirects to unsafe targets, sends a per-run `x-harnessamp-run-token`, requires `HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET` in production-like environments, applies request timeouts and response-size limits, rejects unsupported contract versions, and redacts token-like values from diagnostics.
 
 Worker service command:
 

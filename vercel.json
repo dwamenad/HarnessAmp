@@ -39,6 +39,10 @@
       "destination": "/api/projects?resource=jobs"
     },
     {
+      "source": "/api/projects/:projectId/validate-target",
+      "destination": "/api/projects?resource=validate-target"
+    },
+    {
       "source": "/api/projects/:projectId/secrets",
       "destination": "/api/secrets"
     },

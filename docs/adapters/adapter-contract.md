@@ -2,11 +2,26 @@
 
 Use this contract when exposing a local or hosted agent endpoint to HarnessAmp. The same contract works through ngrok, Cloudflare Tunnel, Tailscale Funnel, Vercel, Render, Fly.io, or any other public HTTPS endpoint.
 
+## Quick Checklist
+
+- Use `POST` only.
+- Remote execution targets must use HTTPS.
+- Return JSON.
+- Preflight returns ready plus the supported contract version.
+- Dispatch returns observations.
+- Validate `x-harnessamp-run-token`.
+- Reject missing or wrong tokens.
+- Never log tokens or secrets.
+- Map each observation to the requested scenario id.
+- Keep errors safe and diagnostic, not secret-bearing.
+
 ## When To Use It
 
 Use `local_http_tunnel` when you want to test an agent running on your machine before deploying it. Keep the tunnel open until the run completes, then rotate or close it. Do not treat a local tunnel as a durable production execution target.
 
 Use a registered runner or deployed adapter endpoint for production execution.
+
+If local tunnels are enabled in `NODE_ENV=production` or `VERCEL_ENV=production`, configure `HARNESSAMP_LOCAL_TUNNEL_TOKEN_SECRET`. HarnessAmp fails closed without that stable secret.
 
 ## Endpoint
 
@@ -30,13 +45,13 @@ HarnessAmp sends a fresh run token during preflight and dispatch. Your adapter s
 Valid preflight response:
 
 ```json
-{ "ok": true }
+{ "ok": true, "contractVersion": "harnessamp_http_runner_v1" }
 ```
 
 Also valid:
 
 ```json
-{ "ready": true }
+{ "ready": true, "contractVersion": "harnessamp_http_runner_v1" }
 ```
 
 Invalid preflight response:
@@ -85,6 +100,8 @@ Return JSON with an `observations` array:
 ```
 
 HarnessAmp also accepts a raw observation array for backwards compatibility, but new adapters should return `{ "observations": [] }`.
+
+Every returned observation should map to the requested scenario id with `taskId`, `scenarioId`, `caseId`, `metadata.taskId`, or `metadata.scenarioId`. The doctor fails with `adapter_observation_scenario_mismatch` when no observation maps to the requested scenario.
 
 Invalid observation response:
 
@@ -146,6 +163,7 @@ Log request ids, scenario ids, status codes, latency, and failure class. Do not 
 - Missing token: read `x-harnessamp-run-token` and return `401` if absent.
 - Invalid JSON: return JSON only, including error responses.
 - Missing readiness field: return `{ "ok": true }` or `{ "ready": true }`.
+- Unsupported contract version: return `contractVersion: "harnessamp_http_runner_v1"` from preflight.
 - Endpoint unreachable: start the local app and keep the tunnel open.
 - Timeout: make preflight fast and increase `--timeout-ms` only when needed.
 - Contract mismatch: check the request body and response shape.
@@ -154,3 +172,5 @@ Log request ids, scenario ids, status codes, latency, and failure class. Do not 
 ## Security Notes For Local Tunnels
 
 HarnessAmp enforces HTTPS-only tunnel URLs, blocks localhost/private/link-local/metadata targets, resolves hostnames before preflight and dispatch, validates redirect targets, sends a per-run token, applies timeouts and response-size limits, and redacts token-like values from diagnostics. These controls are there to keep local testing bounded; they are not a substitute for deploying a production runner.
+
+Unsupported or missing adapter contract versions fail explicitly as `adapter_contract_version_unsupported` in doctor, dashboard validation, API diagnostics, and worker diagnostics when available.
