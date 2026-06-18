@@ -1328,9 +1328,12 @@ function renderSaasRunProgress(runId = 'run-healthguard-2419') {
 function renderSaasRunSummary(runId = 'run-healthguard-2419') {
   const run = runRecord(runId);
   const benchmark = benchmarkForRun(run);
-  const report = listRealReports(runReportState).find((item) => item.runId === run.id);
+  const report = reportPayload(buildLocalRunReportId(run)) ?? listRealReports(runReportState).find((item) => item.runId === run.id);
+  const releaseGate = report?.releaseGate;
+  const targetReliability = report?.targetReliability ?? targetReliabilityContextForRun(run);
+  const lifecycle = report?.lifecycleSummary ?? { summary: run.timeline?.join(' -> ') ?? runLifecycleLabel(run), status: run.status };
   const benchmarkScore = report?.benchmark?.score ?? run.score;
-  const gateResult = report?.benchmark?.gateResult ?? benchmarkGateForRun(run);
+  const gateResult = report?.releaseGate?.status ?? report?.benchmark?.gateResult ?? benchmarkGateForRun(run);
   const runType = report?.benchmark?.benchmarkRunType ?? report?.benchmark?.runType ?? run.runMode ?? 'seeded sample';
   const snapshot = report?.benchmark?.benchmarkSnapshot ?? report?.benchmark?.snapshot ?? null;
   const majorFailures = Number(run.critical) > 0 ? '7' : run.status === 'failed' ? '3' : '2';
@@ -1339,23 +1342,67 @@ function renderSaasRunSummary(runId = 'run-healthguard-2419') {
   return `
     <section class="ha-page">
       <div class="ha-section-head"><div><h2>${escapeHtml(run.name)} Summary</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(benchmark ? `${benchmark.name} v${benchmark.version}` : run.pack)} / ${escapeHtml(run.tierLabel)}</p></div><div class="ha-topbar__actions"><a class="ha-primary" href="/failures/fail-redflag-017">View Top Failure</a><a href="/reports">Open Report Center</a></div></div>
-      ${renderReleaseDecision(Number(run.critical) > 0 ? 'Block release' : 'Safe to release', Number(run.critical) > 0 ? `${run.critical} critical failure(s) must be triaged and pinned before release.` : 'No critical release blockers in this run.', Number(run.critical) > 0 ? 'critical' : 'passed')}
+      ${renderReleaseDecision(releaseGate?.answer ?? (Number(run.critical) > 0 || run.status === 'failed' ? 'Can this agent be released? No.' : 'Can this agent be released? Yes.'), releaseGate?.reasons?.join(' ') ?? (Number(run.critical) > 0 ? `${run.critical} critical failure(s) must be triaged and pinned before release.` : 'No critical release blockers in this run.'), releaseGate?.canRelease === false ? 'critical' : releaseGate?.warningCount ? 'major' : Number(run.critical) > 0 ? 'critical' : 'passed')}
       <div class="ha-metrics">
         ${renderSaasMetric('Benchmark Score', String(benchmarkScore), benchmark ? `${benchmark.slug} gate ${gateResult}` : 'mapped from run', scoreTone)}
-        ${renderSaasMetric('Gate Result', String(gateResult).toUpperCase(), benchmark ? `${benchmark.name} v${benchmark.version}` : 'not recorded', gateResult === 'block' ? 'critical' : gateResult === 'warn' ? 'major' : 'passed')}
+        ${renderSaasMetric('Release Gate', String(gateResult).toUpperCase(), releaseGate ? `${releaseGate.blockingFailures} blocking / ${releaseGate.warningCount} warnings` : 'not recorded', releaseGate?.canRelease === false || gateResult === 'block' ? 'critical' : releaseGate?.warningCount || gateResult === 'warn' ? 'major' : 'passed')}
         ${renderSaasMetric('Run Type', runType, snapshot ? `snapshot ${snapshot.scenarioSetVersion}` : 'sample or seeded context', runType === 'official' ? 'passed' : 'major')}
         ${renderSaasMetric('Critical Failures', run.critical, 'review required when nonzero', Number(run.critical) > 0 ? 'critical' : 'passed')}
-        ${renderSaasMetric('Major Failures', majorFailures, 'owners assigned', Number(majorFailures) > 3 ? 'major' : 'neutral')}
-        ${renderSaasMetric('Pass Rate', passRate, 'versus previous baseline', scoreTone)}
+        ${renderSaasMetric('Target Readiness', targetReliability.readinessStatus, targetReliability.validationState, targetReliability.readinessStatus === 'Healthy' || targetReliability.readinessStatus === 'Production-grade' ? 'passed' : targetReliability.readinessStatus === 'Needs validation' || targetReliability.readinessStatus === 'Ephemeral' ? 'warn' : 'critical')}
+        ${renderSaasMetric('Run Success', targetReliability.runSuccessRate, 'same target context', scoreTone)}
       </div>
+      <article class="ha-panel ha-panel--wide">
+        <div class="ha-panel__head"><h3>Release gate status</h3><span>${escapeHtml(releaseGate?.status ?? String(gateResult))}</span></div>
+        ${renderGovernanceList([
+          ['Can release', releaseGate?.canRelease ? 'yes' : 'no'],
+          ['Blocking failures', String(releaseGate?.blockingFailures ?? Number(run.critical) ?? 0)],
+          ['Warnings', String(releaseGate?.warningCount ?? 0)],
+          ['Target used', targetReliability.targetUsed],
+          ['Validation state at run time', targetReliability.validationState],
+          ['Benchmark/version', benchmark ? `${benchmark.name} v${benchmark.version}` : 'not recorded'],
+          ['Scoring profile', report?.benchmark?.scoringProfileVersion ?? snapshot?.scoringProfileVersion ?? 'not recorded'],
+          ['Gate profile', report?.benchmark?.gateProfileVersion ?? snapshot?.gateProfileVersion ?? 'not recorded'],
+          ['Lifecycle summary', lifecycle.summary],
+        ])}
+        <ul class="ha-compact-list">${(releaseGate?.reasons ?? ['Release gate derived from current run score and critical failures.']).map((reason) => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>
+      </article>
       <div class="ha-grid ha-grid--dashboard">
-        ${renderBreakdownPanel('Failures by Contract', [['Escalate red flags', 4], ['Avoid diagnosis', 3], ['Preserve facts', 2], ['Sensitive data', 1]])}
-        ${renderBreakdownPanel('Failures by Mutation Family', [['Prompt pressure', 8], ['Context omission', 6], ['Role confusion', 4], ['Tool timeout', 1]])}
+        ${renderFailureTriagePanel(report)}
+        ${renderTargetReliabilityReportPanel(targetReliability)}
+        ${renderHistoricalComparisonPanel(report)}
         <article class="ha-panel"><h3>Run artifacts</h3>${renderGovernanceList([['Report', 'Executive, JSON, CSV, Markdown'], ['Failure corpus', 'Promotion candidates available'], ['Audit', 'Owner/status actions persisted']])}<div class="ha-run-links"><a href="/reports">Executive report</a><a href="/failures">Failure queue</a><a href="/compare">Compare run</a></div></article>
         <article class="ha-panel ha-panel--wide"><div class="ha-panel__head"><h3>Critical Failure List</h3><span>${escapeHtml(run.observations)} observations</span></div>${renderFailuresTable()}</article>
       </div>
     </section>
   `;
+}
+
+function renderFailureTriagePanel(report) {
+  const buckets = report?.failureTriage?.buckets ?? [
+    { label: 'Agent behavior failures', count: Number(report?.criticalFailures ?? 0), reasons: ['Benchmark evidence requires review'] },
+    { label: 'Adapter contract failures', count: 0, reasons: [] },
+    { label: 'Execution target failures', count: 0, reasons: [] },
+    { label: 'Validation failures', count: 0, reasons: [] },
+    { label: 'Worker lifecycle failures', count: 0, reasons: [] },
+  ];
+  return `<article class="ha-panel"><h3>Failure triage</h3>${renderGovernanceList(buckets.map((bucket) => [bucket.label, `${bucket.count} - ${bucket.reasons.join('; ') || 'none'}`]))}</article>`;
+}
+
+function renderTargetReliabilityReportPanel(reliability) {
+  return `<article class="ha-panel"><h3>Target reliability</h3>${renderGovernanceList([
+    ['Readiness', reliability.readinessStatus],
+    ['Validation success', reliability.validationSuccessRate],
+    ['Run success', reliability.runSuccessRate],
+    ['Last pass', reliability.lastPass],
+    ['Last fail', reliability.lastFail],
+    ['Failure classes', reliability.failureClasses?.join(', ') || 'none'],
+    ['Contract', reliability.contractVersion],
+  ])}</article>`;
+}
+
+function renderHistoricalComparisonPanel(report) {
+  const comparison = report?.historicalComparison;
+  return `<article class="ha-panel"><h3>Historical comparison</h3><p>${escapeHtml(comparison?.summary ?? 'Complete the same benchmark twice with the same target and agent version to compare improved/regressed state.')}</p></article>`;
 }
 
 function renderSaasFailuresList() {
@@ -1559,11 +1606,21 @@ function renderExecutionTargetCard(target) {
     : target.validationState === 'failed' || target.validationState === 'blocked'
       ? 'failed'
       : 'pending';
+  const reliability = target.reliability;
+  const readinessTone = reliability.readinessStatus === 'Healthy' || reliability.readinessStatus === 'Production-grade' || reliability.readinessStatus === 'Contract valid'
+    ? 'passed'
+    : reliability.readinessStatus === 'Needs validation' || reliability.readinessStatus === 'Ephemeral'
+      ? 'major'
+      : 'critical';
   return `
     <article class="target-card ${target.ephemeral ? 'target-card--ephemeral' : ''}">
       <div class="target-card__head">
         <div><span>${escapeHtml(target.typeLabel)}</span><strong>${escapeHtml(target.name)}</strong></div>
         <span class="ha-badge ${statusClass(stateClass)}">${escapeHtml(target.validationState)}</span>
+      </div>
+      <div class="target-card__readiness">
+        <span class="ha-badge ${statusClass(readinessTone)}">${escapeHtml(reliability.readinessStatus)}</span>
+        ${reliability.badges.map((badge) => `<span>${escapeHtml(badge)}</span>`).join('')}
       </div>
       <div class="target-card__meta">
         <div><span>Status</span><strong>${escapeHtml(target.status)}</strong></div>
@@ -1572,13 +1629,18 @@ function renderExecutionTargetCard(target) {
         <div><span>Last validated</span><strong>${escapeHtml(target.lastValidatedAt)}</strong></div>
         <div><span>Last run</span><strong>${escapeHtml(target.lastRunAt)}</strong></div>
         <div><span>Failure class</span><strong>${escapeHtml(target.failureClass)}</strong></div>
+        <div><span>Validation success</span><strong>${escapeHtml(reliability.validationSuccessRate)}</strong></div>
+        <div><span>Run success</span><strong>${escapeHtml(reliability.runSuccessRate)}</strong></div>
+        <div><span>Last pass/fail</span><strong>${escapeHtml(`${reliability.lastPass} / ${reliability.lastFail}`)}</strong></div>
+        <div><span>Latency</span><strong>${escapeHtml(reliability.latency)}</strong></div>
       </div>
       <details class="target-card__details">
         <summary>Diagnostics</summary>
         <p>${escapeHtml(target.diagnosticsSummary)}</p>
         <div><span>Contract</span><strong>${escapeHtml(target.contractVersion)}</strong></div>
+        <div><span>Failure classes</span><strong>${escapeHtml(reliability.failureClasses.join(', ') || 'none')}</strong></div>
       </details>
-      ${target.ephemeral ? '<small class="target-card__warning">Ephemeral · Run-scoped · Not reusable</small>' : ''}
+      ${target.ephemeral ? '<small class="target-card__warning">Ephemeral target. Reliability history is limited to this local test session.</small>' : ''}
     </article>
   `;
 }
@@ -1588,6 +1650,7 @@ function executionTargetRegistryRows() {
   if (!state.projectRunners.length) {
     rows.push({
       name: 'No registered runners',
+      targetKey: 'registered-runner-empty',
       typeLabel: 'Registered runner',
       status: 'not configured',
       grade: 'Production-grade',
@@ -1605,6 +1668,7 @@ function executionTargetRegistryRows() {
     const job = latestJobForTarget((item) => item.runnerId === runner.id || item.payload?.executionTarget?.runnerId === runner.id);
     rows.push({
       name: runner.name,
+      targetKey: `runner:${runner.id}`,
       typeLabel: 'Registered runner',
       status: runner.status ?? 'unknown',
       grade: 'Production-grade',
@@ -1628,6 +1692,7 @@ function executionTargetRegistryRows() {
     const deployedHttps = /^https:\/\//i.test(state.vercelAiSdkTarget);
     rows.push({
       name: safeTargetLabel(state.vercelAiSdkTarget),
+      targetKey: 'vercel-ai-sdk',
       typeLabel: 'Vercel AI SDK route',
       status: deployedHttps ? 'configured' : 'draft/local',
       grade: deployedHttps ? 'Production-grade' : 'Local/development',
@@ -1646,6 +1711,7 @@ function executionTargetRegistryRows() {
   const latestLocalJob = localJobs[0] ?? null;
   rows.push({
     name: 'Ephemeral local test target',
+    targetKey: 'local-http-tunnel',
     typeLabel: 'Local HTTPS tunnel',
     status: latestLocalJob && ['completed', 'failed', 'canceled', 'cancelled'].includes(latestLocalJob.status) ? 'expired' : state.localTunnelUrl ? 'configured' : 'not configured',
     grade: 'Local testing only',
@@ -1664,6 +1730,7 @@ function executionTargetRegistryRows() {
     for (const secret of byokSecrets) {
       rows.push({
         name: `${secret.displayName} / ${secret.provider}`,
+        targetKey: `hosted-byok:${secret.id ?? secret.displayName}`,
         typeLabel: 'Hosted BYOK',
         status: 'gated',
         grade: 'Encrypted BYOK gated',
@@ -1680,6 +1747,7 @@ function executionTargetRegistryRows() {
   } else {
     rows.push({
       name: 'Hosted BYOK unavailable',
+      targetKey: 'hosted-byok-unavailable',
       typeLabel: 'Hosted BYOK',
       status: 'unavailable',
       grade: 'Encrypted BYOK gated',
@@ -1693,7 +1761,107 @@ function executionTargetRegistryRows() {
       diagnosticsSummary: 'Hosted BYOK for approved projects only. Use registered runners or deployed adapter routes for production.',
     });
   }
-  return rows;
+  return rows.map((target) => ({
+    ...target,
+    reliability: targetReliabilityForRegistryTarget(target),
+  }));
+}
+
+function targetReliabilityForRegistryTarget(target) {
+  const jobs = jobsForRegistryTarget(target);
+  const completedJobs = jobs.filter((job) => job.status === 'completed');
+  const failedJobs = jobs.filter((job) => ['failed', 'canceled', 'cancelled'].includes(job.status));
+  const validationAttempts = target.validationState === 'pending' ? 0 : 1;
+  const validationPasses = target.validationState === 'passed' ? 1 : 0;
+  const validationFailures = ['failed', 'blocked'].includes(target.validationState) ? 1 : 0;
+  const failureClasses = uniqueStrings([
+    target.failureClass,
+    ...jobs.map(jobFailureClass),
+    validationFailures ? validationFailureClass() : '',
+  ]).filter((item) => item !== 'none');
+  const contractVersion = target.contractVersion || jobs.map(jobContractVersion).find((item) => item && item !== 'unknown') || 'unknown';
+  const avgLatency = averageJobLatency(jobs);
+  const readinessStatus = readinessStatusForTarget({
+    target,
+    jobs,
+    failureClasses,
+    validationAttempts,
+    validationPasses,
+    validationFailures,
+    contractVersion,
+  });
+  return {
+    targetUsed: target.name,
+    targetType: target.typeLabel,
+    readinessStatus,
+    validationState: target.validationState,
+    validationSuccessRate: validationAttempts ? percentage(validationPasses, validationAttempts) : 'Needs validation',
+    runSuccessRate: jobs.length ? percentage(completedJobs.length, jobs.length) : 'No runs',
+    lastPass: formatJobDate(completedJobs[0]?.updatedAt ?? completedJobs[0]?.createdAt) ?? (validationPasses ? target.lastValidatedAt : 'none'),
+    lastFail: formatJobDate(failedJobs[0]?.updatedAt ?? failedJobs[0]?.createdAt) ?? (validationFailures ? target.lastValidatedAt : 'none'),
+    failureClasses,
+    latency: avgLatency ?? 'not recorded',
+    contractVersion,
+    ephemeral: target.ephemeral,
+    badges: readinessBadgesForTarget(target, readinessStatus, contractVersion),
+  };
+}
+
+function jobsForRegistryTarget(target) {
+  if (target.targetKey?.startsWith('runner:')) {
+    const runnerId = target.targetKey.replace('runner:', '');
+    return state.projectJobs.filter((job) => job.runnerId === runnerId || job.payload?.executionTarget?.runnerId === runnerId);
+  }
+  if (target.targetKey === 'vercel-ai-sdk') {
+    return state.projectJobs.filter((job) => {
+      const execution = job.result?.execution ?? {};
+      const payloadTarget = job.payload?.executionTarget ?? {};
+      return payloadTarget.type === 'vercel_ai_sdk' || execution.type === 'vercel_ai_sdk' || job.payload?.adapter?.type === 'vercel-ai-sdk';
+    });
+  }
+  if (target.targetKey === 'local-http-tunnel') {
+    return state.projectJobs.filter((job) => job.payload?.executionTarget?.type === 'local_http_tunnel' || job.result?.execution?.type === 'local_http_tunnel');
+  }
+  return [];
+}
+
+function readinessStatusForTarget({ target, jobs, failureClasses, validationAttempts, validationPasses, validationFailures, contractVersion }) {
+  if (target.ephemeral && target.status === 'expired') return 'Expired';
+  if (target.ephemeral) return 'Ephemeral';
+  if (/mismatch|unsupported|invalid|schema/iu.test(`${contractVersion} ${failureClasses.join(' ')}`)) return 'Contract mismatch';
+  if (validationFailures || failureClasses.length) return jobs.length > 1 && jobs.some((job) => job.status === 'completed') ? 'Unstable' : 'Recently failing';
+  if (!validationAttempts || validationPasses === 0) return 'Needs validation';
+  if (target.grade === 'Production-grade') return 'Production-grade';
+  return 'Healthy';
+}
+
+function readinessBadgesForTarget(target, readinessStatus, contractVersion) {
+  const badges = [readinessStatus];
+  if (target.ephemeral) badges.push('Limited session history');
+  if (/unknown|not applicable/iu.test(contractVersion)) badges.push('Needs contract evidence');
+  else if (/mismatch|unsupported|invalid/iu.test(contractVersion)) badges.push('Contract mismatch');
+  else badges.push('Contract valid');
+  if (target.grade === 'Production-grade') badges.push('Production-grade');
+  return uniqueStrings(badges).slice(0, 4);
+}
+
+function averageJobLatency(jobs) {
+  const latencies = jobs
+    .map((job) => job.result?.diagnostics?.latencyMs ?? job.result?.latencyMs ?? job.payload?.diagnostics?.latencyMs)
+    .map((value) => Number(value))
+    .filter(Number.isFinite);
+  if (!latencies.length) return null;
+  const average = Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length);
+  return average >= 1000 ? `${(average / 1000).toFixed(1)}s avg` : `${average}ms avg`;
+}
+
+function percentage(part, total) {
+  if (!total) return '0%';
+  return `${Math.round((part / total) * 100)}%`;
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean)));
 }
 
 function latestJobForTarget(predicate) {
@@ -6570,7 +6738,49 @@ function reportExportContext() {
     harnesses: getConsoleHarnesses(),
     failures: saasFailures,
     failureDetails: saasFailureDetails,
+    targetReliabilityByRunId: Object.fromEntries(allRunRecords().map((run) => [run.id, targetReliabilityContextForRun(run)])),
   };
+}
+
+function targetReliabilityContextForRun(run) {
+  const job = run.jobId ? state.projectJobs.find((item) => item.id === run.jobId) : null;
+  const executionTarget = job?.payload?.executionTarget ?? job?.result?.execution ?? run.executionTarget ?? {};
+  const targetType = executionTarget.type ?? (run.jobId ? 'worker-backed' : 'seeded');
+  const targetName = targetNameForRunTarget(executionTarget, job);
+  const registryMatch = executionTargetRegistryRows().find((target) => {
+    if (targetName !== 'not recorded' && (target.name === targetName || target.name.includes(targetName))) return true;
+    if (targetType === 'local_http_tunnel') return target.targetKey === 'local-http-tunnel';
+    if (targetType === 'vercel_ai_sdk') return target.targetKey === 'vercel-ai-sdk';
+    if (executionTarget.runnerId) return target.targetKey === `runner:${executionTarget.runnerId}`;
+    return false;
+  });
+  const reliability = registryMatch?.reliability;
+  const failureClass = jobFailureClass(job);
+  return {
+    targetUsed: registryMatch?.name ?? targetName,
+    targetType: registryMatch?.typeLabel ?? targetType,
+    readinessStatus: reliability?.readinessStatus ?? (run.status === 'failed' ? 'Recently failing' : 'Needs validation'),
+    validationState: registryMatch?.validationState ?? 'not recorded',
+    validationSuccessRate: reliability?.validationSuccessRate ?? 'not recorded',
+    runSuccessRate: reliability?.runSuccessRate ?? (run.status === 'completed' ? '100%' : run.status === 'failed' ? '0%' : 'not recorded'),
+    lastPass: reliability?.lastPass ?? (run.status === 'completed' ? run.started : 'none'),
+    lastFail: reliability?.lastFail ?? (run.status === 'failed' ? run.started : 'none'),
+    failureClasses: uniqueStrings([...(reliability?.failureClasses ?? []), failureClass]).filter((item) => item !== 'none'),
+    latency: reliability?.latency ?? 'not recorded',
+    contractVersion: reliability?.contractVersion ?? jobContractVersion(job),
+    ephemeral: Boolean(registryMatch?.ephemeral ?? targetType === 'local_http_tunnel'),
+  };
+}
+
+function targetNameForRunTarget(executionTarget, job) {
+  if (executionTarget.runnerId) {
+    const runner = state.projectRunners.find((item) => item.id === executionTarget.runnerId);
+    return runner?.name ?? executionTarget.runnerId;
+  }
+  if (executionTarget.url) return safeTargetLabel(executionTarget.url);
+  if (executionTarget.type === 'local_http_tunnel') return 'Ephemeral local test target';
+  if (executionTarget.type === 'vercel_ai_sdk') return safeTargetLabel(state.vercelAiSdkTarget);
+  return job?.id ? `Job ${job.id}` : 'not recorded';
 }
 
 function reportSlug(name, index) {
