@@ -1121,9 +1121,29 @@ section[id] {
 }
 
 .hosted-provider-controls,
+.local-tunnel-controls,
 .project-secrets {
   display: grid;
   gap: 12px;
+}
+
+.execution-target-help,
+.execution-target-warnings {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.execution-target-help code {
+  color: var(--text);
+}
+
+.execution-target-warnings {
+  color: #e2b166;
 }
 
 .project-secrets {
@@ -2022,6 +2042,7 @@ section[id] {
 .integration-grid,
 .artifact-grid,
 .contract-grid,
+.execution-target-grid,
 .docs-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -2041,6 +2062,7 @@ section[id] {
 .pack-grid article,
 .integration-grid article,
 .contract-grid article,
+.execution-target-grid article,
 .docs-grid article {
   min-height: 220px;
   background: rgba(17, 18, 17, 0.93);
@@ -2050,6 +2072,7 @@ section[id] {
 .pack-grid h3,
 .integration-grid h3,
 .contract-grid h3,
+.execution-target-grid h3,
 .docs-grid h3,
 .quickstart-list h3 {
   margin: 16px 0 12px;
@@ -2060,10 +2083,102 @@ section[id] {
 .pack-grid p,
 .integration-grid p,
 .contract-grid p,
+.execution-target-grid p,
 .docs-grid p,
 .quickstart-list p {
   color: var(--muted);
   line-height: 1.65;
+}
+
+.execution-target-grid article {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.execution-target-grid div {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 14px;
+}
+
+.execution-target-grid span,
+.lifecycle-strip span {
+  display: block;
+  color: var(--dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.execution-target-grid strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.demo-model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0 0 44px;
+  background: var(--line-soft);
+}
+
+.demo-model-grid > article {
+  background: rgba(17, 18, 17, 0.94);
+  padding: clamp(20px, 3vw, 30px);
+}
+
+.demo-model-grid h3 {
+  margin-bottom: 14px;
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1;
+}
+
+.demo-model-grid p {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.demo-model-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.demo-model-grid .execution-target-grid {
+  margin-top: 24px;
+}
+
+.mini-code {
+  overflow: auto;
+  margin: 22px 0 0;
+  border: 1px solid var(--line);
+  background: #080908;
+  color: var(--accent-2);
+  padding: 16px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.lifecycle-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 24px;
+  background: var(--line-soft);
+}
+
+.lifecycle-strip span {
+  min-height: 54px;
+  background: rgba(8, 9, 8, 0.82);
+  color: var(--accent-2);
+  display: grid;
+  place-items: center;
+  padding: 12px 8px;
+  text-align: center;
 }
 
 .deploy-section pre {
@@ -4781,6 +4896,7 @@ section[id] {
   .module-grid,
   .pack-grid,
   .integration-grid,
+  .execution-target-grid,
   .artifact-grid,
   .workspace-grid,
   .benchmark-edit-grid,
@@ -4846,6 +4962,7 @@ section[id] {
   .module-grid,
   .pack-grid,
   .integration-grid,
+  .execution-target-grid,
   .artifact-grid,
   .project-command-center__header,
   .command-metrics,
@@ -4858,6 +4975,8 @@ section[id] {
   .input-workbench,
   .threshold-controls,
   .runner-controls,
+  .demo-model-grid,
+  .lifecycle-strip,
   .schema-status-list,
   .scoreline,
   .report,
@@ -4898,6 +5017,7 @@ section[id] {
   .diagnostic-board,
   .workflow article,
   .module-grid article,
+  .execution-target-grid article,
   .report div,
   .docs-article,
   .docs-page__hero,

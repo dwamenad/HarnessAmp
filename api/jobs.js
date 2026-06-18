@@ -42,7 +42,7 @@ export default async function handler(request, response) {
             userId: session.user.id,
             statuses: request.query?.status ?? request.query?.statuses ?? [],
           });
-        response.status(200).json({ jobs });
+        response.status(200).json({ jobs: jobs.map(sanitizeJobForResponse) });
         return;
       }
 
@@ -57,7 +57,7 @@ export default async function handler(request, response) {
         return;
       }
 
-      response.status(200).json(job);
+      response.status(200).json(sanitizeJobForResponse(job));
       return;
     }
 
@@ -83,7 +83,7 @@ export default async function handler(request, response) {
           return;
         }
 
-        response.status(200).json(job);
+        response.status(200).json(sanitizeJobForResponse(job));
         return;
       }
 
@@ -104,7 +104,7 @@ export default async function handler(request, response) {
           return;
         }
 
-        response.status(200).json(job);
+        response.status(200).json(sanitizeJobForResponse(job));
         return;
       }
 
@@ -125,7 +125,7 @@ export default async function handler(request, response) {
           return;
         }
 
-        response.status(200).json(job);
+        response.status(200).json(sanitizeJobForResponse(job));
         return;
       }
 
@@ -143,7 +143,7 @@ export default async function handler(request, response) {
           return;
         }
 
-        response.status(200).json(job);
+        response.status(200).json(sanitizeJobForResponse(job));
         return;
       }
 
@@ -159,6 +159,20 @@ export default async function handler(request, response) {
     }
     serverError(response, error);
   }
+}
+
+function sanitizeJobForResponse(job) {
+  if (!job || typeof job !== 'object') return job;
+  const executionTarget = job.payload?.executionTarget;
+  if (!executionTarget || executionTarget.type !== 'local_http_tunnel') return job;
+  const { runToken, tokenNonce, ...safeExecutionTarget } = executionTarget;
+  return {
+    ...job,
+    payload: {
+      ...(job.payload ?? {}),
+      executionTarget: safeExecutionTarget,
+    },
+  };
 }
 
 function requestProjectId(request, body = {}) {

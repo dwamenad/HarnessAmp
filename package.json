@@ -19,6 +19,7 @@
     "collect:failures": "node scripts/collect-failures.mjs",
     "release:gate": "node scripts/release-gate.mjs",
     "diagnose": "node scripts/harnessamp.mjs diagnose",
+    "harnessamp:doctor": "node scripts/harnessamp.mjs doctor",
     "replit:start": "node scripts/replit-start.mjs",
     "replit:runner": "node examples/replit/custom-http-runner.mjs",
     "harness1:adapter": "node examples/harness1-adapter/server.mjs",

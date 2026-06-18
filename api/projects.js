@@ -2,6 +2,11 @@ import { badRequest, methodNotAllowed, readJsonBody, serverError, unauthorized }
 import { readSessionContext } from './_session.js';
 import { createRunnerJob, createRunnerRegistration, listProjectReports, listRunners } from './_store.js';
 import { normalizeExecutionTarget } from '../src/adapters/execution-targets.js';
+import {
+  createLocalTunnelTokenNonce,
+  localTunnelRunTokenForNonce,
+  preflightLocalHttpTunnelTarget,
+} from '../src/adapters/local-http-tunnel.js';
 
 export default async function handler(request, response) {
   try {
@@ -87,6 +92,23 @@ export default async function handler(request, response) {
         badRequest(response, error instanceof Error ? error.message : String(error));
         return;
       }
+      const localTunnelTokenNonce = executionTarget.type === 'local_http_tunnel'
+        ? createLocalTunnelTokenNonce()
+        : null;
+      const localTunnelRunToken = localTunnelRunTokenForNonce(localTunnelTokenNonce);
+      const localTunnelMaxResponseBytes = executionTarget.type === 'local_http_tunnel'
+        ? body.maxResponseBytes ?? body.localTunnelMaxResponseBytes ?? null
+        : null;
+      try {
+        await preflightLocalHttpTunnelTarget(executionTarget, {
+          runToken: localTunnelRunToken,
+          timeoutMs: body.preflightTimeoutMs ?? body.localTunnelPreflightTimeoutMs,
+          maxResponseBytes: localTunnelMaxResponseBytes,
+        });
+      } catch (error) {
+        badRequest(response, error instanceof Error ? error.message : String(error));
+        return;
+      }
 
       const job = await createRunnerJob({
         projectId,
@@ -98,6 +120,8 @@ export default async function handler(request, response) {
         presetId: body.presetId ?? null,
         adapter: body.adapter ?? null,
         executionTarget,
+        localTunnelTokenNonce,
+        localTunnelMaxResponseBytes,
         idempotencyKey: body.idempotencyKey ?? request.headers?.['idempotency-key'] ?? null,
         maxAttempts: body.maxAttempts ?? 1,
         timeoutMs: body.timeoutMs ?? 0,
@@ -110,10 +134,16 @@ export default async function handler(request, response) {
         executionTarget: job.payload?.executionTarget?.safeMetadata ?? null,
         adapter: job.payload?.adapter ?? null,
         execution: job.result?.execution ?? {
-          kind: job.payload?.executionTarget?.type === 'registered_runner' ? 'registered-runner' : 'adapter',
+          kind: job.payload?.executionTarget?.type === 'registered_runner'
+            ? 'registered-runner'
+            : job.payload?.executionTarget?.type === 'local_http_tunnel'
+              ? 'http-tunnel'
+              : 'adapter',
           type: job.payload?.executionTarget?.type ?? null,
           adapterType: job.payload?.adapter?.type ?? null,
-          target: job.payload?.executionTarget?.routeUrl ?? job.payload?.adapter?.target ?? null,
+          target: job.payload?.executionTarget?.endpointUrl ?? job.payload?.executionTarget?.routeUrl ?? job.payload?.adapter?.target ?? null,
+          endpointUrl: job.payload?.executionTarget?.endpointUrl ?? null,
+          label: job.payload?.executionTarget?.type === 'local_http_tunnel' ? 'Local tunnel' : null,
           runnerId: job.runnerId ?? null,
         },
         diagnostics: job.result?.diagnostics ?? null,

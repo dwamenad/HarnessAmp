@@ -140,12 +140,13 @@ HarnessAmp keeps customer workloads outside the product. It sends baseline and m
 
 ## Bring Your Own Model
 
-Users can bring their own model or agent to HarnessAmp by exposing an execution target. HarnessAmp sends mutation-pack scenarios to that target, the target calls the user's model using the user's own provider credentials, and HarnessAmp scores the returned behavior. HarnessAmp does not need direct access to provider API keys when using registered runners or Vercel AI SDK routes.
+Users can bring their own model or agent to HarnessAmp by exposing an execution target. HarnessAmp sends mutation-pack scenarios to that target, the target calls the user's model using the user's own provider credentials, and HarnessAmp scores the returned behavior. HarnessAmp does not need direct access to provider API keys when using registered runners, Vercel AI SDK routes, or local HTTPS tunnels.
 
 Recommended production path:
 
 - use a registered runner for deployed agents, RAG systems, enterprise copilots, and production apps
 - use a Vercel AI SDK route when a Next.js/Vercel app already owns the provider credentials
+- use a local HTTPS tunnel for short-lived tests against an agent running on your machine
 - keep OpenAI, Anthropic, Gemini, Mistral, Groq, Together, or other provider keys inside your infrastructure
 - do not send raw provider API keys to HarnessAmp job creation endpoints
 
@@ -158,11 +159,31 @@ Supported paths:
 | `mock` | Local end-to-end testing |
 | `custom_http` | Production agent endpoints |
 | `vercel-ai-sdk` | Next.js/Vercel AI SDK routes and handlers |
+| `local_http_tunnel` | Short-lived HTTPS tunnel to a local HarnessAmp-compatible agent endpoint |
 | `hosted_provider` | Convenience BYOK execution through encrypted project secrets |
 | Replit demo runner | Public demo deployments |
 | Worker service | Durable queued project jobs |
 
-Vercel AI SDK adapter jobs run through the worker lifecycle, not the browser. Job status, API responses, CLI worker logs, dashboard job details, and report metadata expose a normalized diagnostics envelope with adapter type, target route, latency, HTTP status, worker/job ids, retry attempt, phase, safely truncated error text, and deterministic failure classes such as `adapter_timeout`, `adapter_http_error`, `adapter_invalid_response`, and `adapter_target_missing`.
+Vercel AI SDK adapter and local tunnel jobs run through the worker lifecycle, not the browser. Job status, API responses, CLI worker logs, dashboard job details, and report metadata expose a normalized diagnostics envelope with adapter type, target route or endpoint, latency, HTTP status, worker/job ids, retry attempt, phase, safely truncated error text, and deterministic failure classes such as `adapter_timeout`, `adapter_http_error`, `adapter_invalid_response`, and `adapter_target_missing`.
+
+Local tunnel flow:
+
+1. Run the local app that serves your HarnessAmp-compatible agent endpoint.
+2. Run `ngrok http <port>` or another HTTPS tunneling tool.
+3. Paste the HTTPS forwarding URL into the dashboard execution target picker.
+4. Implement the HarnessAmp HTTP contract: preflight returns `{ "ok": true }` or `{ "ready": true }`, and dispatch returns an observation array or `{ "observations": [] }`.
+5. Read `x-harnessamp-run-token` on preflight and require the same header on scenario dispatch requests for that run.
+6. Keep the tunnel open while the benchmark runs, do not expose sensitive local services, and close or rotate the tunnel after testing.
+
+Local tunnel targets are ephemeral. HarnessAmp validates HTTPS URLs, rejects localhost/private/metadata targets, checks DNS resolution before preflight and dispatch, blocks unsafe redirects, applies timeouts and response-size limits, and stores only safe target metadata.
+
+Validate an adapter endpoint before running a benchmark:
+
+```bash
+npm run harnessamp:doctor -- --url https://example.ngrok.app/api/agent
+```
+
+See [docs/adapters/adapter-contract.md](docs/adapters/adapter-contract.md) for the formal contract, common failures, and copy-paste Next.js, Express, Vercel AI SDK, and fetch-handler examples.
 
 Custom HTTP example:
 

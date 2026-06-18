@@ -148,6 +148,18 @@ Vercel AI SDK route:
 }
 ```
 
+Local HTTPS tunnel:
+
+```json
+{
+  "pack": { "project": "HealthGuard" },
+  "executionTarget": {
+    "type": "local_http_tunnel",
+    "endpointUrl": "https://example.ngrok-free.app/harnessamp"
+  }
+}
+```
+
 Hosted provider BYOK:
 
 ```json
@@ -162,7 +174,9 @@ Hosted provider BYOK:
 }
 ```
 
-`registered_runner` requires a valid project runner id. `vercel_ai_sdk` requires a route URL or route module path. `hosted_provider` requires `HARNESSAMP_ENABLE_HOSTED_BYOK=1`, encrypted project secret storage, supported provider, model, and an active project secret whose provider matches the target.
+`registered_runner` requires a valid project runner id. `vercel_ai_sdk` requires a route URL or route module path. `local_http_tunnel` requires a public HTTPS `endpointUrl`, validates reachability with a lightweight preflight `POST`, and dispatches worker jobs to the endpoint using the same observation contract as registered HTTP runners. HarnessAmp sends `x-harnessamp-run-token` on preflight and dispatch; local adapters should read it on preflight and require the same value on subsequent dispatch requests for that run. `hosted_provider` requires `HARNESSAMP_ENABLE_HOSTED_BYOK=1`, encrypted project secret storage, supported provider, model, and an active project secret whose provider matches the target.
+
+The formal adapter contract and copy-paste route examples are documented in `docs/adapters/adapter-contract.md`. Use `npm run harnessamp:doctor -- --url <https-endpoint>` to verify a local or hosted adapter endpoint before enqueueing a benchmark.
 
 ## Project Secrets API
 
@@ -222,7 +236,7 @@ Body:
 
 `executionTarget`, `runnerId`, or `adapter.type` is required. Adapter-backed jobs use the same queue, claim, retry, cancellation, and report-linking lifecycle as registered HTTP runners.
 
-Execution targets are validated before enqueueing when possible. Hosted provider job creation rejects disabled BYOK, missing `secretRef`, missing model, unsupported provider, provider mismatch, disabled/deleted secrets, cross-project secrets, and raw provider API keys in job payloads.
+Execution targets are validated before enqueueing when possible. Local tunnel job creation rejects invalid URLs, non-HTTPS URLs, localhost, private IP ranges, link-local ranges, cloud metadata endpoints, DNS resolutions to private/internal IPs, unsafe redirects, unreachable tunnel endpoints, preflight timeouts, oversized responses, non-2xx preflight responses, non-JSON preflight responses, and preflight responses that do not confirm readiness with `{ "ok": true }`, `{ "ready": true }`, an observation array, or `{ "observations": [] }`. The same URL and redirect safety checks run during worker dispatch. Hosted provider job creation rejects disabled BYOK, missing `secretRef`, missing model, unsupported provider, provider mismatch, disabled/deleted secrets, cross-project secrets, and raw provider API keys in job payloads.
 
 Returns:
 
@@ -270,7 +284,9 @@ Body:
 
 Claims and executes a job through the registered runner or configured adapter. The action moves the job from `claimed` to `running`, dispatches execution from the worker/API process, writes exactly one report on success, and links it through `reportId`. On retryable failure it marks the job `retrying` until attempts are exhausted, then `failed`.
 
-Non-retryable execution classes currently stop immediately: `execution_target_missing`, `execution_target_invalid`, `execution_target_unsupported`, `registered_runner_missing`, `vercel_ai_sdk_route_missing`, `hosted_provider_disabled`, `hosted_provider_secret_missing`, `hosted_provider_secret_disabled`, `hosted_provider_secret_provider_mismatch`, `hosted_provider_auth_error`, `hosted_provider_model_missing`, `adapter_target_missing`, `adapter_invalid_response`, `adapter_schema_mismatch`, and `adapter_worker_canceled`.
+Non-retryable execution classes currently stop immediately: `execution_target_missing`, `execution_target_invalid`, `execution_target_unsupported`, `registered_runner_missing`, `vercel_ai_sdk_route_missing`, `hosted_provider_disabled`, `hosted_provider_secret_missing`, `hosted_provider_secret_disabled`, `hosted_provider_secret_provider_mismatch`, `hosted_provider_auth_error`, `hosted_provider_model_missing`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `adapter_target_missing`, `adapter_invalid_response`, `adapter_schema_mismatch`, and `adapter_worker_canceled`.
+
+Local tunnel-specific failure classes include `local_tunnel_unreachable`, `local_tunnel_timeout`, `local_tunnel_tls_error`, `local_tunnel_dns_error`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `local_tunnel_http_error`, and `local_tunnel_closed_or_expired`.
 
 Worker services may call this action with `Authorization: Bearer <WORKER_SERVICE_TOKEN>` and a matching `projectId` in the JSON body.
 
