@@ -10,6 +10,7 @@ import eventsHandler from '../api/events.js';
 import failuresHandler from '../api/failures.js';
 import harnessSmokeHandler from '../api/harness-smoke.js';
 import jobsHandler from '../api/jobs.js';
+import orgsHandler from '../api/orgs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
 import secretsHandler from '../api/secrets.js';
@@ -25,6 +26,7 @@ const HANDLERS = {
   failures: failuresHandler,
   harnessSmoke: harnessSmokeHandler,
   jobs: jobsHandler,
+  orgs: orgsHandler,
   projects: projectsHandler,
   reports: reportsHandler,
   secrets: secretsHandler,
@@ -33,6 +35,75 @@ const HANDLERS = {
 
 // Mirror the Vercel rewrite behavior so local Vite proxying hits the same handlers.
 const ROUTES = [
+  {
+    name: 'orgs',
+    pattern: /^\/api\/orgs\/([^/]+)\/members\/invite$/u,
+    handler: HANDLERS.orgs,
+    buildQuery: (url, match) => withQuery(url, {
+      orgId: decodeURIComponent(match[1]),
+      resource: 'members',
+    }),
+  },
+  {
+    name: 'orgs',
+    pattern: /^\/api\/orgs\/([^/]+)\/members\/([^/]+)$/u,
+    handler: HANDLERS.orgs,
+    buildQuery: (url, match) => withQuery(url, {
+      orgId: decodeURIComponent(match[1]),
+      resource: 'member',
+      memberId: decodeURIComponent(match[2]),
+    }),
+  },
+  {
+    name: 'orgs',
+    pattern: /^\/api\/orgs\/([^/]+)\/members$/u,
+    handler: HANDLERS.orgs,
+    buildQuery: (url, match) => withQuery(url, {
+      orgId: decodeURIComponent(match[1]),
+      resource: 'members',
+    }),
+  },
+  {
+    name: 'orgs',
+    pattern: /^\/api\/orgs\/([^/]+)\/usage\/estimate-run$/u,
+    handler: HANDLERS.orgs,
+    buildQuery: (url, match) => withQuery(url, {
+      orgId: decodeURIComponent(match[1]),
+      resource: 'estimate-run',
+    }),
+  },
+  {
+    name: 'orgs',
+    pattern: /^\/api\/orgs\/([^/]+)\/usage$/u,
+    handler: HANDLERS.orgs,
+    buildQuery: (url, match) => withQuery(url, {
+      orgId: decodeURIComponent(match[1]),
+      resource: 'usage',
+    }),
+  },
+  {
+    name: 'orgs',
+    pattern: /^\/api\/orgs\/([^/]+)\/plan$/u,
+    handler: HANDLERS.orgs,
+    buildQuery: (url, match) => withQuery(url, {
+      orgId: decodeURIComponent(match[1]),
+      resource: 'plan',
+    }),
+  },
+  {
+    name: 'orgs',
+    pattern: /^\/api\/orgs\/([^/]+)$/u,
+    handler: HANDLERS.orgs,
+    buildQuery: (url, match) => withQuery(url, {
+      orgId: decodeURIComponent(match[1]),
+    }),
+  },
+  {
+    name: 'orgs',
+    pattern: /^\/api\/orgs$/u,
+    handler: HANDLERS.orgs,
+    buildQuery: (url) => withQuery(url),
+  },
   {
     name: 'auth',
     pattern: /^\/api\/auth\/github\/start$/u,
@@ -105,6 +176,16 @@ const ROUTES = [
     handler: HANDLERS.secrets,
     buildQuery: (url, match) => withQuery(url, {
       projectId: decodeURIComponent(match[1]),
+    }),
+  },
+  {
+    name: 'secrets',
+    pattern: /^\/api\/projects\/([^/]+)\/secrets\/([^/]+)\/validate$/u,
+    handler: HANDLERS.secrets,
+    buildQuery: (url, match) => withQuery(url, {
+      projectId: decodeURIComponent(match[1]),
+      id: decodeURIComponent(match[2]),
+      action: 'validate',
     }),
   },
   {

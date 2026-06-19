@@ -1,6 +1,7 @@
 import { badRequest, methodNotAllowed, readJsonBody, serverError, unauthorized } from './_http.js';
 import { readSessionContext } from './_session.js';
 import { readWorkerServiceContext } from './_worker-auth.js';
+import { sanitizeDebugPayload } from '../src/adapters/contract.js';
 import {
   cancelRunnerJob,
   claimRunnerJob,
@@ -163,13 +164,14 @@ export default async function handler(request, response) {
 
 function sanitizeJobForResponse(job) {
   if (!job || typeof job !== 'object') return job;
-  const executionTarget = job.payload?.executionTarget;
-  if (!executionTarget || executionTarget.type !== 'local_http_tunnel') return job;
+  const safeJob = sanitizeDebugPayload(job);
+  const executionTarget = safeJob.payload?.executionTarget;
+  if (!executionTarget || executionTarget.type !== 'local_http_tunnel') return safeJob;
   const { runToken, tokenNonce, ...safeExecutionTarget } = executionTarget;
   return {
-    ...job,
+    ...safeJob,
     payload: {
-      ...(job.payload ?? {}),
+      ...(safeJob.payload ?? {}),
       executionTarget: safeExecutionTarget,
     },
   };

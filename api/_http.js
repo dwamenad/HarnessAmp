@@ -25,11 +25,21 @@ export function badRequest(response, error = 'Bad request') {
 }
 
 export function serverError(response, error) {
-  response.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  response.status(500).json({ error: redactErrorText(error instanceof Error ? error.message : String(error)) });
 }
 
 export function redirect(response, location, statusCode = 302) {
   response.statusCode = statusCode;
   response.setHeader('location', location);
   response.end();
+}
+
+function redactErrorText(value) {
+  return String(value ?? '')
+    .replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, 'sk-ant-[redacted]')
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-[redacted]')
+    .replace(/AIza[A-Za-z0-9_-]{20,}/g, 'AIza[redacted]')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
+    .replace(/(authorization|x-api-key|api-key)\s*:\s*[^,\n\r}]+/gi, '$1: [redacted]')
+    .replace(/(authorization|token|secret|key|password|credential|api[_-]?key)=([^&\s]+)/gi, '$1=[redacted]');
 }

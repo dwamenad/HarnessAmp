@@ -12,6 +12,8 @@ const PROVIDER_ENDPOINTS = {
   anthropic: 'https://api.anthropic.com/v1/messages',
 };
 
+const EXECUTABLE_PROVIDERS = new Set(['openai', 'anthropic']);
+
 export async function executeHostedProviderBenchmark(bundleInput, config = {}, options = {}) {
   const analysis = analyzeBundle(bundleInput);
   const variants = selectVariants(analysis.pack.variants, config.mode ?? 'sample');
@@ -115,22 +117,23 @@ async function executeHostedProviderVariant({ bundle, variant, scenario, config,
         phase: 'before_dispatch',
       });
     }
-    const payload = await callHostedProvider({
+    const dispatch = await dispatchHostedProvider({
       provider: config.provider,
       model: config.model,
-      apiKey: config.apiKey,
-      prompt,
+      input: prompt,
       timeoutMs: config.timeoutMs,
+      secretResolver: config.secretResolver,
       fetchImpl: options.fetchImpl ?? globalThis.fetch,
+      metadata: diagnosticsBase,
     }, diagnosticsBase);
-    const usage = normalizeUsage(payload.usage);
-    const outputText = extractOutputText(config.provider, payload);
+    const usage = normalizeUsage(dispatch.rawResponseMetadata?.usage);
+    const outputText = dispatch.outputText;
     if (!outputText) {
       throw new AdapterExecutionError('Hosted provider returned an invalid response.', {
         ...diagnosticsBase,
         responseTimestamp: new Date().toISOString(),
         latencyMs: Date.now() - startedAt,
-        failureClass: ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_INVALID_RESPONSE,
+        failureClass: ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_RESPONSE_INVALID,
         rawErrorMessage: 'Hosted provider returned an invalid response.',
         phase: 'during_parsing',
       });
@@ -140,6 +143,7 @@ async function executeHostedProviderVariant({ bundle, variant, scenario, config,
       responseTimestamp: new Date().toISOString(),
       latencyMs: Date.now() - startedAt,
       phase: 'completion',
+      httpStatus: dispatch.diagnostics.httpStatus,
       usage: {
         provider: config.provider,
         model: config.model,
@@ -219,29 +223,71 @@ async function executeHostedProviderVariant({ bundle, variant, scenario, config,
   }
 }
 
-async function callHostedProvider({ provider, model, apiKey, prompt, timeoutMs = 30000, fetchImpl }, diagnosticsBase) {
+export async function dispatchHostedProvider({
+  provider,
+  model,
+  input = '',
+  messages = null,
+  system = '',
+  tools = null,
+  timeoutMs = 30000,
+  secretResolver,
+  fetchImpl = globalThis.fetch,
+  metadata = {},
+}) {
   if (!PROVIDER_ENDPOINTS[provider]) {
     throw new AdapterExecutionError(`Unsupported hosted provider: ${provider}`, {
-      ...diagnosticsBase,
+      ...metadata,
       failureClass: ADAPTER_FAILURE_CLASSES.EXECUTION_TARGET_UNSUPPORTED,
+      phase: 'before_dispatch',
+    });
+  }
+  if (!EXECUTABLE_PROVIDERS.has(provider)) {
+    throw new AdapterExecutionError(`Hosted provider execution is not implemented for ${provider}.`, {
+      ...metadata,
+      failureClass: ADAPTER_FAILURE_CLASSES.EXECUTION_TARGET_UNSUPPORTED,
+      phase: 'before_dispatch',
+    });
+  }
+  if (!model) {
+    throw new AdapterExecutionError('Hosted provider model is missing.', {
+      ...metadata,
+      failureClass: ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_MODEL_MISSING,
+      phase: 'before_dispatch',
+    });
+  }
+  if (typeof secretResolver !== 'function') {
+    throw new AdapterExecutionError('Hosted provider secret resolver is missing.', {
+      ...metadata,
+      failureClass: ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_MISSING_SECRET,
       phase: 'before_dispatch',
     });
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1, Number(timeoutMs) || 30000));
+  const startedAt = Date.now();
+  let apiKey = '';
   try {
+    apiKey = await secretResolver({ provider, model });
+    if (!apiKey) {
+      throw new AdapterExecutionError('Hosted provider secret is missing.', {
+        ...metadata,
+        failureClass: ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_MISSING_SECRET,
+        phase: 'before_dispatch',
+      });
+    }
     const response = await fetchImpl(PROVIDER_ENDPOINTS[provider], {
       method: 'POST',
       signal: controller.signal,
       headers: providerHeaders(provider, apiKey),
-      body: JSON.stringify(providerRequestBody(provider, model, prompt)),
+      body: JSON.stringify(providerRequestBody(provider, model, input, messages, system, tools)),
     });
     const text = await response.text();
     const payload = text ? safeJson(text) : {};
     if (!response.ok) {
       const failureClass = classifyHostedHttpStatus(response.status);
       throw new AdapterExecutionError(providerErrorMessage(payload, response.status), {
-        ...diagnosticsBase,
+        ...metadata,
         responseTimestamp: new Date().toISOString(),
         httpStatus: response.status,
         failureClass,
@@ -249,20 +295,73 @@ async function callHostedProvider({ provider, model, apiKey, prompt, timeoutMs =
         phase: 'during_adapter_call',
       });
     }
-    return payload;
+    const outputText = extractOutputText(provider, payload);
+    if (!outputText) {
+      throw new AdapterExecutionError('Hosted provider returned an invalid response.', {
+        ...metadata,
+        responseTimestamp: new Date().toISOString(),
+        httpStatus: response.status,
+        failureClass: ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_RESPONSE_INVALID,
+        rawErrorMessage: 'Hosted provider returned an invalid response.',
+        phase: 'during_parsing',
+      });
+    }
+    return {
+      ok: true,
+      outputText,
+      rawResponseMetadata: {
+        id: payload.id ?? null,
+        model: payload.model ?? model,
+        usage: payload.usage ?? {},
+        stopReason: payload.stop_reason ?? payload.choices?.[0]?.finish_reason ?? null,
+      },
+      diagnostics: normalizeAdapterDiagnostics({}, {
+        ...metadata,
+        adapterType: 'hosted_provider',
+        responseTimestamp: new Date().toISOString(),
+        latencyMs: Date.now() - startedAt,
+        httpStatus: response.status,
+        phase: 'completion',
+        modelMetadata: { provider, model },
+      }),
+    };
   } catch (error) {
     if (error?.name === 'AbortError') {
       throw new AdapterExecutionError(`Hosted provider timed out after ${timeoutMs}ms.`, {
-        ...diagnosticsBase,
+        ...metadata,
         responseTimestamp: new Date().toISOString(),
         timedOut: true,
         failureClass: ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_TIMEOUT,
         rawErrorMessage: `Hosted provider timed out after ${timeoutMs}ms.`,
       });
     }
-    throw error;
+    if (error instanceof AdapterExecutionError) throw error;
+    throw new AdapterExecutionError('Hosted provider network error.', {
+      ...metadata,
+      responseTimestamp: new Date().toISOString(),
+      failureClass: ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_NETWORK_ERROR,
+      rawErrorMessage: error instanceof Error ? error.message : String(error),
+      phase: 'during_adapter_call',
+    });
   } finally {
+    apiKey = '';
     clearTimeout(timeout);
+  }
+}
+
+async function callHostedProvider({ provider, model, apiKey, prompt, timeoutMs = 30000, fetchImpl }, diagnosticsBase) {
+  try {
+    return await dispatchHostedProvider({
+      provider,
+      model,
+      input: prompt,
+      timeoutMs,
+      fetchImpl,
+      secretResolver: async () => apiKey,
+      metadata: diagnosticsBase,
+    });
+  } catch (error) {
+    throw error;
   }
 }
 
@@ -280,17 +379,29 @@ function providerHeaders(provider, apiKey) {
   };
 }
 
-function providerRequestBody(provider, model, prompt) {
+function providerRequestBody(provider, model, prompt, messages, system, tools) {
+  const normalizedMessages = Array.isArray(messages) && messages.length
+    ? messages.map((message) => ({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: String(message.content ?? ''),
+    }))
+    : [{ role: 'user', content: prompt }];
   if (provider === 'anthropic') {
     return {
       model,
       max_tokens: 512,
-      messages: [{ role: 'user', content: prompt }],
+      ...(system ? { system } : {}),
+      ...(tools ? { tools } : {}),
+      messages: normalizedMessages,
     };
   }
   return {
     model,
-    messages: [{ role: 'user', content: prompt }],
+    ...(tools ? { tools } : {}),
+    messages: [
+      ...(system ? [{ role: 'system', content: system }] : []),
+      ...normalizedMessages,
+    ],
   };
 }
 
@@ -316,15 +427,16 @@ function normalizeUsage(value = {}) {
 }
 
 function classifyHostedHttpStatus(status) {
-  if (status === 401 || status === 403) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_AUTH_ERROR;
+  if (status === 401 || status === 403) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_AUTH_FAILED;
   if (status === 429) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_RATE_LIMITED;
+  if (status === 400 || status === 404 || status === 422) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_INVALID_REQUEST;
   return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_UNKNOWN;
 }
 
 function classifyHostedProviderError(error) {
   const failure = classifyAdapterError(error);
   if (failure === ADAPTER_FAILURE_CLASSES.TIMEOUT) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_TIMEOUT;
-  if (failure === ADAPTER_FAILURE_CLASSES.AUTH_ERROR) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_AUTH_ERROR;
+  if (failure === ADAPTER_FAILURE_CLASSES.AUTH_ERROR) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_AUTH_FAILED;
   if (failure === ADAPTER_FAILURE_CLASSES.RATE_LIMITED) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_RATE_LIMITED;
   return error?.failureClass ?? ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_UNKNOWN;
 }

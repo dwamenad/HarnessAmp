@@ -10,6 +10,15 @@ import {
   validateBenchmarkPackCandidate,
 } from '../src/core/benchmark-lifecycle.js';
 import { analyzeBundle } from '../src/core/engine.js';
+import {
+  aggregateUsageEvents,
+  evaluateRunEntitlements,
+  estimateRunUsage,
+  monthPeriod,
+  normalizePlan,
+  planDefinition,
+} from '../src/core/plans.js';
+import { canRole, normalizeOrgRole, rolePermissions } from '../src/core/rbac.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
 import {
   executeVercelAiSdkAdapterBenchmark,
@@ -20,6 +29,7 @@ import {
   adapterFailureRetryable,
   classifyAdapterError,
   normalizeAdapterDiagnostics,
+  sanitizeDebugPayload,
 } from '../src/adapters/contract.js';
 import {
   adapterConfigForExecutionTarget,
@@ -27,7 +37,7 @@ import {
   executionTargetSafeMetadata,
   normalizeExecutionTarget,
 } from '../src/adapters/execution-targets.js';
-import { executeHostedProviderBenchmark } from '../src/adapters/hosted-provider.js';
+import { dispatchHostedProvider, executeHostedProviderBenchmark } from '../src/adapters/hosted-provider.js';
 import { dispatchLocalHttpTunnelJob, localTunnelRunTokenForNonce } from '../src/adapters/local-http-tunnel.js';
 import {
   assertHostedByokEnabled,
@@ -39,6 +49,8 @@ import { ensureSchema, hasPostgresConfig, query } from './_db.js';
 
 const memory = globalThis.__harnessAmpStore ?? {
   users: new Map(),
+  organizations: new Map(),
+  organizationMembers: new Map(),
   workspaces: new Map(),
   projects: new Map(),
   memberships: new Map(),
@@ -55,6 +67,7 @@ const memory = globalThis.__harnessAmpStore ?? {
   promotionCandidates: new Map(),
   goldenCases: new Map(),
   events: [],
+  usageEvents: new Map(),
 };
 
 const RUNNER_JOB_TERMINAL_STATUSES = new Set(['completed', 'failed', 'canceled', 'cancelled']);
@@ -69,6 +82,9 @@ memory.benchmarkReviewAssignments ??= new Map();
 memory.promotionCandidates ??= new Map();
 memory.goldenCases ??= new Map();
 memory.projectSecrets ??= new Map();
+memory.organizations ??= new Map();
+memory.organizationMembers ??= new Map();
+memory.usageEvents ??= new Map();
 memory.failureWorkflows ??= new Map();
 memory.failureRegressionSuites ??= new Map();
 
@@ -123,7 +139,9 @@ export async function seedDevSession() {
   return {
     user,
     workspaces: await listWorkspacesForUser(user.id),
+    organizations: await listOrganizationsForUser(user.id),
     currentWorkspaceId: workspace.id,
+    currentOrganizationId: workspace.organizationId,
     defaultProjectId: project.id,
   };
 }
@@ -133,12 +151,15 @@ export async function getSessionContext(userId) {
   if (!user) return null;
 
   const workspaces = await listWorkspacesForUser(userId);
+  const organizations = await listOrganizationsForUser(userId);
   const currentWorkspaceId = workspaces[0]?.id ?? null;
   const projects = currentWorkspaceId ? await listProjectsForWorkspace(userId, currentWorkspaceId) : [];
   return {
     user,
     workspaces,
+    organizations,
     currentWorkspaceId,
+    currentOrganizationId: workspaces[0]?.organizationId ?? organizations[0]?.id ?? null,
     defaultProjectId: projects[0]?.id ?? null,
   };
 }
@@ -165,15 +186,53 @@ export async function ensureDefaultWorkspaceProject(user) {
     return { workspace: existing[0], project };
   }
 
-  const workspace = await createWorkspace(user.id, `${user.login} Lab`);
+  const workspace = await createWorkspace(user.id, `${user.login} Lab`, { plan: 'team' });
   const project = await createProject(user.id, workspace.id, 'Primary Project');
   return { workspace, project };
+}
+
+export async function createOrganization(userId, name, options = {}) {
+  const workspace = await createWorkspace(userId, name, options);
+  return getOrganization({ organizationId: workspace.organizationId, userId });
+}
+
+export async function listOrganizationsForUser(userId) {
+  if (useMemory()) {
+    return Array.from(memory.organizationMembers.values())
+      .filter((member) => member.userId === userId && member.status === 'active')
+      .map((member) => memory.organizations.get(member.organizationId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((organization) => organizationSummary(organization, organizationMemberForUser(organization.id, userId)));
+  }
+
+  await ensureSchema();
+  const result = await query(
+    `select o.*, om.id as member_id, om.role as member_role, om.status as member_status
+     from organizations o
+     join organization_members om on om.organization_id = o.id
+     where om.user_id = $1 and om.status = 'active'
+     order by o.created_at asc`,
+    [userId],
+  );
+  return result.rows.map((row) => organizationSummary(normalizeOrganizationRow(row), {
+    id: row.member_id,
+    role: row.member_role,
+    status: row.member_status,
+  }));
+}
+
+export async function getOrganization({ organizationId, userId }) {
+  const member = await getOrganizationMemberForUser({ organizationId, userId });
+  if (!member) return null;
+  const organization = await readOrganization(organizationId);
+  return organization ? organizationSummary(organization, member) : null;
 }
 
 export async function listWorkspacesForUser(userId) {
   if (useMemory()) {
     return Array.from(memory.workspaces.values())
-      .filter((workspace) => workspace.ownerUserId === userId || workspaceHasMember(workspace.id, userId))
+      .filter((workspace) => workspace.ownerUserId === userId || organizationMemberForUser(workspace.organizationId, userId) || workspaceHasMember(workspace.id, userId))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
@@ -183,31 +242,67 @@ export async function listWorkspacesForUser(userId) {
      from workspaces w
      left join projects p on p.workspace_id = w.id
      left join project_memberships pm on pm.project_id = p.id and pm.user_id = $1
-     where w.owner_user_id = $1 or pm.user_id = $1
+     left join organization_members om on om.organization_id = w.organization_id and om.user_id = $1 and om.status = 'active'
+     where w.owner_user_id = $1 or pm.user_id = $1 or om.user_id = $1
      order by w.created_at asc`,
     [userId],
   );
   return result.rows.map(normalizeWorkspaceRow);
 }
 
-export async function createWorkspace(userId, name) {
+export async function createWorkspace(userId, name, options = {}) {
+  const now = new Date().toISOString();
   if (useMemory()) {
+    const organization = createOrganizationRecord({
+      name,
+      plan: options.plan ?? 'free',
+      status: options.status ?? 'active',
+      now,
+    });
+    memory.organizations.set(organization.id, organization);
+    memory.organizationMembers.set(`${organization.id}:${userId}`, {
+      id: createId('om'),
+      organizationId: organization.id,
+      userId,
+      email: userEmailFor(userId),
+      role: 'owner',
+      status: 'active',
+      invitedAt: null,
+      joinedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
     const workspace = {
       id: createId('ws'),
+      organizationId: organization.id,
       name,
       ownerUserId: userId,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
     };
     memory.workspaces.set(workspace.id, workspace);
     return workspace;
   }
 
   await ensureSchema();
+  const orgId = createId('org');
+  const orgSlug = await uniqueOrganizationSlug(slugify(name));
+  await query(
+    `insert into organizations (id, name, slug, plan, status, created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, $6)`,
+    [orgId, name, orgSlug, normalizePlan(options.plan ?? 'free'), options.status ?? 'active', now],
+  );
+  const user = await getUserById(userId);
+  await query(
+    `insert into organization_members
+       (id, organization_id, user_id, email, role, status, joined_at, created_at, updated_at)
+     values ($1, $2, $3, $4, 'owner', 'active', $5, $5, $5)`,
+    [createId('om'), orgId, userId, user?.email ?? `${userId}@harnessamp.local`, now],
+  );
   const result = await query(
-    `insert into workspaces (id, name, owner_user_id)
-     values ($1, $2, $3)
+    `insert into workspaces (id, organization_id, name, owner_user_id)
+     values ($1, $2, $3, $4)
      returning *`,
-    [createId('ws'), name, userId],
+    [createId('ws'), orgId, name, userId],
   );
   return normalizeWorkspaceRow(result.rows[0]);
 }
@@ -219,6 +314,7 @@ export async function listProjectsForWorkspace(userId, workspaceId) {
       .map((project) => ({
         ...project,
         role: projectRoleFor(project.id, userId),
+        permissions: rolePermissions(projectRoleFor(project.id, userId)),
       }))
       .filter((project) => Boolean(project.role))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -227,11 +323,12 @@ export async function listProjectsForWorkspace(userId, workspaceId) {
   await ensureSchema();
   const result = await query(
     `select p.*, 
-            coalesce(pm.role, case when w.owner_user_id = $1 then 'owner' else null end) as role
+            coalesce(om.role, pm.role, case when w.owner_user_id = $1 then 'owner' else null end) as role
      from projects p
      join workspaces w on w.id = p.workspace_id
+     left join organization_members om on om.organization_id = coalesce(p.organization_id, w.organization_id) and om.user_id = $1 and om.status = 'active'
      left join project_memberships pm on pm.project_id = p.id and pm.user_id = $1
-     where p.workspace_id = $2 and (w.owner_user_id = $1 or pm.user_id = $1)
+     where p.workspace_id = $2 and (w.owner_user_id = $1 or pm.user_id = $1 or om.user_id = $1)
      order by p.created_at asc`,
     [userId, workspaceId],
   );
@@ -241,11 +338,15 @@ export async function listProjectsForWorkspace(userId, workspaceId) {
 export async function createProject(userId, workspaceId, name) {
   if (useMemory()) {
     const workspace = memory.workspaces.get(workspaceId);
-    if (!workspace || workspace.ownerUserId !== userId) {
-      throw new Error('Only workspace owners can create projects');
-    }
+    if (!workspace) throw new Error('Workspace not found');
+    requireOrgPermissionSync({
+      organizationId: workspace.organizationId,
+      userId,
+      permission: 'createProject',
+    });
     const project = {
       id: createId('proj'),
+      organizationId: workspace.organizationId,
       workspaceId,
       name,
       slug: slugify(name),
@@ -266,17 +367,20 @@ export async function createProject(userId, workspaceId, name) {
 
   await ensureSchema();
   const workspace = await query('select * from workspaces where id = $1 limit 1', [workspaceId]);
-  if (!workspace.rows[0] || workspace.rows[0].owner_user_id !== userId) {
-    throw new Error('Only workspace owners can create projects');
-  }
+  if (!workspace.rows[0]) throw new Error('Workspace not found');
+  await requireOrgPermission({
+    organizationId: workspace.rows[0].organization_id,
+    userId,
+    permission: 'createProject',
+  });
 
   const projectId = createId('proj');
   const createdAt = new Date().toISOString();
   const result = await query(
-    `insert into projects (id, workspace_id, name, slug, created_by, created_at)
-     values ($1, $2, $3, $4, $5, $6)
+    `insert into projects (id, organization_id, workspace_id, name, slug, created_by, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7)
      returning *`,
-    [projectId, workspaceId, name, slugify(name), userId, createdAt],
+    [projectId, workspace.rows[0].organization_id, workspaceId, name, slugify(name), userId, createdAt],
   );
 
   await query(
@@ -293,8 +397,7 @@ export async function createProject(userId, workspaceId, name) {
 }
 
 export async function listProjectReports({ projectId, userId }) {
-  const membership = await getProjectMembership(userId, projectId);
-  if (!membership) throw new Error('Project membership not found');
+  await requireProjectPermission({ userId, projectId, permission: 'viewReports' });
 
   if (useMemory()) {
     return Array.from(memory.reports.values())
@@ -312,18 +415,15 @@ export async function listProjectReports({ projectId, userId }) {
 }
 
 export async function saveReport({ snapshot, projectId, userId }) {
-  const membership = await getProjectMembership(userId, projectId);
-  if (!membership || !canMutateProject(membership.role)) {
-    throw new Error('Only owners and maintainers can save reports');
-  }
-  return persistReport({ snapshot, projectId, workspaceId: membership.workspaceId, userId });
+  const membership = await requireProjectPermission({ userId, projectId, permission: 'exportReports' });
+  return persistReport({ snapshot, projectId, workspaceId: membership.workspaceId, organizationId: membership.organizationId, userId });
 }
 
 export async function getReport({ id, userId }) {
   if (useMemory()) {
     const report = memory.reports.get(id) ?? null;
     if (!report) return null;
-    const membership = await getProjectMembership(userId, report.projectId);
+    const membership = await requireProjectPermission({ userId, projectId: report.projectId, permission: 'viewReports' }).catch(() => null);
     return membership ? report : null;
   }
 
@@ -333,8 +433,9 @@ export async function getReport({ id, userId }) {
      from reports r
      join projects p on p.id = r.project_id
      join workspaces w on w.id = p.workspace_id
+     left join organization_members om on om.organization_id = coalesce(r.organization_id, p.organization_id, w.organization_id) and om.user_id = $2 and om.status = 'active'
      left join project_memberships pm on pm.project_id = p.id and pm.user_id = $2
-     where r.id = $1 and (w.owner_user_id = $2 or pm.user_id = $2)
+     where r.id = $1 and (w.owner_user_id = $2 or pm.user_id = $2 or om.user_id = $2)
      limit 1`,
     [id, userId],
   );
@@ -542,10 +643,7 @@ export async function recordFailureWorkflowAction({
 }
 
 export async function createRunnerRegistration({ projectId, userId, name, endpointUrl, sharedSecret, status = 'active' }) {
-  const membership = await getProjectMembership(userId, projectId);
-  if (!membership || !canMutateProject(membership.role)) {
-    throw new Error('Only owners and maintainers can register runners');
-  }
+  await requireProjectPermission({ userId, projectId, permission: 'createTarget' });
 
   if (useMemory()) {
     const runner = {
@@ -594,16 +692,15 @@ export async function createProjectSecret({
   projectId,
   userId,
   provider,
+  environment = 'production',
   name,
   secretValue,
-  validationStatus = null,
+  validationStatus = 'pending',
 }) {
   assertHostedByokEnabled();
-  const membership = await getProjectMembership(userId, projectId);
-  if (!membership || !canMutateProject(membership.role)) {
-    throw new Error('Only owners and maintainers can create project secrets');
-  }
+  const membership = await requireProjectPermission({ userId, projectId, permission: 'manageSecrets' });
   const normalizedProvider = normalizeProvider(provider);
+  const normalizedEnvironment = normalizeSecretEnvironment(environment);
   if (!normalizedProvider) throw new Error('Provider is required');
   if (!secretValue) throw new Error('Provider API key is required');
   const now = new Date().toISOString();
@@ -611,12 +708,15 @@ export async function createProjectSecret({
     id: createId('sec'),
     projectId,
     workspaceId: membership.workspaceId,
+    organizationId: membership.organizationId,
+    environment: normalizedEnvironment,
     provider: normalizedProvider,
     displayName: normalizeOptionalText(name) ?? `${normalizedProvider} key`,
     maskedPreview: maskSecretValue(secretValue),
     status: 'active',
     validationStatus,
     lastValidationErrorClass: null,
+    lastValidationError: null,
     encryptedSecret: encryptSecretValue(secretValue),
     createdBy: userId,
     createdAt: now,
@@ -632,17 +732,125 @@ export async function createProjectSecret({
   await ensureSchema();
   const inserted = await query(
     `insert into project_secrets
-       (id, project_id, workspace_id, provider, display_name, masked_preview, status, validation_status, last_validation_error_class, encrypted_secret, created_by, created_at, updated_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, null, $9, $10, $11, $11)
+     (id, project_id, workspace_id, organization_id, environment, provider, display_name, masked_preview, status, validation_status, last_validation_error_class, last_validation_error, encrypted_secret, created_by, created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, null, null, $11, $12, $13, $13)
      returning *`,
-    [secret.id, projectId, membership.workspaceId, secret.provider, secret.displayName, secret.maskedPreview, secret.status, validationStatus, secret.encryptedSecret, userId, now],
+    [secret.id, projectId, membership.workspaceId, membership.organizationId, secret.environment, secret.provider, secret.displayName, secret.maskedPreview, secret.status, validationStatus, secret.encryptedSecret, userId, now],
   );
   return projectSecretSummary(normalizeProjectSecretRow(inserted.rows[0]));
 }
 
+export async function rotateProjectSecret({
+  projectId,
+  secretId,
+  userId,
+  provider = null,
+  environment = null,
+  name = null,
+  secretValue = null,
+}) {
+  assertHostedByokEnabled();
+  await requireProjectPermission({ userId, projectId, permission: 'manageSecrets' });
+  const existing = await readProjectSecret(secretId);
+  if (!existing || existing.projectId !== projectId || existing.status === 'deleted') return null;
+  const nextValue = secretValue ? String(secretValue) : null;
+  const next = {
+    ...existing,
+    provider: provider ? normalizeProvider(provider) : existing.provider,
+    environment: environment ? normalizeSecretEnvironment(environment) : existing.environment,
+    displayName: normalizeOptionalText(name) ?? existing.displayName,
+    maskedPreview: nextValue ? maskSecretValue(nextValue) : existing.maskedPreview,
+    encryptedSecret: nextValue ? encryptSecretValue(nextValue) : existing.encryptedSecret,
+    validationStatus: nextValue ? 'pending' : existing.validationStatus,
+    lastValidationErrorClass: nextValue ? null : existing.lastValidationErrorClass,
+    lastValidationError: nextValue ? null : existing.lastValidationError,
+    status: 'active',
+    updatedAt: new Date().toISOString(),
+  };
+  if (!next.provider) throw new Error('Provider is required');
+  if (useMemory()) {
+    memory.projectSecrets.set(secretId, next);
+    return projectSecretSummary(next);
+  }
+  await ensureSchema();
+  const result = await query(
+    `update project_secrets
+     set provider = $3, environment = $4, display_name = $5, masked_preview = $6,
+         encrypted_secret = $7, validation_status = $8, last_validation_error_class = $9,
+         last_validation_error = $10, status = $11, updated_at = $12
+     where id = $1 and project_id = $2
+     returning *`,
+    [
+      secretId,
+      projectId,
+      next.provider,
+      next.environment,
+      next.displayName,
+      next.maskedPreview,
+      next.encryptedSecret,
+      next.validationStatus,
+      next.lastValidationErrorClass,
+      next.lastValidationError,
+      next.status,
+      next.updatedAt,
+    ],
+  );
+  return result.rows[0] ? projectSecretSummary(normalizeProjectSecretRow(result.rows[0])) : null;
+}
+
+export async function validateProjectSecret({ projectId, secretId, userId, model = null, fetchImpl = globalThis.fetch }) {
+  assertHostedByokEnabled();
+  await requireProjectPermission({ userId, projectId, permission: 'manageSecrets' });
+  const secret = await readProjectSecret(secretId);
+  if (!secret || secret.projectId !== projectId || secret.status === 'deleted') return null;
+  if (!EXECUTABLE_HOSTED_PROVIDERS.has(secret.provider)) {
+    return updateProjectSecretValidation({
+      projectId,
+      secretId,
+      validationStatus: 'unsupported',
+      lastValidationErrorClass: 'hosted_provider_invalid_request',
+      lastValidationError: 'Validation is not implemented for this provider.',
+    });
+  }
+  try {
+    await dispatchHostedProvider({
+      provider: secret.provider,
+      model: model ?? defaultValidationModel(secret.provider),
+      input: 'Respond with ok.',
+      timeoutMs: 10000,
+      fetchImpl,
+      secretResolver: async () => decryptSecretValue(secret.encryptedSecret),
+      metadata: {
+        adapterType: 'hosted_provider',
+        target: `${secret.provider}:${defaultValidationModel(secret.provider)}`,
+        phase: 'validation',
+      },
+    });
+    return updateProjectSecretValidation({
+      projectId,
+      secretId,
+      validationStatus: 'valid',
+      lastValidationErrorClass: null,
+      lastValidationError: null,
+    });
+  } catch (error) {
+    const diagnostics = normalizeAdapterDiagnostics(error?.diagnostics, {
+      failureClass: error?.failureClass ?? classifyAdapterError(error),
+      rawErrorMessage: error instanceof Error ? error.message : String(error),
+      phase: 'validation',
+    });
+    return updateProjectSecretValidation({
+      projectId,
+      secretId,
+      validationStatus: 'invalid',
+      lastValidationErrorClass: diagnostics.failureClass,
+      lastValidationError: diagnostics.rawErrorMessage,
+    });
+  }
+}
+
 export async function listProjectSecrets({ projectId, userId }) {
-  const membership = await getProjectMembership(userId, projectId);
-  if (!membership) throw new Error('Project membership not found');
+  await requireProjectPermission({ userId, projectId, permission: 'manageSecrets' });
   if (useMemory()) {
     return Array.from(memory.projectSecrets.values())
       .filter((secret) => secret.projectId === projectId && secret.status !== 'deleted')
@@ -660,8 +868,7 @@ export async function listProjectSecrets({ projectId, userId }) {
 }
 
 export async function getProjectSecretMetadata({ projectId, secretId, userId }) {
-  const membership = await getProjectMembership(userId, projectId);
-  if (!membership) throw new Error('Project membership not found');
+  await requireProjectPermission({ userId, projectId, permission: 'manageSecrets' });
   const secret = await readProjectSecret(secretId);
   if (!secret || secret.projectId !== projectId || secret.status === 'deleted') return null;
   return projectSecretSummary(secret);
@@ -675,26 +882,33 @@ export async function deleteProjectSecret({ projectId, secretId, userId }) {
   return updateProjectSecretStatus({ projectId, secretId, userId, status: 'deleted' });
 }
 
-export async function resolveHostedProviderSecret({ projectId, secretRef, provider }) {
+export async function resolveHostedProviderSecret({ projectId, secretRef, provider, environment = 'production' }) {
   const secret = await readProjectSecret(secretRef);
   if (!secret || secret.projectId !== projectId || secret.status === 'deleted') {
     throw new AdapterExecutionError('Hosted provider secret not found.', {
-      failureClass: 'hosted_provider_secret_missing',
+      failureClass: 'hosted_provider_missing_secret',
       rawErrorMessage: 'Hosted provider secret not found.',
       phase: 'before_dispatch',
     });
   }
   if (secret.status !== 'active') {
     throw new AdapterExecutionError('Hosted provider secret is disabled.', {
-      failureClass: 'hosted_provider_secret_disabled',
+      failureClass: 'hosted_provider_invalid_secret',
       rawErrorMessage: 'Hosted provider secret is disabled.',
       phase: 'before_dispatch',
     });
   }
   if (secret.provider !== provider) {
     throw new AdapterExecutionError('Hosted provider secret provider mismatch.', {
-      failureClass: 'hosted_provider_secret_provider_mismatch',
+      failureClass: 'hosted_provider_invalid_secret',
       rawErrorMessage: 'Hosted provider secret provider mismatch.',
+      phase: 'before_dispatch',
+    });
+  }
+  if ((secret.environment ?? 'production') !== environment) {
+    throw new AdapterExecutionError('Hosted provider secret environment mismatch.', {
+      failureClass: 'hosted_provider_invalid_secret',
+      rawErrorMessage: 'Hosted provider secret environment mismatch.',
       phase: 'before_dispatch',
     });
   }
@@ -721,13 +935,28 @@ export async function createRunnerJob({
   executionTarget = null,
   localTunnelTokenNonce = null,
   localTunnelMaxResponseBytes = null,
+  runMode = 'sample',
+  ciGate = false,
 }) {
-  const membership = await getProjectMembership(userId, projectId);
-  if (!membership || !canMutateProject(membership.role)) {
-    throw new Error('Only owners and maintainers can create jobs');
-  }
+  const membership = await requireProjectPermission({ userId, projectId, permission: 'createRun' });
 
   const target = normalizeExecutionTarget(executionTarget, { runnerId, adapter });
+  if (target.type === 'hosted_provider') {
+    await requireProjectPermission({ userId, projectId, permission: 'useSecretBackedTargets' });
+  }
+  const entitlement = await checkRunEntitlement({
+    organizationId: membership.organizationId,
+    executionTarget: target,
+    pack,
+    runMode,
+    ciGate,
+  });
+  if (!entitlement.allowed) {
+    const error = new Error('Plan entitlement check failed');
+    error.statusCode = 402;
+    error.entitlement = entitlement;
+    throw error;
+  }
   if (target.type === 'hosted_provider') {
     await validateHostedProviderTargetForProject({ projectId, target });
   }
@@ -766,6 +995,7 @@ export async function createRunnerJob({
   const job = await persistJob({
     id: createId('job'),
     projectId,
+    organizationId: membership.organizationId,
     runnerId: resolvedRunnerId,
     userId,
     workspaceId: membership.workspaceId,
@@ -776,6 +1006,19 @@ export async function createRunnerJob({
     maxAttempts: normalizePositiveInteger(maxAttempts, 1),
     timeoutMs: normalizeNonNegativeInteger(timeoutMs, 0),
     retryBackoffMs: normalizeNonNegativeInteger(retryBackoffMs, 0),
+  });
+  await recordUsageEvent({
+    organizationId: membership.organizationId,
+    projectId,
+    runId: job.id,
+    eventType: 'run_created',
+    quantity: 1,
+    metadata: {
+      targetType: target.type,
+      runMode,
+      estimate: entitlement.estimate,
+    },
+    idempotencyKey: `${job.id}:run_created`,
   });
 
   return job;
@@ -838,6 +1081,18 @@ export async function cancelRunnerJob({ jobId, userId }) {
   }
   if (RUNNER_JOB_TERMINAL_STATUSES.has(job.status)) return job;
   const now = new Date().toISOString();
+  if (job.organizationId) {
+    await recordUsageEvent({
+      organizationId: job.organizationId,
+      projectId: job.projectId,
+      runId: job.id,
+      eventType: 'run_completed',
+      quantity: 1,
+      metadata: { status: 'canceled' },
+      idempotencyKey: `${job.id}:run_completed`,
+      createdAt: now,
+    });
+  }
   return updateJobStatus(jobId, {
     status: 'canceled',
     error: null,
@@ -1497,6 +1752,16 @@ async function dispatchRunnerJob(job) {
     },
   });
   if (!running || await isJobCanceled(job.id)) return readJob(job.id);
+  await recordUsageEvent({
+    organizationId: running.organizationId,
+    projectId: running.projectId,
+    runId: running.id,
+    eventType: 'run_started',
+    quantity: 1,
+    metadata: { attempt: running.attempts },
+    idempotencyKey: `${running.id}:run_started`,
+  });
+  const workerStartedAt = Date.now();
 
   const executionTarget = normalizeExecutionTarget(running.payload?.executionTarget, {
     runnerId: running.runnerId,
@@ -1512,6 +1777,48 @@ async function dispatchRunnerJob(job) {
         : executionTarget.type === 'hosted_provider'
           ? await runHostedProviderBackedJob(running, executionTarget)
           : failUnsupportedExecutionTarget(running, executionTarget);
+  const usageEstimate = estimateRunUsage({
+    pack: running.payload.pack,
+    runMode: running.payload?.executionTarget?.mode ?? 'sample',
+  });
+  await recordUsageEvent({
+    organizationId: running.organizationId,
+    projectId: running.projectId,
+    runId: running.id,
+    eventType: 'scenario_executed',
+    quantity: observations.length || usageEstimate.scenarioCount,
+    metadata: { observed: observations.length },
+    idempotencyKey: `${running.id}:scenario_executed`,
+  });
+  await recordUsageEvent({
+    organizationId: running.organizationId,
+    projectId: running.projectId,
+    runId: running.id,
+    eventType: 'mutation_executed',
+    quantity: usageEstimate.mutationCount,
+    metadata: { benchmarkId: usageEstimate.benchmarkId },
+    idempotencyKey: `${running.id}:mutation_executed`,
+  });
+  if (executionTarget.type === 'hosted_provider') {
+    await recordUsageEvent({
+      organizationId: running.organizationId,
+      projectId: running.projectId,
+      runId: running.id,
+      eventType: 'provider_call',
+      quantity: observations.length || usageEstimate.providerCallCount,
+      metadata: { provider: executionTarget.provider, targetType: executionTarget.type },
+      idempotencyKey: `${running.id}:provider_call`,
+    });
+  }
+  await recordUsageEvent({
+    organizationId: running.organizationId,
+    projectId: running.projectId,
+    runId: running.id,
+    eventType: 'execution_ms',
+    quantity: Date.now() - workerStartedAt,
+    metadata: { workerId: running.workerId ?? running.claimedBy ?? '' },
+    idempotencyKey: `${running.id}:execution_ms`,
+  });
 
   if (await isJobCanceled(job.id)) return readJob(job.id);
   const analysis = analyzeBundle(running.payload.pack, observations, {
@@ -1535,6 +1842,7 @@ async function dispatchRunnerJob(job) {
     snapshot,
     projectId: running.projectId,
     workspaceId: running.workspaceId,
+    organizationId: running.organizationId,
     userId: running.userId,
   });
 
@@ -1565,6 +1873,16 @@ async function dispatchRunnerJob(job) {
     nextRetryAt: null,
     finishedAt: completedAt,
     completedAt,
+  });
+  await recordUsageEvent({
+    organizationId: running.organizationId,
+    projectId: running.projectId,
+    runId: running.id,
+    reportId: saved.id,
+    eventType: 'run_completed',
+    quantity: 1,
+    metadata: { gate: snapshot.summary.verdict },
+    idempotencyKey: `${running.id}:run_completed`,
   });
   return readJob(job.id);
 }
@@ -1706,6 +2024,7 @@ async function runHostedProviderBackedJob(job, executionTarget) {
     projectId: job.projectId,
     secretRef: executionTarget.secretRef,
     provider: executionTarget.provider,
+    environment: executionTarget.environment ?? 'production',
   });
   let apiKey = resolved.secretValue;
   try {
@@ -1713,8 +2032,8 @@ async function runHostedProviderBackedJob(job, executionTarget) {
       provider: executionTarget.provider,
       model: executionTarget.model,
       secretRef: resolved.metadata.ref,
-      apiKey,
-      timeoutMs: job.timeoutMs || 30000,
+      secretResolver: async () => apiKey,
+      timeoutMs: job.timeoutMs || executionTarget.timeoutMs || 30000,
       mode: executionTarget.mode ?? 'sample',
     }, {
       environment: 'worker',
@@ -1772,6 +2091,18 @@ async function markRunnerJobFailure(jobId, error) {
   const canRetry = current.attempts < current.maxAttempts && adapterFailureRetryable(diagnostics.failureClass);
   const failedAt = canRetry ? null : new Date().toISOString();
   const nextRetryAt = canRetry ? retryReadyAt(current.retryBackoffMs) : null;
+  if (!canRetry && current.organizationId) {
+    await recordUsageEvent({
+      organizationId: current.organizationId,
+      projectId: current.projectId,
+      runId: current.id,
+      eventType: 'run_completed',
+      quantity: 1,
+      metadata: { status: 'failed', failureClass: diagnostics.failureClass },
+      idempotencyKey: `${current.id}:run_completed`,
+      createdAt: failedAt,
+    });
+  }
   return updateJobStatus(jobId, {
     status: canRetry ? 'retrying' : 'failed',
     error: message,
@@ -1959,17 +2290,19 @@ async function runFetchWithTimeout(fn, timeoutMs, message) {
   }
 }
 
-async function persistReport({ snapshot, projectId, workspaceId, userId }) {
+async function persistReport({ snapshot, projectId, workspaceId, organizationId = null, userId }) {
   const reportId = snapshot.id ?? createId('report');
+  const safeSnapshot = sanitizeDebugPayload(snapshot);
   const report = {
     id: reportId,
     projectId,
     workspaceId,
+    organizationId,
     createdBy: userId,
     gate: snapshot.summary?.verdict ?? 'warn',
-    summary: snapshot.summary ?? {},
+    summary: sanitizeDebugPayload(snapshot.summary ?? {}),
     snapshot: {
-      ...snapshot,
+      ...safeSnapshot,
       id: reportId,
     },
     createdAt: new Date().toISOString(),
@@ -1982,13 +2315,13 @@ async function persistReport({ snapshot, projectId, workspaceId, userId }) {
 
   await ensureSchema();
   await query(
-    `insert into reports (id, project_id, workspace_id, created_by, gate, summary, snapshot)
-     values ($1, $2, $3, $4, $5, $6, $7)
+    `insert into reports (id, project_id, workspace_id, organization_id, created_by, gate, summary, snapshot)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
      on conflict (id) do update set
        gate = excluded.gate,
        summary = excluded.summary,
        snapshot = excluded.snapshot`,
-    [report.id, projectId, workspaceId, userId, report.gate, report.summary, report.snapshot],
+    [report.id, projectId, workspaceId, organizationId, userId, report.gate, report.summary, report.snapshot],
   );
   return { id: report.id, storage: 'postgres' };
 }
@@ -1996,6 +2329,7 @@ async function persistReport({ snapshot, projectId, workspaceId, userId }) {
 async function persistJob({
   id,
   projectId,
+  organizationId = null,
   runnerId,
   userId,
   workspaceId,
@@ -2010,6 +2344,7 @@ async function persistJob({
   const job = {
     id,
     projectId,
+    organizationId,
     runnerId,
     userId,
     workspaceId,
@@ -2050,10 +2385,10 @@ async function persistJob({
   await ensureSchema();
   const result = await query(
     `insert into runner_jobs
-       (id, project_id, workspace_id, runner_id, created_by, status, idempotency_key, payload, result, error, history, attempts, max_attempts, timeout_ms, retry_backoff_ms)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, null, null, $9, $10, $11, $12, $13)
+       (id, project_id, organization_id, workspace_id, runner_id, created_by, status, idempotency_key, payload, result, error, history, attempts, max_attempts, timeout_ms, retry_backoff_ms)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, null, null, $10, $11, $12, $13, $14)
      returning *`,
-    [id, projectId, workspaceId, runnerId, userId, status, idempotencyKey, payload, job.history, attempts, maxAttempts, timeoutMs, retryBackoffMs],
+    [id, projectId, organizationId, workspaceId, runnerId, userId, status, idempotencyKey, payload, job.history, attempts, maxAttempts, timeoutMs, retryBackoffMs],
   );
   return normalizeJobRow(result.rows[0]);
 }
@@ -2214,6 +2549,253 @@ async function readPromotionCandidate(candidateId) {
   return result.rows[0] ? normalizePromotionCandidateRow(result.rows[0]) : null;
 }
 
+export async function listOrganizationMembers({ organizationId, userId }) {
+  await requireOrgPermission({ organizationId, userId, permission: 'manageOrgSettings' });
+  if (useMemory()) {
+    return Array.from(memory.organizationMembers.values())
+      .filter((member) => member.organizationId === organizationId && member.status !== 'removed')
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+  await ensureSchema();
+  const result = await query(
+    `select * from organization_members
+     where organization_id = $1 and status <> 'removed'
+     order by created_at asc`,
+    [organizationId],
+  );
+  return result.rows.map(normalizeOrganizationMemberRow);
+}
+
+export async function inviteOrganizationMember({ organizationId, userId, email, role = 'viewer' }) {
+  await requireOrgPermission({ organizationId, userId, permission: 'inviteMembers' });
+  const normalizedEmail = normalizeOptionalText(email)?.toLowerCase();
+  if (!normalizedEmail) throw new Error('Member email is required');
+  const normalizedRole = normalizeOrgRole(role);
+  const invitedUser = await findUserByEmail(normalizedEmail);
+  const now = new Date().toISOString();
+  const member = {
+    id: createId('om'),
+    organizationId,
+    userId: invitedUser?.id ?? null,
+    email: normalizedEmail,
+    role: normalizedRole,
+    status: invitedUser ? 'active' : 'invited',
+    invitedAt: invitedUser ? null : now,
+    joinedAt: invitedUser ? now : null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (useMemory()) {
+    memory.organizationMembers.set(organizationMemberKey(member), member);
+    return member;
+  }
+  await ensureSchema();
+  const result = await query(
+    `insert into organization_members
+       (id, organization_id, user_id, email, role, status, invited_at, joined_at, created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+     on conflict (organization_id, email) do update set
+       user_id = excluded.user_id,
+       role = excluded.role,
+       status = excluded.status,
+       invited_at = excluded.invited_at,
+       joined_at = excluded.joined_at,
+       updated_at = excluded.updated_at
+     returning *`,
+    [member.id, organizationId, invitedUser?.id ?? null, normalizedEmail, normalizedRole, member.status, member.invitedAt, member.joinedAt, now],
+  );
+  return normalizeOrganizationMemberRow(result.rows[0]);
+}
+
+export async function updateOrganizationMember({ organizationId, memberId, userId, role = null, status = null }) {
+  if (role) await requireOrgPermission({ organizationId, userId, permission: 'changeMemberRoles' });
+  if (status === 'removed') await requireOrgPermission({ organizationId, userId, permission: 'removeMembers' });
+  const existing = await readOrganizationMember(organizationId, memberId);
+  if (!existing) return null;
+  const nextRole = role ? normalizeOrgRole(role) : existing.role;
+  const nextStatus = status ? normalizeMemberStatus(status) : existing.status;
+  if (existing.role === 'owner' && (nextRole !== 'owner' || nextStatus === 'removed')) {
+    await assertNotLastOwner(organizationId, existing.id);
+  }
+  const now = new Date().toISOString();
+  if (useMemory()) {
+    const next = { ...existing, role: nextRole, status: nextStatus, updatedAt: now };
+    memory.organizationMembers.set(organizationMemberKey(next), next);
+    return next;
+  }
+  await ensureSchema();
+  const result = await query(
+    `update organization_members
+     set role = $3, status = $4, updated_at = $5
+     where organization_id = $1 and id = $2
+     returning *`,
+    [organizationId, memberId, nextRole, nextStatus, now],
+  );
+  return result.rows[0] ? normalizeOrganizationMemberRow(result.rows[0]) : null;
+}
+
+export async function removeOrganizationMember({ organizationId, memberId, userId }) {
+  return updateOrganizationMember({ organizationId, memberId, userId, status: 'removed' });
+}
+
+export async function updateOrganization({ organizationId, userId, name = null, status = null }) {
+  await requireOrgPermission({ organizationId, userId, permission: 'manageOrgSettings' });
+  const organization = await readOrganization(organizationId);
+  if (!organization) return null;
+  const now = new Date().toISOString();
+  const next = {
+    ...organization,
+    name: normalizeOptionalText(name) ?? organization.name,
+    slug: name ? slugify(name) : organization.slug,
+    status: normalizeOrgStatus(status ?? organization.status),
+    updatedAt: now,
+  };
+  if (useMemory()) {
+    memory.organizations.set(organizationId, next);
+    return organizationSummary(next, organizationMemberForUser(organizationId, userId));
+  }
+  await ensureSchema();
+  const result = await query(
+    `update organizations
+     set name = $2, slug = $3, status = $4, updated_at = $5
+     where id = $1
+     returning *`,
+    [organizationId, next.name, next.slug, next.status, now],
+  );
+  return result.rows[0] ? organizationSummary(normalizeOrganizationRow(result.rows[0]), await getOrganizationMemberForUser({ organizationId, userId })) : null;
+}
+
+export async function deleteOrganization({ organizationId, userId }) {
+  await requireOrgPermission({ organizationId, userId, permission: 'deleteOrganization' });
+  if (useMemory()) {
+    const organization = memory.organizations.get(organizationId);
+    if (!organization) return null;
+    const next = { ...organization, status: 'canceled', updatedAt: new Date().toISOString() };
+    memory.organizations.set(organizationId, next);
+    return organizationSummary(next, organizationMemberForUser(organizationId, userId));
+  }
+  await ensureSchema();
+  const result = await query(
+    `update organizations set status = 'canceled', updated_at = now() where id = $1 returning *`,
+    [organizationId],
+  );
+  return result.rows[0] ? organizationSummary(normalizeOrganizationRow(result.rows[0]), await getOrganizationMemberForUser({ organizationId, userId })) : null;
+}
+
+export async function getOrganizationPlan({ organizationId, userId }) {
+  const organization = await getOrganization({ organizationId, userId });
+  if (!organization) return null;
+  return {
+    organizationId,
+    currentPlan: organization.plan,
+    definition: planDefinition(organization.plan),
+  };
+}
+
+export async function updateOrganizationPlan({ organizationId, userId, plan }) {
+  await requireOrgPermission({ organizationId, userId, permission: 'manageBilling' });
+  const normalizedPlan = normalizePlan(plan);
+  const now = new Date().toISOString();
+  if (useMemory()) {
+    const organization = memory.organizations.get(organizationId);
+    if (!organization) return null;
+    const next = { ...organization, plan: normalizedPlan, updatedAt: now };
+    memory.organizations.set(organizationId, next);
+    return { organizationId, currentPlan: normalizedPlan, definition: planDefinition(normalizedPlan) };
+  }
+  await ensureSchema();
+  const result = await query(
+    `update organizations set plan = $2, updated_at = $3 where id = $1 returning *`,
+    [organizationId, normalizedPlan, now],
+  );
+  return result.rows[0] ? { organizationId, currentPlan: normalizedPlan, definition: planDefinition(normalizedPlan) } : null;
+}
+
+export async function recordUsageEvent({
+  organizationId,
+  projectId = null,
+  runId = null,
+  reportId = null,
+  eventType,
+  quantity = 1,
+  metadata = {},
+  idempotencyKey = null,
+}) {
+  if (!organizationId || !eventType) return null;
+  const event = {
+    id: createId('usage'),
+    organizationId,
+    projectId,
+    runId,
+    reportId,
+    eventType,
+    quantity: Number(quantity) || 0,
+    metadata: metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? sanitizeDebugPayload(metadata) : {},
+    idempotencyKey,
+    createdAt: new Date().toISOString(),
+  };
+  if (useMemory()) {
+    if (idempotencyKey) {
+      const duplicate = Array.from(memory.usageEvents.values()).find((item) => item.organizationId === organizationId && item.idempotencyKey === idempotencyKey);
+      if (duplicate) return duplicate;
+    }
+    memory.usageEvents.set(event.id, event);
+    return event;
+  }
+  await ensureSchema();
+  const result = await query(
+    `insert into usage_events
+       (id, organization_id, project_id, run_id, report_id, event_type, quantity, metadata, idempotency_key, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     on conflict (organization_id, idempotency_key) do nothing
+     returning *`,
+    [event.id, organizationId, projectId, runId, reportId, eventType, event.quantity, event.metadata, idempotencyKey, event.createdAt],
+  );
+  return result.rows[0] ? normalizeUsageEventRow(result.rows[0]) : null;
+}
+
+export async function getOrgUsageForPeriod({ organizationId, userId = null, periodStart = null, periodEnd = null } = {}) {
+  if (userId) await requireOrgPermission({ organizationId, userId, permission: 'viewRun' });
+  const period = {
+    periodStart: periodStart ?? monthPeriod().periodStart,
+    periodEnd: periodEnd ?? monthPeriod().periodEnd,
+  };
+  const events = await listUsageEventsForPeriod({ organizationId, ...period });
+  const totals = aggregateUsageEvents(events);
+  const organization = await readOrganization(organizationId);
+  const definition = planDefinition(organization?.plan ?? 'free');
+  return {
+    organizationId,
+    period,
+    plan: definition.plan,
+    limits: definition.limits,
+    features: definition.features,
+    totals,
+    remaining: {
+      monthlyRuns: Math.max(0, definition.limits.monthlyRuns - totals.runCount),
+      monthlyScenarios: Math.max(0, definition.limits.monthlyScenarios - totals.scenarioCount),
+      monthlyProviderCalls: Math.max(0, definition.limits.monthlyProviderCalls - totals.providerCallCount),
+      monthlyExecutionMinutes: Math.max(0, definition.limits.monthlyExecutionMinutes - totals.executionMinutes),
+    },
+    events,
+  };
+}
+
+export async function estimateOrganizationRunUsage({ organizationId, userId, pack, benchmark = null, tier = null, runMode = 'sample', mutationConfig = null, executionTarget = null, ciGate = false }) {
+  await requireOrgPermission({ organizationId, userId, permission: 'createRun' });
+  const usage = await getOrgUsageForPeriod({ organizationId });
+  const organization = await readOrganization(organizationId);
+  const estimate = estimateRunUsage({ benchmark, pack, tier, runMode, mutationConfig });
+  return evaluateRunEntitlements({
+    plan: organization?.plan ?? 'free',
+    usage: usage.totals,
+    estimate,
+    executionTarget,
+    runMode,
+    ciGate,
+  });
+}
+
 async function buildBenchmarkDetail(benchmark) {
   if (useMemory()) {
     const versions = benchmarkVersionsFor(benchmark.id).sort((left, right) => right.versionNumber - left.versionNumber);
@@ -2265,6 +2847,7 @@ async function getProjectMembership(userId, projectId) {
     if (!role) return null;
     return {
       projectId,
+      organizationId: project.organizationId ?? memory.workspaces.get(project.workspaceId)?.organizationId ?? null,
       workspaceId: project.workspaceId,
       role,
     };
@@ -2273,12 +2856,14 @@ async function getProjectMembership(userId, projectId) {
   await ensureSchema();
   const result = await query(
     `select p.id as project_id,
+            coalesce(p.organization_id, w.organization_id) as organization_id,
             p.workspace_id,
-            coalesce(pm.role, case when w.owner_user_id = $1 then 'owner' else null end) as role
+            coalesce(om.role, pm.role, case when w.owner_user_id = $1 then 'owner' else null end) as role
      from projects p
      join workspaces w on w.id = p.workspace_id
+     left join organization_members om on om.organization_id = coalesce(p.organization_id, w.organization_id) and om.user_id = $1 and om.status = 'active'
      left join project_memberships pm on pm.project_id = p.id and pm.user_id = $1
-     where p.id = $2 and (w.owner_user_id = $1 or pm.user_id = $1)
+     where p.id = $2 and (w.owner_user_id = $1 or pm.user_id = $1 or om.user_id = $1)
      limit 1`,
     [userId, projectId],
   );
@@ -2286,8 +2871,9 @@ async function getProjectMembership(userId, projectId) {
   if (!result.rows[0]) return null;
   return {
     projectId: result.rows[0].project_id,
+    organizationId: result.rows[0].organization_id,
     workspaceId: result.rows[0].workspace_id,
-    role: result.rows[0].role,
+    role: normalizeOrgRole(result.rows[0].role, 'viewer'),
   };
 }
 
@@ -2297,34 +2883,50 @@ function workspaceHasMember(workspaceId, userId) {
 
 function projectRoleFor(projectId, userId) {
   const membership = memory.memberships.get(`${projectId}:${userId}`);
-  if (membership) return membership.role;
   const project = memory.projects.get(projectId);
   if (!project) return null;
+  const orgMember = organizationMemberForUser(project.organizationId ?? memory.workspaces.get(project.workspaceId)?.organizationId, userId);
+  if (orgMember) return orgMember.role;
+  if (membership) return normalizeLegacyRole(membership.role);
   const workspace = memory.workspaces.get(project.workspaceId);
   return workspace?.ownerUserId === userId ? 'owner' : null;
 }
 
 function canMutateProject(role) {
-  return role === 'owner' || role === 'maintainer';
+  return ['owner', 'admin', 'developer', 'maintainer'].includes(role);
+}
+
+function normalizeLegacyRole(role) {
+  if (role === 'maintainer') return 'developer';
+  return normalizeOrgRole(role, role);
 }
 
 function normalizeOptionalText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-const SUPPORTED_HOSTED_PROVIDERS = new Set(['openai', 'anthropic', 'google', 'mistral', 'groq', 'together']);
+const SUPPORTED_HOSTED_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'custom']);
 const EXECUTABLE_HOSTED_PROVIDERS = new Set(['openai', 'anthropic']);
+const SECRET_ENVIRONMENTS = new Set(['development', 'staging', 'production']);
 
 function normalizeProvider(value) {
   const provider = normalizeOptionalText(value)?.toLowerCase() ?? '';
   return SUPPORTED_HOSTED_PROVIDERS.has(provider) ? provider : null;
 }
 
+function normalizeSecretEnvironment(value) {
+  const environment = normalizeOptionalText(value)?.toLowerCase() ?? 'production';
+  if (!SECRET_ENVIRONMENTS.has(environment)) throw new Error('Secret environment must be development, staging, or production');
+  return environment;
+}
+
+function defaultValidationModel(provider) {
+  if (provider === 'anthropic') return 'claude-3-5-haiku-latest';
+  return 'gpt-4.1-mini';
+}
+
 async function updateProjectSecretStatus({ projectId, secretId, userId, status }) {
-  const membership = await getProjectMembership(userId, projectId);
-  if (!membership || !canMutateProject(membership.role)) {
-    throw new Error('Only owners and maintainers can update project secrets');
-  }
+  await requireProjectPermission({ userId, projectId, permission: 'manageSecrets' });
   const existing = await readProjectSecret(secretId);
   if (!existing || existing.projectId !== projectId) return null;
   const next = { ...existing, status, updatedAt: new Date().toISOString() };
@@ -2339,6 +2941,41 @@ async function updateProjectSecretStatus({ projectId, secretId, userId, status }
      where id = $1 and project_id = $2
      returning *`,
     [secretId, projectId, status, next.updatedAt],
+  );
+  return result.rows[0] ? projectSecretSummary(normalizeProjectSecretRow(result.rows[0])) : null;
+}
+
+async function updateProjectSecretValidation({
+  projectId,
+  secretId,
+  validationStatus,
+  lastValidationErrorClass,
+  lastValidationError,
+}) {
+  const now = new Date().toISOString();
+  if (useMemory()) {
+    const existing = memory.projectSecrets.get(secretId);
+    if (!existing || existing.projectId !== projectId) return null;
+    const next = {
+      ...existing,
+      validationStatus,
+      lastValidationErrorClass,
+      lastValidationError,
+      updatedAt: now,
+    };
+    memory.projectSecrets.set(secretId, next);
+    return projectSecretSummary(next);
+  }
+  await ensureSchema();
+  const result = await query(
+    `update project_secrets
+     set validation_status = $3,
+         last_validation_error_class = $4,
+         last_validation_error = $5,
+         updated_at = $6
+     where id = $1 and project_id = $2
+     returning *`,
+    [secretId, projectId, validationStatus, lastValidationErrorClass, lastValidationError, now],
   );
   return result.rows[0] ? projectSecretSummary(normalizeProjectSecretRow(result.rows[0])) : null;
 }
@@ -2359,6 +2996,9 @@ async function validateHostedProviderTargetForProject({ projectId, target }) {
   }
   if (secret.provider !== target.provider) {
     throw new Error('Hosted provider secret provider mismatch.');
+  }
+  if ((secret.environment ?? 'production') !== (target.environment ?? 'production')) {
+    throw new Error('Hosted provider secret environment mismatch.');
   }
 }
 
@@ -2386,17 +3026,210 @@ function projectSecretSummary(secret) {
     id: secret.id,
     ref: secret.id,
     projectId: secret.projectId,
+    organizationId: secret.organizationId ?? null,
+    environment: secret.environment ?? 'production',
     provider: secret.provider,
+    name: secret.displayName,
     displayName: secret.displayName,
+    configured: secret.status === 'active',
+    maskedValue: secret.maskedPreview,
     maskedPreview: secret.maskedPreview,
     status: secret.status,
     validationStatus: secret.validationStatus ?? null,
     lastValidationErrorClass: secret.lastValidationErrorClass ?? null,
+    lastValidationError: secret.lastValidationError ?? null,
     createdBy: secret.createdBy ?? null,
     createdAt: secret.createdAt,
     updatedAt: secret.updatedAt,
     lastUsedAt: secret.lastUsedAt ?? null,
   };
+}
+
+async function checkRunEntitlement({ organizationId, executionTarget, pack, runMode = 'sample', ciGate = false }) {
+  const organization = await readOrganization(organizationId);
+  const usage = await getOrgUsageForPeriod({ organizationId });
+  const estimate = estimateRunUsage({ pack, runMode });
+  return evaluateRunEntitlements({
+    plan: organization?.plan ?? 'free',
+    usage: usage.totals,
+    estimate,
+    executionTarget,
+    runMode,
+    ciGate,
+  });
+}
+
+export async function requireOrgPermission({ organizationId, userId, permission }) {
+  const member = await getOrganizationMemberForUser({ organizationId, userId });
+  if (!member || member.status !== 'active') {
+    throw new Error('Organization membership not found');
+  }
+  if (!canRole(member.role, permission)) {
+    throw new Error(`Organization permission denied: ${permission}`);
+  }
+  return member;
+}
+
+async function requireProjectPermission({ userId, projectId, permission }) {
+  const membership = await getProjectMembership(userId, projectId);
+  if (!membership) throw new Error('Project membership not found');
+  if (!canRole(membership.role, permission)) {
+    throw new Error(`Organization permission denied: ${permission}`);
+  }
+  return membership;
+}
+
+function requireOrgPermissionSync({ organizationId, userId, permission }) {
+  const member = organizationMemberForUser(organizationId, userId);
+  if (!member || member.status !== 'active') throw new Error('Organization membership not found');
+  if (!canRole(member.role, permission)) throw new Error(`Organization permission denied: ${permission}`);
+  return member;
+}
+
+async function readOrganization(organizationId) {
+  if (!organizationId) return null;
+  if (useMemory()) return memory.organizations.get(organizationId) ?? null;
+  await ensureSchema();
+  const result = await query('select * from organizations where id = $1 limit 1', [organizationId]);
+  return result.rows[0] ? normalizeOrganizationRow(result.rows[0]) : null;
+}
+
+async function getOrganizationMemberForUser({ organizationId, userId }) {
+  if (!organizationId || !userId) return null;
+  if (useMemory()) return organizationMemberForUser(organizationId, userId);
+  await ensureSchema();
+  const result = await query(
+    `select * from organization_members
+     where organization_id = $1 and user_id = $2 and status = 'active'
+     limit 1`,
+    [organizationId, userId],
+  );
+  return result.rows[0] ? normalizeOrganizationMemberRow(result.rows[0]) : null;
+}
+
+async function findUserByEmail(email) {
+  const normalizedEmail = normalizeOptionalText(email)?.toLowerCase();
+  if (!normalizedEmail) return null;
+  if (useMemory()) {
+    return Array.from(memory.users.values()).find((user) => String(user.email ?? '').toLowerCase() === normalizedEmail) ?? null;
+  }
+  await ensureSchema();
+  const result = await query('select * from users where lower(email) = $1 limit 1', [normalizedEmail]);
+  return result.rows[0] ? normalizeUserRow(result.rows[0]) : null;
+}
+
+function organizationMemberForUser(organizationId, userId) {
+  return Array.from(memory.organizationMembers.values()).find((member) => (
+    member.organizationId === organizationId
+    && member.userId === userId
+    && member.status === 'active'
+  )) ?? null;
+}
+
+async function readOrganizationMember(organizationId, memberId) {
+  if (useMemory()) {
+    return Array.from(memory.organizationMembers.values()).find((member) => member.organizationId === organizationId && member.id === memberId) ?? null;
+  }
+  await ensureSchema();
+  const result = await query(
+    `select * from organization_members where organization_id = $1 and id = $2 limit 1`,
+    [organizationId, memberId],
+  );
+  return result.rows[0] ? normalizeOrganizationMemberRow(result.rows[0]) : null;
+}
+
+async function assertNotLastOwner(organizationId, excludingMemberId) {
+  const owners = useMemory()
+    ? Array.from(memory.organizationMembers.values()).filter((member) => member.organizationId === organizationId && member.role === 'owner' && member.status === 'active' && member.id !== excludingMemberId)
+    : (await query(
+      `select id from organization_members
+       where organization_id = $1 and role = 'owner' and status = 'active' and id <> $2`,
+      [organizationId, excludingMemberId],
+    )).rows;
+  if (!owners.length) throw new Error('Organization must have at least one owner');
+}
+
+async function listUsageEventsForPeriod({ organizationId, periodStart, periodEnd }) {
+  if (useMemory()) {
+    return Array.from(memory.usageEvents.values())
+      .filter((event) => event.organizationId === organizationId)
+      .filter((event) => event.createdAt >= periodStart && event.createdAt < periodEnd)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+  await ensureSchema();
+  const result = await query(
+    `select * from usage_events
+     where organization_id = $1 and created_at >= $2 and created_at < $3
+     order by created_at asc`,
+    [organizationId, periodStart, periodEnd],
+  );
+  return result.rows.map(normalizeUsageEventRow);
+}
+
+function createOrganizationRecord({ name, plan = 'free', status = 'active', now = new Date().toISOString() }) {
+  return {
+    id: createId('org'),
+    name,
+    slug: uniqueMemoryOrgSlug(slugify(name)),
+    plan: normalizePlan(plan),
+    status: normalizeOrgStatus(status),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function organizationSummary(organization, member = null) {
+  return {
+    id: organization.id,
+    name: organization.name,
+    slug: organization.slug,
+    plan: normalizePlan(organization.plan),
+    status: organization.status,
+    role: member?.role ?? null,
+    permissions: member?.role ? rolePermissions(member.role) : {},
+    createdAt: organization.createdAt,
+    updatedAt: organization.updatedAt,
+  };
+}
+
+function organizationMemberKey(member) {
+  return `${member.organizationId}:${member.userId ?? member.email}`;
+}
+
+function userEmailFor(userId) {
+  return memory.users.get(userId)?.email ?? `${userId}@harnessamp.local`;
+}
+
+function uniqueMemoryOrgSlug(base) {
+  let slug = base || 'organization';
+  let suffix = 2;
+  const existing = new Set(Array.from(memory.organizations.values()).map((org) => org.slug));
+  while (existing.has(slug)) {
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return slug;
+}
+
+async function uniqueOrganizationSlug(base) {
+  let slug = base || 'organization';
+  let suffix = 2;
+  while (true) {
+    const existing = await query('select id from organizations where slug = $1 limit 1', [slug]);
+    if (!existing.rows[0]) return slug;
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
+}
+
+function normalizeOrgStatus(value) {
+  const status = String(value ?? 'active').toLowerCase();
+  return ['active', 'trialing', 'past_due', 'suspended', 'canceled'].includes(status) ? status : 'active';
+}
+
+function normalizeMemberStatus(value) {
+  const status = String(value ?? 'active').toLowerCase();
+  return ['active', 'invited', 'removed'].includes(status) ? status : 'active';
 }
 
 function normalizeAdapterConfig(value) {
@@ -2432,8 +3265,9 @@ function executionDescriptor(job) {
       type: target.type,
       provider: target.provider,
       model: target.model,
+      environment: target.environment ?? 'production',
       secretRef: target.secretRef,
-      timeoutMs: job.timeoutMs,
+      timeoutMs: job.timeoutMs || target.timeoutMs || 0,
     };
   }
   if (target.type === 'local_http_tunnel') {
@@ -2639,6 +3473,7 @@ function normalizeUserRow(row) {
 function normalizeWorkspaceRow(row) {
   return {
     id: row.id,
+    organizationId: row.organization_id ?? row.organizationId ?? null,
     name: row.name,
     ownerUserId: row.owner_user_id,
     createdAt: String(row.created_at),
@@ -2646,13 +3481,16 @@ function normalizeWorkspaceRow(row) {
 }
 
 function normalizeProjectRow(row) {
+  const role = row.role ? normalizeOrgRole(row.role, row.role) : null;
   return {
     id: row.id,
+    organizationId: row.organization_id ?? row.organizationId ?? null,
     workspaceId: row.workspace_id,
     name: row.name,
     slug: row.slug,
     createdBy: row.created_by,
-    role: row.role ?? null,
+    role,
+    permissions: role ? rolePermissions(role) : {},
     createdAt: String(row.created_at),
   };
 }
@@ -2675,6 +3513,7 @@ function normalizeReportRow(row) {
     id: row.id,
     projectId: row.project_id,
     workspaceId: row.workspace_id,
+    organizationId: row.organization_id ?? null,
     createdBy: row.created_by,
     gate: row.gate,
     summary: row.summary,
@@ -2687,6 +3526,7 @@ function normalizeFailureWorkflowRow(row) {
   return {
     id: row.id,
     projectId: row.project_id,
+    organizationId: row.organization_id ?? null,
     workspaceId: row.workspace_id,
     failureId: row.failure_id,
     status: row.status,
@@ -2734,6 +3574,7 @@ function normalizeJobRow(row) {
   return {
     id: row.id,
     projectId: row.project_id,
+    organizationId: row.organization_id ?? null,
     workspaceId: row.workspace_id,
     runnerId: row.runner_id,
     userId: row.created_by,
@@ -2772,17 +3613,62 @@ function normalizeProjectSecretRow(row) {
     id: row.id,
     projectId: row.project_id,
     workspaceId: row.workspace_id,
+    organizationId: row.organization_id ?? null,
+    environment: row.environment ?? 'production',
     provider: row.provider,
     displayName: row.display_name,
     maskedPreview: row.masked_preview,
     status: row.status,
     validationStatus: row.validation_status ?? null,
     lastValidationErrorClass: row.last_validation_error_class ?? null,
+    lastValidationError: row.last_validation_error ?? null,
     encryptedSecret: row.encrypted_secret,
     createdBy: row.created_by,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     lastUsedAt: row.last_used_at ? String(row.last_used_at) : null,
+  };
+}
+
+function normalizeOrganizationRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    plan: normalizePlan(row.plan),
+    status: normalizeOrgStatus(row.status),
+    createdAt: String(row.created_at ?? row.createdAt),
+    updatedAt: String(row.updated_at ?? row.updatedAt ?? row.created_at ?? row.createdAt),
+  };
+}
+
+function normalizeOrganizationMemberRow(row) {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    userId: row.user_id ?? null,
+    email: row.email,
+    role: normalizeOrgRole(row.role),
+    status: normalizeMemberStatus(row.status),
+    invitedAt: row.invited_at ? String(row.invited_at) : null,
+    joinedAt: row.joined_at ? String(row.joined_at) : null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function normalizeUsageEventRow(row) {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id ?? null,
+    runId: row.run_id ?? null,
+    reportId: row.report_id ?? null,
+    eventType: row.event_type,
+    quantity: Number(row.quantity ?? 0),
+    metadata: row.metadata ?? {},
+    idempotencyKey: row.idempotency_key ?? null,
+    createdAt: String(row.created_at),
   };
 }
 

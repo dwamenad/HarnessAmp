@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const routerSource = await readFile(new URL('../src/console/router.js', import.meta.url), 'utf8');
+const labelsSource = await readFile(new URL('../src/console/lib/labels.js', import.meta.url), 'utf8');
 const packCatalogSource = await readFile(new URL('../src/v2/domain-pack-catalog.js', import.meta.url), 'utf8');
 const styleSource = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
 const reportExportSource = await readFile(new URL('../src/console/report-export.js', import.meta.url), 'utf8');
@@ -134,29 +136,29 @@ test('web app splits the product landing page from the operator surface', () => 
     '/report/',
     'href="/dashboard"',
     '>Open console</a>',
-    'Try seeded demo',
+    'View seeded demo',
+    'Run sample demo',
     'Product preview',
     'Validate real AI agents before release.',
+    'Run benchmark packs against the agent you actually operate',
     'Connect the agent you operate.',
+    'Sample data first. Real execution when connected.',
     'Adapter contract kit',
     'Execution Targets',
     'renderExecutionTargets',
     'executionTargetRegistryRows',
+    'executionTargetTerms',
+    'readinessLabels',
     'targetReliabilityForRegistryTarget',
     'readinessStatusForTarget',
     'target-card__readiness',
-    'Healthy',
-    'Needs validation',
-    'Recently failing',
-    'Unstable',
-    'Ephemeral',
-    'Contract mismatch',
     'target-registry',
     'Registered runner',
     'Vercel AI SDK route',
     'Hosted BYOK unavailable',
     'Local tunnel doctor',
     'Validate endpoint',
+    'Target readiness',
     'contract version supported',
     'Expired or completed tunnels are not reusable.',
     'Demo vs real execution',
@@ -193,8 +195,12 @@ test('web app splits the product landing page from the operator surface', () => 
     'Release decision',
     'Release gate status',
     'Failure triage',
+    'ha-triage-list',
+    'categorized blockers',
     'Historical comparison',
     'Target reliability',
+    'lifecycleDisplayLabel',
+    'Release blocked',
     'Block release',
     'Review critical failures',
     'renderDashboardNextAction',
@@ -212,6 +218,19 @@ test('web app splits the product landing page from the operator surface', () => 
     "BYOK', 'gated",
     'Hosted BYOK \\(gated\\)',
   ].forEach((text) => assert.match(source, new RegExp(text)));
+  [
+    'Sample workspace',
+    'Connected project',
+    'Production run',
+    'Sample data',
+    'Real execution',
+    'Healthy',
+    'Needs validation',
+    'Recently failing',
+    'Unstable',
+    'Ephemeral',
+    'Contract mismatch',
+  ].forEach((text) => assert.match(labelsSource, new RegExp(text)));
   [
     'Launch the app',
     'Operational states',
@@ -358,6 +377,16 @@ test('saas start run supports end-to-end queued run flow', () => {
     'BenchmarkResult',
     'Full benchmark',
     'CI gate',
+    'run-launch-state',
+    'renderLaunchStateCallout',
+    'runLaunchState',
+    'Start worker run',
+    'Start sample preview',
+    'Validate the selected execution target before launch.',
+    'Local tunnel targets must use the public HTTPS forwarding URL.',
+    'canValidateExecutionTarget',
+    'hostedByokLaunchReady',
+    'isHttpsUrl',
     'renderBenchmarkAuthority',
     'renderBenchmarkContents',
     'renderGatePreview',
@@ -397,6 +426,9 @@ test('saas reports page exposes working export controls', () => {
     'reportPrintHtml',
     'Downloaded report CSV',
     'Downloaded Print HTML report',
+    'safeValidationMessage',
+    'Bearer \\[redacted\\]',
+    '\\[redacted-api-key\\]',
     'Benchmark',
     'Seeded sample rows stay labeled',
   ].forEach((text) => assert.match(source, new RegExp(text)));
@@ -457,7 +489,40 @@ test('saas console exposes strengthened operator controls', () => {
     'CI exit codes',
     'renderEnvironmentOverview',
     'production blocking',
+    'renderOrgOverview',
+    'renderOrgMembers',
+    'renderOrgUsage',
+    'renderOrgBilling',
+    'renderRunUsageEstimate',
+    'Estimated usage',
+    '/org/members',
+    '/org/usage',
+    '/org/billing',
+    'organization-select',
   ].forEach((text) => assert.match(source, new RegExp(text)));
+});
+
+test('saas sidebar nests organization administration', () => {
+  assert.match(routerSource, /export const saasNav = \[/);
+  assert.match(routerSource, /export const organizationNav = \[/);
+  assert.match(source, /organizationNavCollapsed: true/);
+  assert.match(source, /resolveRoute\(pathname/);
+  assert.match(labelsSource, /workspaceModeLabels/);
+  assert.match(labelsSource, /Sample workspace/);
+  assert.match(labelsSource, /Production run/);
+  assert.match(source, /renderSaasNavGroup\(route, 'Organization', 'OG', '\/org', organizationNav\)/);
+  assert.match(source, /organization-nav-toggle/);
+  assert.match(source, /aria-expanded="\$\{collapsed \? 'false' : 'true'\}"/);
+  assert.match(source, /const childItems = \[\[href, 'Overview', icon\], \.\.\.items\]/);
+  assert.match(source, /ha-nav-sub/);
+  assert.match(source, /organization-nav-sub/);
+  assert.match(routerSource, /\['\/org\/members', 'Members', 'MB'\]/);
+  assert.match(routerSource, /\['\/org\/usage', 'Usage', 'US'\]/);
+  assert.match(routerSource, /\['\/org\/billing', 'Billing', 'BL'\]/);
+  assert.match(routerSource, /\['\/team', 'Team', 'TM'\]/);
+  assert.match(source, /state\.organizationNavCollapsed = !state\.organizationNavCollapsed/);
+  assert.doesNotMatch(routerSource, /\['\/usage', 'Usage', 'UB'\]/);
+  assert.match(routerSource, /return '\/org\/usage'/);
 });
 
 test('saas console includes keyboard and motion accessibility styles', () => {
@@ -468,6 +533,13 @@ test('saas console includes keyboard and motion accessibility styles', () => {
     'ha-env-grid',
     'ha-audit-trail',
     'ha-policy-form',
+    'ha-launch-state',
+    'ha-triage-list',
+    'ha-nav-group',
+    'ha-nav-sub',
+    'is-section-active',
+    'is-collapsed',
+    'ha-nav-group__chevron',
   ].forEach((text) => assert.match(styleSource, new RegExp(text)));
 });
 

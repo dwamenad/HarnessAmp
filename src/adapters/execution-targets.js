@@ -1,6 +1,7 @@
 import { validateVercelAiSdkAdapterConfig } from './vercel-ai-sdk.js';
 
-const HOSTED_PROVIDER_TYPES = new Set(['openai', 'anthropic', 'google', 'mistral', 'groq', 'together']);
+const HOSTED_PROVIDER_TYPES = new Set(['openai', 'anthropic', 'gemini', 'custom']);
+const HOSTED_PROVIDER_ENVIRONMENTS = new Set(['development', 'staging', 'production']);
 const SECRET_KEY_PATTERN = /api[_-]?key|secret|token|authorization|password|credential/i;
 
 export function normalizeExecutionTarget(input = {}, legacy = {}) {
@@ -87,6 +88,8 @@ export function normalizeExecutionTarget(input = {}, legacy = {}) {
     const provider = stringOr(source.provider, '');
     const model = stringOr(source.model, '');
     const secretRef = stringOr(source.secretRef ?? source.secret_ref, '');
+    const environment = normalizeHostedEnvironment(source.environment);
+    const timeoutMs = positiveNumberOrNull(source.timeoutMs ?? source.timeout_ms);
     if (!HOSTED_PROVIDER_TYPES.has(provider)) throw new Error(`Unsupported hosted provider: ${provider || 'missing'}`);
     if (!model) throw new Error('hosted_provider execution target requires model.');
     if (!secretRef) throw new Error('hosted_provider execution target requires secretRef.');
@@ -95,11 +98,15 @@ export function normalizeExecutionTarget(input = {}, legacy = {}) {
       provider,
       model,
       secretRef,
+      environment,
+      timeoutMs,
       safeMetadata: {
         type,
         provider,
         model,
+        environment,
         secretRef,
+        timeoutMs,
         enabled: true,
       },
     };
@@ -133,7 +140,9 @@ export function executionTargetSafeMetadata(target) {
     reuseLabel: target.type === 'local_http_tunnel' ? 'Not reusable' : null,
     provider: target.provider ?? null,
     model: target.model ?? null,
+    environment: target.environment ?? null,
     secretRef: target.secretRef ?? null,
+    timeoutMs: target.timeoutMs ?? null,
   };
 }
 
@@ -200,4 +209,12 @@ function stringOr(value, fallback) {
 function positiveNumberOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function normalizeHostedEnvironment(value) {
+  const environment = stringOr(value, 'production');
+  if (!HOSTED_PROVIDER_ENVIRONMENTS.has(environment)) {
+    throw new Error('hosted_provider execution target environment must be development, staging, or production.');
+  }
+  return environment;
 }
