@@ -1,5 +1,6 @@
 import { benchmarkForRun, classifyBenchmarkRun, createBenchmarkSnapshot, evaluateBenchmarkGate, releaseDecisionForGate, scoreBenchmark } from '../benchmarks/registry.js';
 import { extractBenchmarkMetrics } from '../benchmarks/results.js';
+import { sanitizeDebugPayload } from '../adapters/contract.js';
 
 export function reportSlug(name, index = 0) {
   return `${String(name).toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/(^-|-$)/gu, '')}-${index + 1}`;
@@ -96,6 +97,7 @@ export function localRunReportPayload(run, context = {}) {
 }
 
 export function enrichReportPayload(report, context = {}) {
+  report = sanitizeDebugPayload(report);
   const critical = numericRunValue(report.criticalFailures);
   const failed = critical > 0 || report.status === 'review_required';
   const benchmark = report.benchmark ?? null;
@@ -157,6 +159,7 @@ export function enrichReportPayload(report, context = {}) {
 }
 
 export function reportCsv(report) {
+  report = sanitizeDebugPayload(report);
   const rows = [
     ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'release_gate_status', 'can_release', 'gate_reasons', 'blocking_failures', 'warnings', 'target_used', 'target_readiness', 'target_validation_state', 'target_run_success_rate', 'target_validation_success_rate', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'failure_class', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'triage_class', 'recommended_control'],
     ...(report.failureEvidence.length ? report.failureEvidence : [{}]).map((failure) => [
@@ -207,6 +210,7 @@ export function reportCsv(report) {
 }
 
 export function reportMarkdown(report) {
+  report = sanitizeDebugPayload(report);
   return `# ${report.name}
 
 - Project: ${report.project}
@@ -296,6 +300,7 @@ ${report.remediation.map((item) => `- ${item}`).join('\n')}
 }
 
 export function reportPrintHtml(report) {
+  report = sanitizeDebugPayload(report);
   const retrievalSection = report.retrievalEvidence ? `
   <section>
     <h2>RetrievalGuard Source Fidelity</h2>

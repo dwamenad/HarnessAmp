@@ -27,6 +27,23 @@ import {
   syncConsoleStateToRunReportState,
   upsertRun as upsertPersistedRun,
 } from './console/run-report-store.js';
+import {
+  endpointCheckStatusLabel,
+  executionTargetDisplayName,
+  executionTargetTerms,
+  readinessLabels,
+  validationLabel,
+  workerLifecycleLabels,
+  workspaceModeForState,
+} from './console/lib/labels.js';
+import {
+  isSaasNavActive,
+  metricHref,
+  organizationNav,
+  resolveRoute,
+  saasNav,
+  saasRouteLabels,
+} from './console/router.js';
 import { MUTATION_PACKS } from './mutations/registry.js';
 import { catalogCardRows, domainPackCatalog } from './v2/domain-pack-catalog.js';
 import { benchmarkForRun, getBenchmarkById, getGateProfile, getScoringProfile, listBenchmarks } from './benchmarks/registry.js';
@@ -146,25 +163,25 @@ const quickstart = [
 const executionTargetCards = [
   {
     title: 'Registered runner',
-    description: 'A private HTTP runner that executes benchmark scenarios inside your staging or production-like agent environment.',
+    description: 'A private runner that executes benchmark scenarios against the agent stack you already operate.',
     bestFor: 'Production and staging agents, internal copilots, RAG systems, and enterprise workflows.',
-    note: 'Production-grade path. Provider credentials stay in your infrastructure.',
+    note: 'Primary production path. Provider credentials stay in your infrastructure.',
   },
   {
     title: 'Vercel AI SDK route',
-    description: 'A Next.js or Vercel route that already owns provider credentials and returns HarnessAmp-compatible observations.',
+    description: 'A deployed Next.js or Vercel route that owns provider credentials and returns HarnessAmp observations.',
     bestFor: 'Deployed Vercel or Next.js apps using the AI SDK or adapter-compatible handlers.',
     note: 'Deployed adapter endpoint. HarnessAmp calls the route; your app keeps the keys.',
   },
   {
     title: 'Local HTTPS tunnel',
-    description: 'A short-lived HTTPS tunnel to an agent running on a developer machine, commonly ngrok but compatible with any HTTPS tunnel.',
+    description: 'A short-lived HTTPS tunnel to an agent running on a developer machine.',
     bestFor: 'Local adapter debugging and pre-production contract testing.',
     note: 'Local testing only. Keep the tunnel open during the run and close or rotate it afterward.',
   },
   {
     title: 'Hosted BYOK',
-    description: 'A convenience execution path where project-owned provider credentials can be referenced by worker-backed jobs.',
+    description: 'A gated execution path where approved projects reference saved encrypted provider credentials.',
     bestFor: 'Quick tests when encrypted project secret storage and the BYOK feature flag are enabled.',
     note: 'Feature-flagged path. Provider keys require encrypted project secret storage.',
   },
@@ -210,45 +227,11 @@ const runnerContract = [
 ];
 
 const proofStats = [
-  ['4', 'execution targets'],
+  ['4', 'target paths'],
   ['doctor', 'adapter validation'],
-  ['local', 'tunnel testing'],
+  ['local', 'ephemeral tunnels'],
   ['BYOK', 'gated'],
   ['worker', 'backed runs'],
-];
-
-const saasRouteLabels = {
-  '/dashboard': 'Dashboard',
-  '/harnesses': 'Harnesses',
-  '/harnesses/new': 'New Harness',
-  '/packs': 'Mutation Packs',
-  '/contracts': 'Contracts',
-  '/targets': 'Execution Targets',
-  '/runs/new': 'New Run',
-  '/runs/run-healthguard-2419': 'Run Progress',
-  '/runs/run-healthguard-2419/summary': 'Run Summary',
-  '/failures': 'Failures',
-  '/failures/fail-redflag-017': 'Failure Evidence',
-  '/compare': 'Compare Runs',
-  '/reports': 'Reports',
-  '/ci': 'CI / Runners',
-  '/usage': 'Usage & Billing',
-  '/team': 'Team',
-};
-
-const saasNav = [
-  ['/dashboard', 'Dashboard', 'DA'],
-  ['/harnesses', 'Harnesses', 'HA'],
-  ['/packs', 'Mutation Packs', 'MP'],
-  ['/contracts', 'Contracts', 'BC'],
-  ['/targets', 'Execution Targets', 'ET'],
-  ['/runs/new', 'New Run', 'NR'],
-  ['/failures', 'Failures', 'FE'],
-  ['/compare', 'Compare', 'CR'],
-  ['/reports', 'Reports', 'RP'],
-  ['/ci', 'CI / Runners', 'CI'],
-  ['/usage', 'Usage', 'UB'],
-  ['/team', 'Team', 'TM'],
 ];
 
 const saasMetrics = [
@@ -449,6 +432,8 @@ const defaultState = {
   analyticsEnabled: true,
   sessionStatus: 'loading',
   selectedWorkspaceId: '',
+  selectedOrganizationId: '',
+  organizationNavCollapsed: true,
   selectedProjectId: '',
   selectedRunnerId: '',
   executionTarget: 'runner',
@@ -460,6 +445,7 @@ const defaultState = {
   selectedSecretRef: '',
   secretDraftName: 'OpenAI dev key',
   secretDraftProvider: 'openai',
+  secretDraftEnvironment: 'production',
   secretDraftValue: '',
   workspaceDraftName: 'Workspace',
   projectDraftName: 'Active Project',
@@ -467,6 +453,10 @@ const defaultState = {
   runnerRegistrationEndpoint: '',
   runnerRegistrationSecret: '',
   workspaceProjects: [],
+  organizations: [],
+  organizationMembers: [],
+  organizationUsage: null,
+  organizationPlan: null,
   projectReports: [],
   projectRunners: [],
   projectSecrets: [],
@@ -632,18 +622,40 @@ function renderSaasSidebar(route) {
         <div><strong>HarnessAmp</strong><small>Reliability testing</small></div>
       </a>
       <nav class="ha-nav" aria-label="Console">
-        ${saasNav.map(([href, label, icon]) => {
-          const active = route.pathname === href
-            || (href === '/harnesses' && route.pathname.startsWith('/harnesses/'))
-            || (href === '/failures' && route.pathname.startsWith('/failures/'));
-          return `<a class="${active ? 'is-active' : ''}" href="${href}"><span>${icon}</span>${label}</a>`;
-        }).join('')}
+        ${saasNav.map((item) => renderSaasNavLink(route, item)).join('')}
+        ${renderSaasNavGroup(route, 'Organization', 'OG', '/org', organizationNav)}
       </nav>
       <div class="ha-sidebar__footer">
         <span class="ha-status-dot"></span>
         <div><strong>CI gate passing</strong><small>main baseline: 86</small></div>
       </div>
     </aside>
+  `;
+}
+
+function renderSaasNavLink(route, [href, label, icon], className = '') {
+  const active = isSaasNavActive(route, href);
+  const classes = [className, active ? 'is-active' : ''].filter(Boolean).join(' ');
+  const classAttr = classes ? ` class="${classes}"` : '';
+  const current = active ? ' aria-current="page"' : '';
+  return `<a${classAttr} href="${href}"${current}><span>${icon}</span>${label}</a>`;
+}
+
+function renderSaasNavGroup(route, label, icon, href, items) {
+  const childItems = [[href, 'Overview', icon], ...items];
+  const parentActive = route.pathname === href;
+  const sectionActive = parentActive || items.some(([itemHref]) => isSaasNavActive(route, itemHref));
+  const collapsed = Boolean(state.organizationNavCollapsed);
+  const parentClass = parentActive ? 'is-active' : sectionActive ? 'is-section-active' : '';
+  return `
+    <div class="ha-nav-group ${sectionActive ? 'is-open' : ''} ${collapsed ? 'is-collapsed' : ''}">
+      <button class="ha-nav-group__parent ${parentClass}" id="organization-nav-toggle" type="button" aria-expanded="${collapsed ? 'false' : 'true'}" aria-controls="organization-nav-sub">
+        <span>${icon}</span><strong>${escapeHtml(label)}</strong><em class="ha-nav-group__chevron" aria-hidden="true"></em>
+      </button>
+      <div class="ha-nav-sub" id="organization-nav-sub" aria-label="${escapeHtml(label)} navigation"${collapsed ? ' hidden' : ''}>
+        ${childItems.map((item) => renderSaasNavLink(route, item, 'ha-nav-sub__link')).join('')}
+      </div>
+    </div>
   `;
 }
 
@@ -663,6 +675,11 @@ function renderSaasRoute(route) {
   if (route.pathname === '/compare') return renderSaasCompare();
   if (route.pathname === '/reports') return renderSaasReports();
   if (route.pathname === '/ci') return renderSaasCi();
+  if (route.pathname === '/org') return renderOrgOverview();
+  if (route.pathname === '/org/members') return renderOrgMembers();
+  if (route.pathname === '/org/usage') return renderOrgUsage();
+  if (route.pathname === '/org/billing') return renderOrgBilling();
+  if (route.pathname === '/project/settings') return renderProjectSettings();
   if (route.pathname === '/usage') return renderSaasUsage();
   if (route.pathname === '/team') return renderSaasTeam();
   return renderSaasDashboard();
@@ -670,6 +687,11 @@ function renderSaasRoute(route) {
 
 function renderSaasDashboard() {
   const latestRun = latestCompletedLocalRun();
+  const workspaceMode = workspaceModeForState({
+    sessionStatus: state.sessionStatus,
+    selectedProjectId: state.selectedProjectId,
+    productionRun: Boolean(latestRun?.jobId && latestRun?.status === 'completed'),
+  });
   const dashboardMetrics = latestRun ? dashboardMetricsForRun(latestRun) : saasMetrics;
   const dashboardDecision = latestRun ? dashboardDecisionForRun(latestRun) : {
     label: 'Block release',
@@ -683,7 +705,7 @@ function renderSaasDashboard() {
           <h2>Release readiness</h2>
           <p>Review the current release gate, identify blockers, and move to the next operator action.</p>
         </div>
-        ${renderDataSourceStrip('Local preview', 'Seeded console state plus persisted browser actions.')}
+        ${renderDataSourceStrip(workspaceMode.label, workspaceMode.detail)}
       </div>
       ${renderReleaseDecision(dashboardDecision.label, dashboardDecision.detail, dashboardDecision.tone, [
         ['Review top failure', '/failures/fail-redflag-017'],
@@ -901,6 +923,7 @@ function renderSaasNewRun() {
   const selectedHarness = harnesses.find((harness) => harness.id === draft.harnessId) ?? harnesses[0];
   const eligibility = runEligibilityForBenchmark(selectedBenchmark, estimated);
   const preflight = runPreflightItems({ benchmark: selectedBenchmark, harness: selectedHarness, eligibility, draft });
+  const launchState = runLaunchState({ benchmark: selectedBenchmark, harness: selectedHarness, eligibility, draft });
   return `
     <section class="ha-page">
       <div class="ha-section-head"><div><h2>Configure Run</h2><p>Choose a benchmark, select an execution target, validate it, then launch a worker-backed run.</p></div>${renderDataSourceStrip(state.sessionStatus === 'authenticated' ? 'Live project data' : 'Local preview', state.sessionStatus === 'authenticated' ? 'Uses API-backed job queue.' : 'Persists run draft and preview runs in this browser.')}</div>
@@ -921,8 +944,9 @@ function renderSaasNewRun() {
             ${renderSelectFromObjects('Tier', runTierOptions().map((tier) => ({ value: tier.id, label: tier.label })), selectedTier.id, 'run-tier-select')}
             ${renderSelect('Fail condition', ['block on critical failures', 'block on high severity', 'block on score below threshold', 'never block'], draft.failCondition, 'run-fail-condition')}
           </details>
+          ${renderLaunchStateCallout(launchState)}
           <div class="ha-form-actions">
-            <button class="ha-primary" id="start-configured-run" type="button">Start Run</button>
+            <button class="ha-primary" id="start-configured-run" type="button" ${launchState.canLaunch ? '' : 'disabled'}>${escapeHtml(launchState.actionLabel)}</button>
             <a class="ha-secondary" href="/targets">Manage targets</a>
             <a class="ha-secondary" href="/runs/${escapeHtml(consoleState.activeRunId || 'run-healthguard-2419')}">View active run</a>
           </div>
@@ -934,6 +958,7 @@ function renderSaasNewRun() {
           ${renderSaasMetric('Release eligibility', eligibility.label, eligibility.detail, eligibility.tone)}
           ${renderSaasMetric('Estimated scenarios', estimated.scenarios, `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
           ${renderSaasMetric('Estimated evaluated observations', estimated.observations, 'response x contract checks', 'neutral')}
+          ${renderRunUsageEstimate({ estimated, draft })}
           ${renderPreflightChecklist(preflight)}
           ${renderRunTargetReadiness()}
           ${renderGatePreview(selectedBenchmark)}
@@ -972,7 +997,7 @@ function renderBenchmarkAuthority(benchmark, pack, tier) {
 
 function renderRunLaunchWorkflow() {
   const validation = state.endpointValidation;
-  const validationState = validation?.ok ? 'passed' : validation?.status === 'failed' ? 'failed' : 'pending';
+  const validationState = validationLabel(validation);
   const steps = [
     ['1', 'Benchmark', selectedBenchmarkForDraft(consoleState.runDraft)?.name ?? 'Choose benchmark'],
     ['2', 'Execution target', executionTargetDisplayName(state.executionTarget)],
@@ -992,15 +1017,30 @@ function renderRunLaunchWorkflow() {
   `;
 }
 
+function renderLaunchStateCallout(launchState) {
+  const items = launchState.reasons.length ? launchState.reasons : launchState.warnings;
+  return `
+    <div class="ha-launch-state ha-launch-state--${escapeHtml(launchState.tone)}" id="run-launch-state" aria-live="polite">
+      <div>
+        <span>${escapeHtml(launchState.badge)}</span>
+        <strong>${escapeHtml(launchState.title)}</strong>
+        <p>${escapeHtml(launchState.detail)}</p>
+      </div>
+      ${items.length ? `<ul>${items.slice(0, 3).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
+    </div>
+  `;
+}
+
 function renderRunExecutionTargetStep() {
+  const validateDisabled = canValidateExecutionTarget() ? '' : 'disabled';
   return `
     <section class="run-target-step" aria-labelledby="run-target-heading">
       <div class="ha-panel__head"><h3 id="run-target-heading">Execution target</h3><a href="/targets">Open registry</a></div>
       <div class="target-choice-grid">
-        ${renderTargetChoice('runner', 'Registered runner', 'Production-grade', 'Reusable runner endpoint. Provider keys stay in your infrastructure.')}
-        ${renderTargetChoice('vercel-ai-sdk', 'Vercel AI SDK route', 'Production-grade when deployed HTTPS', 'Adapter route that owns provider keys in your app environment.')}
-        ${renderTargetChoice('local-http-tunnel', 'Local HTTPS tunnel', 'Ephemeral · Run-scoped · Not reusable', 'Short-lived local validation target.')}
-        ${renderTargetChoice('hosted-provider', 'Hosted BYOK (gated)', 'Encrypted BYOK gated', 'Approved projects only, using encrypted project secrets.')}
+        ${renderTargetChoice('runner')}
+        ${renderTargetChoice('vercel-ai-sdk')}
+        ${renderTargetChoice('local-http-tunnel')}
+        ${renderTargetChoice('hosted-provider')}
       </div>
       ${state.executionTarget === 'runner' ? `<label><span>Runner</span><select id="runner-select">${renderRunnerOptions()}</select></label>` : ''}
       ${state.executionTarget === 'vercel-ai-sdk' ? `<label><span>Route URL or path</span><input id="vercel-ai-sdk-target" type="text" value="${escapeHtml(state.vercelAiSdkTarget)}" placeholder="https://app.example.com/api/harnessamp/agent" /></label>` : ''}
@@ -1014,27 +1054,29 @@ function renderRunExecutionTargetStep() {
         <div class="hosted-provider-controls">
           <label><span>Provider</span><select id="hosted-provider-select">${renderProviderOptions(state.hostedProvider)}</select></label>
           <label><span>Model</span><input id="hosted-provider-model" type="text" value="${escapeHtml(state.hostedProviderModel)}" placeholder="gpt-4.1-mini" /></label>
+          <label><span>Environment</span><select id="secret-draft-environment">${renderEnvironmentOptions(state.secretDraftEnvironment)}</select></label>
           <label><span>Saved key</span><select id="secret-select">${renderSecretOptions()}</select></label>
           <p class="session-muted">${escapeHtml(hostedByokAvailabilityMessage())}</p>
         </div>
       ` : ''}
       <div class="inline-actions">
-        <button class="button button--secondary" id="validate-endpoint" type="button">Validate endpoint</button>
+        <button class="button button--secondary" id="validate-endpoint" type="button" ${validateDisabled}>Validate endpoint</button>
       </div>
       ${renderEndpointValidationPanel()}
     </section>
   `;
 }
 
-function renderTargetChoice(value, title, badge, description) {
+function renderTargetChoice(value) {
+  const term = executionTargetTerms[value] ?? executionTargetTerms.runner;
   const checked = state.executionTarget === value;
   return `
     <label class="target-choice ${checked ? 'target-choice--selected' : ''}">
       <input type="radio" name="execution-target" value="${escapeHtml(value)}" ${checked ? 'checked' : ''} />
       <span>
-        <strong>${escapeHtml(title)}</strong>
-        <small>${escapeHtml(description)}</small>
-        <em>${escapeHtml(badge)}</em>
+        <strong>${escapeHtml(term.title)}</strong>
+        <small>${escapeHtml(term.detail)}</small>
+        <em>${escapeHtml(term.badge)}</em>
       </span>
     </label>
   `;
@@ -1043,25 +1085,118 @@ function renderTargetChoice(value, title, badge, description) {
 function renderRunTargetReadiness() {
   const target = currentExecutionTargetSummary();
   const validation = state.endpointValidation;
+  const validationMatches = endpointValidationMatchesCurrentTarget(validation);
+  const validationDetail = validationMatches
+    ? validation?.message ?? target.reason
+    : 'No current validation result for this selected target.';
   return `
     <div class="ha-preflight">
       <strong>Target readiness</strong>
       <ol>
         <li><span>${escapeHtml(target.name)}</span><small>${escapeHtml(target.grade)} / ${escapeHtml(target.reuse)}</small></li>
-        <li><span>${escapeHtml(validation?.ok ? 'Validation passed' : validation?.status === 'failed' ? 'Validation failed' : 'Validation pending')}</span><small>${escapeHtml(validation?.message ?? target.reason)}</small></li>
-        <li><span>Worker lifecycle</span><small>queued -> claimed -> running -> retrying -> completed / failed / canceled</small></li>
+        <li><span>${escapeHtml(validationMatches ? validationLabel(validation) : readinessLabels.needsValidation)}</span><small>${escapeHtml(validationDetail)}</small></li>
+        <li><span>Worker lifecycle</span><small>${workerLifecyclePreview.map((step) => workerLifecycleLabels[step] ?? step).join(' -> ')}</small></li>
       </ol>
     </div>
   `;
 }
 
+function renderRunUsageEstimate({ estimated, draft }) {
+  const usage = state.organizationUsage?.usage ?? seededUsagePayload();
+  const plan = state.organizationPlan?.definition ?? orgPlanDefinition(currentOrganization()?.plan ?? usage.plan ?? 'team');
+  const scenarioCount = Math.max(1, numericRunValue(estimated.scenarios));
+  const providerCallCount = state.executionTarget === 'hosted-provider' ? scenarioCount : 0;
+  const executionMinutes = Math.max(1, Math.ceil(scenarioCount * 0.08));
+  const reasons = [];
+  if (state.executionTarget === 'hosted-provider' && !plan.features.hostedByok) reasons.push('Hosted BYOK requires Starter or higher.');
+  if (draft.runMode === 'full' && !plan.features.fullBenchmarks) reasons.push('Full benchmark runs require Team or higher.');
+  if (draft.failCondition !== 'never block' && /ci|gate/i.test(draft.failCondition) && !plan.features.ciGates) reasons.push('CI gate enforcement requires Team or higher.');
+  const remaining = usage.remaining ?? {};
+  if (Number.isFinite(remaining.monthlyRuns) && remaining.monthlyRuns < 1) reasons.push('Monthly run quota is exhausted.');
+  if (Number.isFinite(remaining.monthlyScenarios) && remaining.monthlyScenarios < scenarioCount) reasons.push('Monthly scenario quota is too low for this run.');
+  if (Number.isFinite(remaining.monthlyProviderCalls) && remaining.monthlyProviderCalls < providerCallCount) reasons.push('Monthly provider-call quota is too low for this Hosted BYOK run.');
+  if (Number.isFinite(remaining.monthlyExecutionMinutes) && remaining.monthlyExecutionMinutes < executionMinutes) reasons.push('Monthly execution-minute quota is too low for this run.');
+  const blocked = reasons.length > 0;
+  return `
+    <div class="ha-preflight ha-usage-estimate">
+      <strong>Estimated usage</strong>
+      <ol>
+        <li><span>Plan</span><small>${escapeHtml(plan.label)} / ${blocked ? 'blocked before enqueue' : 'within current limits'}</small></li>
+        <li><span>${formatNumber(scenarioCount)} scenarios</span><small>${formatNumber(providerCallCount)} provider calls / ${formatNumber(executionMinutes)} execution minutes</small></li>
+        <li><span>Monthly remaining</span><small>${formatNumber(remaining.monthlyRuns ?? 0)} runs / ${formatNumber(remaining.monthlyScenarios ?? 0)} scenarios / ${formatNumber(remaining.monthlyProviderCalls ?? 0)} provider calls</small></li>
+        <li><span>${blocked ? 'Plan check' : 'Plan check'}</span><small>${escapeHtml(reasons[0] ?? 'This selection fits the current organization plan.')}</small></li>
+      </ol>
+    </div>
+  `;
+}
+
+function runLaunchState({ benchmark, harness, eligibility, draft }) {
+  const reasons = [];
+  const warnings = [];
+  const authenticatedWorkerRun = state.sessionStatus === 'authenticated' && Boolean(state.selectedProjectId);
+  const validation = state.endpointValidation;
+  const validationMatches = endpointValidationMatchesCurrentTarget(validation);
+  const targetReady = canDispatchExecutionTarget();
+  const targetSummary = currentExecutionTargetSummary();
+  const agentVersion = String(draft.agentVersion || harness?.agentVersion || '').trim();
+
+  if (!benchmark) reasons.push('Choose a benchmark so scoring and gate profiles are fixed.');
+  if (!harness) reasons.push('Choose a harness before launching the run.');
+  if (!agentVersion || agentVersion === 'unknown') warnings.push('Add an agent version to make history and comparisons useful.');
+  if (draft.runMode !== 'sample' && eligibility.tone !== 'passed') reasons.push('Use full scenario coverage for release-gate eligible runs.');
+
+  if (authenticatedWorkerRun) {
+    if (!targetReady) reasons.push(targetSummary.reason);
+    if (validation?.status === 'validating') reasons.push('Validation is still pending.');
+    else if (!validationMatches || !validation?.ok) reasons.push('Validate the selected execution target before launch.');
+  } else {
+    warnings.push('Local preview creates a sample run in this browser. Sign in and select a project to enqueue a worker-backed real run.');
+  }
+
+  const canLaunch = reasons.length === 0;
+  const sampleMode = draft.runMode === 'sample' || !authenticatedWorkerRun;
+  return {
+    canLaunch,
+    badge: sampleMode ? readinessLabels.sample : readinessLabels.realExecution,
+    title: canLaunch
+      ? (authenticatedWorkerRun ? 'Ready to enqueue worker-backed run' : 'Ready to create sample preview')
+      : 'Launch blocked',
+    detail: canLaunch
+      ? (authenticatedWorkerRun ? 'Benchmark, target, validation, and usage checks are ready.' : 'This run stays local and remains labeled as sample data.')
+      : reasons[0],
+    reasons,
+    warnings,
+    tone: canLaunch ? (warnings.length ? 'major' : 'passed') : 'critical',
+    actionLabel: authenticatedWorkerRun ? 'Start worker run' : 'Start sample preview',
+  };
+}
+
+function endpointValidationMatchesCurrentTarget(validation = state.endpointValidation) {
+  if (!validation) return false;
+  return validation.target === currentValidationTargetKey();
+}
+
+function currentValidationTargetKey() {
+  return state.executionTarget === 'local-http-tunnel' ? state.localTunnelUrl : state.executionTarget;
+}
+
+function canValidateExecutionTarget() {
+  if (!state.selectedProjectId || state.endpointValidation?.status === 'validating') return false;
+  if (state.executionTarget === 'local-http-tunnel') return isHttpsUrl(state.localTunnelUrl);
+  if (state.executionTarget === 'vercel-ai-sdk') return Boolean(state.vercelAiSdkTarget.trim());
+  if (state.executionTarget === 'hosted-provider') return canDispatchExecutionTarget();
+  return Boolean(state.selectedRunnerId);
+}
+
 function currentExecutionTargetSummary() {
   if (state.executionTarget === 'local-http-tunnel') {
+    const hasUrl = Boolean(state.localTunnelUrl.trim());
+    const https = isHttpsUrl(state.localTunnelUrl);
     return {
       name: 'Ephemeral local test target',
       grade: 'Local testing only',
       reuse: 'Run-scoped / Not reusable',
-      reason: state.localTunnelUrl ? 'Validate before enqueueing.' : 'Paste the HTTPS forwarding URL.',
+      reason: hasUrl && !https ? 'Local tunnel targets must use the public HTTPS forwarding URL.' : hasUrl ? 'Validate before enqueueing.' : 'Paste the HTTPS forwarding URL.',
     };
   }
   if (state.executionTarget === 'vercel-ai-sdk') {
@@ -1090,11 +1225,12 @@ function currentExecutionTargetSummary() {
   };
 }
 
-function executionTargetDisplayName(value) {
-  if (value === 'vercel-ai-sdk') return 'Vercel AI SDK route';
-  if (value === 'local-http-tunnel') return 'Local HTTPS tunnel';
-  if (value === 'hosted-provider') return 'Hosted BYOK';
-  return 'Registered runner';
+function isHttpsUrl(value) {
+  try {
+    return new URL(String(value ?? '').trim()).protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 function hostedByokAvailabilityMessage() {
@@ -1300,13 +1436,14 @@ function renderSaasRunProgress(runId = 'run-healthguard-2419') {
   const status = run.status;
   const progress = run.progress ?? (status === 'queued' ? 8 : status === 'running' ? 58 : status === 'failed' ? 41 : 100);
   const statusText = runLifecycleLabel(run);
+  const statusDisplay = lifecycleDisplayLabel(statusText);
   const jobMeta = run.jobId ? ` / Job ${run.jobId}` : '';
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)}</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(run.pack)} / ${escapeHtml(run.tierLabel)} / Started ${escapeHtml(run.started)}${escapeHtml(jobMeta)}. Run status: ${escapeHtml(statusText)}.</p></div><a class="ha-primary" href="/runs/${escapeHtml(id)}/summary">View Summary</a></div>
+      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)}</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(run.pack)} / ${escapeHtml(run.tierLabel)} / Started ${escapeHtml(run.started)}${escapeHtml(jobMeta)}. Run status: ${escapeHtml(statusDisplay)}.</p></div><a class="ha-primary" href="/runs/${escapeHtml(id)}/summary">View Summary</a></div>
       ${renderLifecycleRail(statusText)}
       <div class="ha-metrics">
-        ${renderSaasMetric('Run status', status, 'current state', status === 'completed' ? 'passed' : status === 'failed' ? 'critical' : 'warn')}
+        ${renderSaasMetric('Run status', statusDisplay, 'current state', status === 'completed' ? 'passed' : status === 'failed' ? 'critical' : 'warn')}
         ${renderSaasMetric('Progress', `${progress}%`, `${escapeHtml(run.observations)} observations evaluated`, status === 'completed' ? 'passed' : 'warn')}
         ${renderSaasMetric('Critical failures', run.critical, 'review required when nonzero', Number(run.critical) > 0 ? 'critical' : 'passed')}
         ${renderSaasMetric('Average latency', '1.84s', 'p95 3.1s', 'neutral')}
@@ -1385,24 +1522,51 @@ function renderFailureTriagePanel(report) {
     { label: 'Validation failures', count: 0, reasons: [] },
     { label: 'Worker lifecycle failures', count: 0, reasons: [] },
   ];
-  return `<article class="ha-panel"><h3>Failure triage</h3>${renderGovernanceList(buckets.map((bucket) => [bucket.label, `${bucket.count} - ${bucket.reasons.join('; ') || 'none'}`]))}</article>`;
+  return `
+    <article class="ha-panel">
+      <div class="ha-panel__head"><h3>Failure triage</h3><span>categorized blockers</span></div>
+      <div class="ha-triage-list">
+        ${buckets.map((bucket) => {
+          const reasonText = bucket.count ? bucket.reasons.join('; ') || 'Review evidence' : 'None recorded';
+          return `
+          <div class="${bucket.count ? 'has-failures' : ''}">
+            <span class="ha-badge ${statusClass(bucket.count ? 'critical' : 'passed')}">${escapeHtml(String(bucket.count))}</span>
+            <strong>${escapeHtml(bucket.label)}</strong>
+            <small>${escapeHtml(reasonText)}</small>
+          </div>
+        `;
+        }).join('')}
+      </div>
+    </article>
+  `;
 }
 
 function renderTargetReliabilityReportPanel(reliability) {
+  const targetReliability = reliability ?? {};
   return `<article class="ha-panel"><h3>Target reliability</h3>${renderGovernanceList([
-    ['Readiness', reliability.readinessStatus],
-    ['Validation success', reliability.validationSuccessRate],
-    ['Run success', reliability.runSuccessRate],
-    ['Last pass', reliability.lastPass],
-    ['Last fail', reliability.lastFail],
-    ['Failure classes', reliability.failureClasses?.join(', ') || 'none'],
-    ['Contract', reliability.contractVersion],
+    ['Readiness', targetReliability.readinessStatus ?? readinessLabels.needsValidation],
+    ['Validation success', targetReliability.validationSuccessRate ?? 'not recorded'],
+    ['Run success', targetReliability.runSuccessRate ?? 'not recorded'],
+    ['Last pass', targetReliability.lastPass ?? 'none'],
+    ['Last fail', targetReliability.lastFail ?? 'none'],
+    ['Failure classes', targetReliability.failureClasses?.join(', ') || 'none'],
+    ['Contract', targetReliability.contractVersion ?? 'unknown'],
   ])}</article>`;
 }
 
 function renderHistoricalComparisonPanel(report) {
   const comparison = report?.historicalComparison;
-  return `<article class="ha-panel"><h3>Historical comparison</h3><p>${escapeHtml(comparison?.summary ?? 'Complete the same benchmark twice with the same target and agent version to compare improved/regressed state.')}</p></article>`;
+  const status = comparison?.status ?? 'not_available';
+  return `
+    <article class="ha-panel">
+      <div class="ha-panel__head"><h3>Historical comparison</h3><span class="ha-badge ${statusClass(status === 'regressed' ? 'critical' : status === 'improved' ? 'passed' : 'warn')}">${escapeHtml(humanizeDocSegment(status))}</span></div>
+      <p>${escapeHtml(comparison?.summary ?? 'Complete the same benchmark twice with the same target and agent version to compare improved/regressed state.')}</p>
+      ${comparison?.status && comparison.status !== 'not_available' ? renderGovernanceList([
+        ['Score change', formatSigned(comparison.scoreDelta ?? 0)],
+        ['Critical failure change', formatSigned(comparison.criticalDelta ?? 0)],
+      ]) : ''}
+    </article>
+  `;
 }
 
 function renderSaasFailuresList() {
@@ -1616,7 +1780,7 @@ function renderExecutionTargetCard(target) {
     <article class="target-card ${target.ephemeral ? 'target-card--ephemeral' : ''}">
       <div class="target-card__head">
         <div><span>${escapeHtml(target.typeLabel)}</span><strong>${escapeHtml(target.name)}</strong></div>
-        <span class="ha-badge ${statusClass(stateClass)}">${escapeHtml(target.validationState)}</span>
+        <span class="ha-badge ${statusClass(stateClass)}">${escapeHtml(validationStateDisplay(target.validationState))}</span>
       </div>
       <div class="target-card__readiness">
         <span class="ha-badge ${statusClass(readinessTone)}">${escapeHtml(reliability.readinessStatus)}</span>
@@ -1643,6 +1807,13 @@ function renderExecutionTargetCard(target) {
       ${target.ephemeral ? '<small class="target-card__warning">Ephemeral target. Reliability history is limited to this local test session.</small>' : ''}
     </article>
   `;
+}
+
+function validationStateDisplay(validationState) {
+  if (validationState === 'passed') return readinessLabels.healthy;
+  if (validationState === 'failed') return readinessLabels.recentlyFailing;
+  if (validationState === 'blocked') return readinessLabels.contractMismatch;
+  return readinessLabels.needsValidation;
 }
 
 function executionTargetRegistryRows() {
@@ -1827,12 +1998,11 @@ function jobsForRegistryTarget(target) {
 
 function readinessStatusForTarget({ target, jobs, failureClasses, validationAttempts, validationPasses, validationFailures, contractVersion }) {
   if (target.ephemeral && target.status === 'expired') return 'Expired';
-  if (target.ephemeral) return 'Ephemeral';
-  if (/mismatch|unsupported|invalid|schema/iu.test(`${contractVersion} ${failureClasses.join(' ')}`)) return 'Contract mismatch';
-  if (validationFailures || failureClasses.length) return jobs.length > 1 && jobs.some((job) => job.status === 'completed') ? 'Unstable' : 'Recently failing';
-  if (!validationAttempts || validationPasses === 0) return 'Needs validation';
-  if (target.grade === 'Production-grade') return 'Production-grade';
-  return 'Healthy';
+  if (target.ephemeral) return readinessLabels.ephemeral;
+  if (/mismatch|unsupported|invalid|schema/iu.test(`${contractVersion} ${failureClasses.join(' ')}`)) return readinessLabels.contractMismatch;
+  if (validationFailures || failureClasses.length) return jobs.length > 1 && jobs.some((job) => job.status === 'completed') ? readinessLabels.unstable : readinessLabels.recentlyFailing;
+  if (!validationAttempts || validationPasses === 0) return readinessLabels.needsValidation;
+  return readinessLabels.healthy;
 }
 
 function readinessBadgesForTarget(target, readinessStatus, contractVersion) {
@@ -1895,15 +2065,17 @@ function validationTimestampFor(targetType) {
 }
 
 function validationFailureClass() {
+  if (!endpointValidationMatchesCurrentTarget(state.endpointValidation)) return 'none';
   return state.endpointValidation?.checks?.find((check) => !check.ok)?.failureClass || 'none';
 }
 
 function validationContractVersion() {
+  if (!endpointValidationMatchesCurrentTarget(state.endpointValidation)) return 'unknown';
   return state.endpointValidation?.checks?.find((check) => check.contractVersion)?.contractVersion || 'unknown';
 }
 
 function validationMessageForLocalTunnel(job) {
-  if (state.endpointValidation?.message) return state.endpointValidation.message;
+  if (endpointValidationMatchesCurrentTarget(state.endpointValidation) && state.endpointValidation?.message) return state.endpointValidation.message;
   if (job?.status === 'failed') return job.lastError ?? job.error ?? 'Local tunnel run failed with safe diagnostics.';
   if (job && ['completed', 'canceled', 'cancelled'].includes(job.status)) return 'Historical local tunnel run retained; target is expired and not reusable.';
   return state.localTunnelUrl ? 'Validate this run-scoped local tunnel before enqueueing.' : 'No current tunnel URL configured.';
@@ -1911,7 +2083,7 @@ function validationMessageForLocalTunnel(job) {
 
 function safeTargetLabel(value) {
   if (!value) return 'not configured';
-  return String(value).replace(/(token|secret|key|password|credential|authorization)=([^&\s]+)/gi, '$1=[redacted]');
+  return safeValidationMessage(value);
 }
 
 function renderReportsTable(reportRows) {
@@ -2103,6 +2275,137 @@ function renderSaasCi() {
   `;
 }
 
+function renderOrgOverview() {
+  const org = currentOrganization();
+  const plan = state.organizationPlan?.definition ?? orgPlanDefinition(org?.plan);
+  return `
+    <section class="ha-page">
+      <div class="ha-section-head">
+        <div><h2>Organization</h2><p>Create teams, assign roles, and keep runs tied to a billing and usage boundary.</p></div>
+        <div class="ha-topbar__actions">${renderOrganizationSwitcher()}</div>
+      </div>
+      <div class="ha-metrics">
+        ${renderSaasMetric('Current plan', plan.label, `${plan.limits.monthlyScenarios.toLocaleString()} scenarios/month`, 'neutral')}
+        ${renderSaasMetric('Members', String(state.organizationMembers.length || 1), `${plan.limits.members} included`, 'neutral')}
+        ${renderSaasMetric('Projects', String(state.workspaceProjects.length || 1), `${plan.limits.projects} included`, 'neutral')}
+        ${renderSaasMetric('Hosted BYOK', plan.features.hostedByok ? 'Enabled' : 'Blocked', plan.features.hostedByok ? 'OpenAI and Anthropic' : 'Upgrade required', plan.features.hostedByok ? 'passed' : 'warn')}
+      </div>
+      <article class="ha-panel ha-panel--wide">
+        <div class="ha-panel__head"><h3>${escapeHtml(org?.name ?? 'Demo organization')}</h3><span>${escapeHtml(org?.role ?? 'viewer')}</span></div>
+        ${renderGovernanceList([
+          ['Organization slug', org?.slug ?? 'demo-organization'],
+          ['Status', org?.status ?? 'active'],
+          ['Plan', plan.label],
+          ['RBAC', 'owner, admin, developer, viewer'],
+        ])}
+      </article>
+    </section>
+  `;
+}
+
+function renderOrgMembers() {
+  const members = state.organizationMembers.length ? state.organizationMembers : [{
+    email: state.accountEmail,
+    role: currentOrganization()?.role ?? 'owner',
+    status: 'active',
+    invitedAt: '',
+    joinedAt: 'seeded',
+  }];
+  return `
+    <section class="ha-page">
+      <div class="ha-section-head">
+        <div><h2>Members</h2><p>Owners and admins can invite teammates. Viewers keep read-only access to runs and reports.</p></div>
+        <div class="ha-topbar__actions">${renderOrganizationSwitcher()}</div>
+      </div>
+      <article class="ha-panel">
+        <div class="hosted-provider-controls">
+          <label><span>Email</span><input id="org-invite-email" type="email" placeholder="teammate@example.com" /></label>
+          <label><span>Role</span><select id="org-invite-role">${['developer', 'viewer', 'admin'].map((role) => `<option value="${role}">${role}</option>`).join('')}</select></label>
+          <button type="button" class="button button--secondary" disabled>Invite member</button>
+        </div>
+      </article>
+      <article class="ha-panel">
+        <table class="ha-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Joined</th></tr></thead><tbody>${members.map((member) => `
+          <tr>
+            <td>${escapeHtml(member.email)}</td>
+            <td>${escapeHtml(member.role)}</td>
+            <td>${escapeHtml(member.status)}</td>
+            <td>${escapeHtml(formatJobDate(member.joinedAt) ?? member.joinedAt ?? member.invitedAt ?? 'invited')}</td>
+          </tr>
+        `).join('')}</tbody></table>
+      </article>
+    </section>
+  `;
+}
+
+function renderOrgUsage() {
+  const usage = state.organizationUsage ?? seededUsagePayload();
+  const limits = usage.limits ?? orgPlanDefinition(usage.plan).limits;
+  const totals = usage.totals ?? {};
+  return `
+    <section class="ha-page">
+      <div class="ha-section-head">
+        <div><h2>Usage</h2><p>Usage is metered by organization for runs, scenarios, provider calls, execution minutes, CI gates, and exports.</p></div>
+        <div class="ha-topbar__actions">${renderOrganizationSwitcher()}</div>
+      </div>
+      <div class="ha-metrics">
+        ${renderSaasMetric('Runs', String(totals.runCount ?? 0), `${usage.remaining?.monthlyRuns ?? limits.monthlyRuns} remaining`, 'neutral')}
+        ${renderSaasMetric('Scenarios', Number(totals.scenarioCount ?? 0).toLocaleString(), `${usage.remaining?.monthlyScenarios ?? limits.monthlyScenarios} remaining`, 'neutral')}
+        ${renderSaasMetric('Provider calls', Number(totals.providerCallCount ?? 0).toLocaleString(), `${usage.remaining?.monthlyProviderCalls ?? limits.monthlyProviderCalls} remaining`, 'neutral')}
+        ${renderSaasMetric('Execution minutes', Number(totals.executionMinutes ?? 0).toLocaleString(), `${usage.remaining?.monthlyExecutionMinutes ?? limits.monthlyExecutionMinutes} remaining`, 'neutral')}
+      </div>
+      <article class="ha-panel ha-panel--wide">
+        <div class="ha-panel__head"><h3>Monthly usage progress</h3><span>${escapeHtml(usage.period?.periodStart ?? 'current month')}</span></div>
+        <div class="ha-usage-bars">
+          ${renderUsageBar('Runs', totals.runCount ?? 0, limits.monthlyRuns)}
+          ${renderUsageBar('Scenarios', totals.scenarioCount ?? 0, limits.monthlyScenarios)}
+          ${renderUsageBar('Provider calls', totals.providerCallCount ?? 0, Math.max(1, limits.monthlyProviderCalls))}
+          ${renderUsageBar('Execution minutes', totals.executionMinutes ?? 0, limits.monthlyExecutionMinutes)}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderOrgBilling() {
+  const plan = state.organizationPlan?.definition ?? orgPlanDefinition(currentOrganization()?.plan);
+  return `
+    <section class="ha-page">
+      <div class="ha-section-head">
+        <div><h2>Billing</h2><p>Internal plan and entitlement substrate. Stripe checkout is intentionally not part of this build.</p></div>
+        <div class="ha-topbar__actions">${renderOrganizationSwitcher()}</div>
+      </div>
+      <article class="ha-panel ha-plan-current">
+        <div><span class="ha-badge ha-badge--passed">Current plan</span><h3>${escapeHtml(plan.label)}</h3><p>${plan.limits.monthlyRuns.toLocaleString()} monthly runs, ${plan.limits.monthlyScenarios.toLocaleString()} scenarios, ${plan.limits.monthlyProviderCalls.toLocaleString()} provider calls.</p></div>
+      </article>
+      <article class="ha-panel">
+        <div class="ha-panel__head"><h3>Entitlements</h3><span>server-enforced before run creation</span></div>
+        ${renderGovernanceList(Object.entries(plan.features).map(([feature, enabled]) => [feature, enabled ? 'enabled' : 'disabled']))}
+      </article>
+    </section>
+  `;
+}
+
+function renderProjectSettings() {
+  const role = activeProjectRole();
+  const permissions = currentProject()?.permissions ?? {};
+  return `
+    <section class="ha-page">
+      <div class="ha-section-head"><div><h2>Project settings</h2><p>Project-scoped access follows organization role permissions.</p></div></div>
+      <article class="ha-panel ha-panel--wide">
+        ${renderGovernanceList([
+          ['Project', currentProject()?.name ?? state.projectName],
+          ['Organization', currentOrganization()?.name ?? state.workspaceName],
+          ['Your role', role],
+          ['Can create runs', permissions.createRun ? 'yes' : 'no'],
+          ['Can manage secrets', permissions.manageSecrets ? 'yes' : 'no'],
+          ['Can export reports', permissions.exportReports ? 'yes' : 'no'],
+        ])}
+      </article>
+    </section>
+  `;
+}
+
 function benchmarkCiPreview() {
   const latest = [...runReportState.benchmarkResults]
     .sort((left, right) => String(right.createdAt ?? '').localeCompare(String(left.createdAt ?? '')))[0];
@@ -2260,6 +2563,7 @@ function renderSaasTeam() {
           <div class="hosted-provider-controls">
             <label><span>Name</span><input id="secret-draft-name" type="text" value="${escapeHtml(state.secretDraftName)}" /></label>
             <label><span>Provider</span><select id="secret-draft-provider">${renderProviderOptions(state.secretDraftProvider)}</select></label>
+            <label><span>Environment</span><select id="secret-draft-environment">${renderEnvironmentOptions(state.secretDraftEnvironment)}</select></label>
             <label><span>API key</span><input id="secret-draft-value" type="password" value="${escapeHtml(state.secretDraftValue)}" placeholder="Saved encrypted; never displayed again" /></label>
             <button class="button button--secondary" id="create-project-secret" type="button">Save encrypted key</button>
           </div>
@@ -2292,7 +2596,7 @@ function renderSaasRunsTableFor(runs) {
           <td data-label="Run"><a href="/runs/${escapeHtml(run.id)}">${escapeHtml(run.name)}</a></td>
           <td data-label="Harness">${escapeHtml(run.harness)}</td>
           <td data-label="Pack">${escapeHtml(run.pack)}</td>
-          <td data-label="Status"><span class="ha-badge ${statusClass(run.status)}">${escapeHtml(runLifecycleLabel(run))}</span></td>
+          <td data-label="Status"><span class="ha-badge ${statusClass(runLifecycleLabel(run))}">${escapeHtml(lifecycleDisplayLabel(runLifecycleLabel(run)))}</span></td>
           <td data-label="Decision">${renderDecisionBadge(releaseDecisionForRun(run), Number(run.critical) > 0 || run.status === 'failed' ? 'critical' : 'passed')}</td>
           <td data-label="Score">${escapeHtml(run.score)}</td>
           <td data-label="Critical">${escapeHtml(run.critical)}</td>
@@ -2500,22 +2804,15 @@ function renderPackMaturityBadges(evaluationModel) {
 }
 
 function renderLifecycleRail(current) {
-  return `<ol class="ha-lifecycle" aria-label="Run lifecycle">${runLifecycleSteps.map((step) => `<li class="${step === current ? 'is-current' : lifecycleStepComplete(step, current) ? 'is-complete' : ''}"><span></span>${escapeHtml(step)}</li>`).join('')}</ol>`;
+  return `<ol class="ha-lifecycle" aria-label="Run lifecycle">${runLifecycleSteps.map((step) => `<li class="${step === current ? 'is-current' : lifecycleStepComplete(step, current) ? 'is-complete' : ''}"><span></span>${escapeHtml(lifecycleDisplayLabel(step))}</li>`).join('')}</ol>`;
 }
 
 function renderGovernanceList(items) {
-  return `<dl class="ha-governance-list">${items.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>`;
+  return `<dl class="ha-governance-list">${items.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value ?? 'not recorded')}</dd></div>`).join('')}</dl>`;
 }
 
 function renderEmptyState(title, detail, href, actionLabel) {
   return `<div class="ha-empty-state"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(detail)}</p><a href="${escapeHtml(href)}">${escapeHtml(actionLabel)}</a></div>`;
-}
-
-function metricHref(label) {
-  if (/critical|failure/i.test(label)) return '/failures';
-  if (/robustness|baseline/i.test(label)) return '/compare';
-  if (/usage/i.test(label)) return '/usage';
-  return null;
 }
 
 function runLifecycleLabel(run) {
@@ -2524,6 +2821,12 @@ function runLifecycleLabel(run) {
   if (run.status === 'failed') return 'failed to execute';
   if (Number(run.critical) > 0) return 'failed quality gate';
   return 'completed';
+}
+
+function lifecycleDisplayLabel(status) {
+  if (status === 'failed to execute') return 'Failed';
+  if (status === 'failed quality gate') return 'Release blocked';
+  return workerLifecycleLabels[status] ?? humanizeDocSegment(status);
 }
 
 function lifecycleStepComplete(step, current) {
@@ -2882,14 +3185,20 @@ function updateRunBenchmark(benchmarkId) {
 }
 
 async function startConfiguredRun() {
-  if (state.sessionStatus === 'authenticated' && state.selectedProjectId && canDispatchExecutionTarget()) {
-    const currentTargetKey = state.executionTarget === 'local-http-tunnel' ? state.localTunnelUrl : state.executionTarget;
-    const matchesCurrentTarget = state.endpointValidation?.target === currentTargetKey;
-    if (!matchesCurrentTarget || !state.endpointValidation?.ok) {
-      showFeedback('Validate endpoint before starting a worker-backed run.');
-      await validateExecutionEndpoint();
-      if (!state.endpointValidation?.ok || state.endpointValidation?.target !== currentTargetKey) return;
-    }
+  const draft = consoleState.runDraft;
+  const selectedBenchmark = selectedBenchmarkForDraft(draft);
+  const harness = getConsoleHarnesses().find((item) => item.id === draft.harnessId) ?? getConsoleHarnesses()[0];
+  const pack = runnablePackOptions().find((item) => item.id === draft.packId) ?? runnablePackOptions()[0];
+  const tier = runTierOptions().find((item) => item.id === draft.tier) ?? runTierOptions()[0];
+  const launchState = runLaunchState({
+    benchmark: selectedBenchmark,
+    harness,
+    eligibility: runEligibilityForBenchmark(selectedBenchmark, estimateRunSelection(pack, tier)),
+    draft,
+  });
+  if (!launchState.canLaunch) {
+    showFeedback(launchState.reasons[0] ?? 'Resolve run readiness before launch.');
+    return;
   }
 
   const run = createLocalRunRecord();
@@ -2972,8 +3281,12 @@ async function validateExecutionEndpoint() {
     showFeedback('Select a project before validating an execution target.');
     return;
   }
-  if (state.executionTarget === 'local-http-tunnel' && !state.localTunnelUrl.trim()) {
-    showFeedback('Paste a local tunnel HTTPS forwarding URL before validation.');
+  if (state.executionTarget === 'local-http-tunnel' && !isHttpsUrl(state.localTunnelUrl)) {
+    showFeedback('Paste the public HTTPS forwarding URL before validating a local tunnel.');
+    return;
+  }
+  if (!canValidateExecutionTarget()) {
+    showFeedback(currentExecutionTargetSummary().reason);
     return;
   }
   state.endpointValidation = {
@@ -3455,10 +3768,11 @@ function normalizePositiveIntegerInput(value, fallback) {
 }
 
 function statusClass(status) {
-  if (/critical|failing|failed|block|new/u.test(status)) return 'ha-badge--critical';
-  if (/major|warn|queued|not tested|not run/u.test(status)) return 'ha-badge--major';
-  if (/running|checking/u.test(status)) return 'ha-badge--neutral';
-  if (/connected|completed|passing|passed|resolved/u.test(status)) return 'ha-badge--passed';
+  const value = String(status ?? '').toLowerCase();
+  if (/critical|failing|failed|block|mismatch|recently failing|release blocked|new/u.test(value)) return 'ha-badge--critical';
+  if (/major|warn|queued|not tested|not run|needs validation|ephemeral|validation pending/u.test(value)) return 'ha-badge--major';
+  if (/running|checking|claimed|retrying/u.test(value)) return 'ha-badge--neutral';
+  if (/connected|completed|passing|passed|resolved|healthy|release eligible/u.test(value)) return 'ha-badge--passed';
   return 'ha-badge--neutral';
 }
 
@@ -3487,10 +3801,10 @@ function renderHomeHero() {
     <section class="hero reveal">
       <div class="hero__copy">
         <h1>Validate real AI agents before release.</h1>
-        <p class="hero__lede">Connect your runner or deployed adapter, run mutation benchmarks, and ship with clear failure diagnostics and release gates.</p>
+        <p class="hero__lede">Run benchmark packs against the agent you actually operate, validate the adapter first, and get a release decision with failure evidence.</p>
         <div class="hero__actions">
-          <a class="button button--primary" href="/dashboard">Open console</a>
-          <a class="button button--secondary" href="/app#demo">Try seeded demo</a>
+          <a class="button button--primary" href="/runs/new">Test a real agent</a>
+          <a class="button button--secondary" href="/app#demo">View seeded demo</a>
           <a class="button button--secondary" href="/docs/adapters/adapter-contract">Adapter contract</a>
         </div>
       </div>
@@ -3518,7 +3832,7 @@ function renderExecutionTargetsSection() {
       <div class="section__intro">
         <p class="eyebrow">Execution targets</p>
         <h2>Connect the agent you operate.</h2>
-        <p>Use registered runners or deployed HTTPS routes for production. Local tunnels are short-lived test targets. Hosted BYOK is gated and uses encrypted project secrets.</p>
+        <p>An execution target is the safe place HarnessAmp sends benchmark scenarios. Use registered runners or deployed HTTPS adapter routes for production. Use local tunnels only for short-lived local testing. Hosted BYOK stays gated behind encrypted project secrets.</p>
       </div>
       ${renderExecutionTargetGrid()}
     </section>
@@ -3543,7 +3857,7 @@ function renderExecutionTargetGrid() {
 function renderProductSection() {
   return `
     <section id="product" class="section reveal">
-      <div class="section__intro"><p class="eyebrow">Core product</p><h2>Mutation benchmarks for agents that already run.</h2><p>See pass/fail gates, failed contracts, mutation failures, and reproducible diagnostics without changing frameworks.</p></div>
+      <div class="section__intro"><p class="eyebrow">What it tests</p><h2>Mutation benchmarks for agents that already run.</h2><p>HarnessAmp checks behavior under prompt pressure, tool drift, permission mistakes, retrieval conflicts, and unsafe boundary crossings without changing your agent framework.</p></div>
       <div class="module-grid">${modules.map(([title, detail]) => `<article><h3>${title}</h3><p>${detail}</p></article>`).join('')}</div>
     </section>
   `;
@@ -3555,10 +3869,10 @@ function renderHomeReportPreview(activeReportUrl) {
       <div class="section__intro">
         <p class="eyebrow">Report outputs</p>
         <h2>Reports that explain the gate.</h2>
-        <p>Every completed run captures pass/fail status, robustness gap, failed contracts, mutation failures, and exportable diagnostics.</p>
+        <p>Every completed run starts with release eligibility, then shows blockers, warnings, target readiness, failure classes, and exportable evidence.</p>
         <div class="hero__actions">
           <a class="button button--primary" href="/reports">Open reports</a>
-          <a class="button button--secondary" href="/app#demo">Try seeded demo</a>
+          <a class="button button--secondary" href="/app#demo">View seeded demo</a>
           <a class="button button--secondary" href="/docs/usage">Read usage docs</a>
         </div>
       </div>
@@ -3581,16 +3895,16 @@ function renderDemoSection({ preset, profile, profileLocked }) {
     <section id="demo" class="section demo-section reveal">
       <div class="section__intro">
         <p class="eyebrow">Product preview</p>
-        <h2>Seeded demo first. Real execution when connected.</h2>
-        <p>Preview the workflow with sample data, then validate your target and run through the worker queue.</p>
+        <h2>Sample data first. Real execution when connected.</h2>
+        <p>Preview scoring and reports with clearly labeled sample data, then connect an execution target for worker-backed real-agent runs.</p>
         <div class="try-path">
-          <span>01 Try seeded demo</span>
-          <span>02 Validate adapter</span>
-          <span>03 Run through worker</span>
+          <span>01 Inspect sample run</span>
+          <span>02 Validate target</span>
+          <span>03 Run real agent</span>
         </div>
         <div class="hero__actions">
-          <a class="button button--primary" href="#demo-console">Try the seeded demo</a>
-          <a class="button button--secondary" href="/dashboard">Configure execution target</a>
+          <a class="button button--primary" href="#demo-console">Run sample demo</a>
+          <a class="button button--secondary" href="/runs/new">Configure execution target</a>
           <a class="button button--secondary" href="/docs/adapters/adapter-contract">Open adapter contract docs</a>
         </div>
       </div>
@@ -3678,8 +3992,8 @@ function renderDemoExecutionModel() {
       <article>
         <p class="eyebrow">Demo vs real execution</p>
         <h3>Understand the workflow before connecting infrastructure.</h3>
-        <p>Demo mode uses sample benchmarks and seeded or sandboxed outputs so visitors can inspect scoring, failure evidence, reports, and release decisions quickly.</p>
-        <p>Real runs use execution targets connected to the user's own agent. Production-grade real-agent testing should use registered runners or deployed adapter endpoints. Local tunnels are for short-lived local testing only.</p>
+        <p>Sample mode uses seeded benchmark results so visitors can inspect scoring, failure evidence, reports, and release decisions quickly.</p>
+        <p>Real execution uses a registered runner or deployed adapter route connected to your own agent. Local tunnels are ephemeral local tests, not reusable production targets.</p>
       </article>
       <article>
         <p class="eyebrow">Adapter readiness check</p>
@@ -3867,6 +4181,7 @@ function renderWorkspaceSection(isAuthed) {
               <div class="hosted-provider-controls">
                 <label><span>Provider</span><select id="hosted-provider-select">${renderProviderOptions(state.hostedProvider)}</select></label>
                 <label><span>Model</span><input id="hosted-provider-model" type="text" value="${escapeHtml(state.hostedProviderModel)}" placeholder="gpt-4.1-mini" /></label>
+                <label><span>Environment</span><select id="secret-draft-environment">${renderEnvironmentOptions(state.secretDraftEnvironment)}</select></label>
                 <label><span>Saved key</span><select id="secret-select">${renderSecretOptions()}</select></label>
               </div>
             </div>
@@ -3876,6 +4191,7 @@ function renderWorkspaceSection(isAuthed) {
               <div class="hosted-provider-controls">
                 <label><span>Name</span><input id="secret-draft-name" type="text" value="${escapeHtml(state.secretDraftName)}" /></label>
                 <label><span>Provider</span><select id="secret-draft-provider">${renderProviderOptions(state.secretDraftProvider)}</select></label>
+                <label><span>Environment</span><select id="secret-draft-environment">${renderEnvironmentOptions(state.secretDraftEnvironment)}</select></label>
                 <label><span>API key</span><input id="secret-draft-value" type="password" value="${escapeHtml(state.secretDraftValue)}" placeholder="Saved encrypted; never displayed again" /></label>
                 <button class="button button--secondary" id="create-project-secret" type="button">Save encrypted key</button>
               </div>
@@ -4108,6 +4424,11 @@ function renderDocBreadcrumbs(page) {
 }
 
 function bindEvents() {
+  bindIfPresent('#organization-nav-toggle', 'click', () => {
+    state.organizationNavCollapsed = !state.organizationNavCollapsed;
+    persistState();
+    render();
+  });
   bindConsoleHarnessEvents();
   bindFailureWorkflowEvents();
   bindReportExportEvents();
@@ -4194,6 +4515,12 @@ function bindEvents() {
     render();
     runDiagnosis();
   });
+  bindIfPresent('#organization-select', 'change', async (event) => {
+    state.selectedOrganizationId = event.target.value;
+    persistState();
+    await refreshOrganizationResources();
+    render();
+  });
   bindIfPresent('#project-select', 'change', async (event) => {
     state.selectedProjectId = event.target.value;
     persistState();
@@ -4266,11 +4593,18 @@ function bindEvents() {
     state.secretDraftProvider = event.target.value;
     persistState();
   });
+  bindIfPresent('#secret-draft-environment', 'change', (event) => {
+    state.secretDraftEnvironment = event.target.value;
+    persistState();
+    rerenderTargetSurface();
+  });
   bindIfPresent('#secret-draft-value', 'input', (event) => {
     state.secretDraftValue = event.target.value;
     persistState();
   });
   bindIfPresent('#create-project-secret', 'click', createProjectSecretFromDraft);
+  document.querySelectorAll('.secret-validate').forEach((button) => button.addEventListener('click', () => updateProjectSecret(button.dataset.secretId, 'validate')));
+  document.querySelectorAll('.secret-rotate').forEach((button) => button.addEventListener('click', () => rotateProjectSecretFromDraft(button.dataset.secretId)));
   document.querySelectorAll('.secret-disable').forEach((button) => button.addEventListener('click', () => updateProjectSecret(button.dataset.secretId, 'disable')));
   document.querySelectorAll('.secret-delete').forEach((button) => button.addEventListener('click', () => updateProjectSecret(button.dataset.secretId, 'delete')));
   bindIfPresent('#dispatch-job', 'click', dispatchProjectJob);
@@ -5442,16 +5776,22 @@ function renderRunnerOptions() {
 }
 
 function renderProviderOptions(selected) {
-  return ['openai', 'anthropic', 'google', 'mistral', 'groq', 'together'].map((provider) => `
+  return ['openai', 'anthropic', 'gemini', 'custom'].map((provider) => `
     <option value="${provider}" ${provider === selected ? 'selected' : ''}>${escapeHtml(provider)}</option>
   `).join('');
 }
 
+function renderEnvironmentOptions(selected) {
+  return ['development', 'staging', 'production'].map((environment) => `
+    <option value="${environment}" ${environment === selected ? 'selected' : ''}>${escapeHtml(environment)}</option>
+  `).join('');
+}
+
 function renderSecretOptions() {
-  const active = state.projectSecrets.filter((secret) => secret.status === 'active' && secret.provider === state.hostedProvider);
+  const active = state.projectSecrets.filter((secret) => secret.status === 'active' && secret.provider === state.hostedProvider && (secret.environment ?? 'production') === state.secretDraftEnvironment);
   if (!active.length) return '<option value="">No saved keys</option>';
   return active.map((secret) => `
-    <option value="${escapeHtml(secret.ref ?? secret.id)}" ${(secret.ref ?? secret.id) === state.selectedSecretRef ? 'selected' : ''}>${escapeHtml(secret.displayName)} · ${escapeHtml(secret.maskedPreview)}</option>
+    <option value="${escapeHtml(secret.ref ?? secret.id)}" ${(secret.ref ?? secret.id) === state.selectedSecretRef ? 'selected' : ''}>${escapeHtml(secret.displayName ?? secret.name)} · ${escapeHtml(secret.maskedPreview ?? secret.maskedValue)} · ${escapeHtml(secretReadiness(secret))}</option>
   `).join('');
 }
 
@@ -5460,14 +5800,24 @@ function renderProjectSecretList() {
   return state.projectSecrets.map((secret) => `
     <article class="project-secret-item">
       <span>${escapeHtml(secret.provider)} · ${escapeHtml(secret.status)}</span>
-      <strong>${escapeHtml(secret.displayName)}</strong>
-      <small>${escapeHtml(secret.maskedPreview)} · updated ${escapeHtml(formatJobDate(secret.updatedAt) ?? secret.updatedAt)}</small>
+      <strong>${escapeHtml(secret.displayName ?? secret.name)}</strong>
+      <small>${escapeHtml(secret.environment ?? 'production')} · ${escapeHtml(secret.maskedPreview ?? secret.maskedValue)} · ${escapeHtml(secretReadiness(secret))} · updated ${escapeHtml(formatJobDate(secret.updatedAt) ?? secret.updatedAt)}</small>
       <div class="inline-actions">
+        <button class="button button--secondary secret-validate" data-secret-id="${escapeHtml(secret.ref ?? secret.id)}" type="button" ${secret.status !== 'active' ? 'disabled' : ''}>Validate</button>
+        <button class="button button--secondary secret-rotate" data-secret-id="${escapeHtml(secret.ref ?? secret.id)}" type="button" ${!state.secretDraftValue ? 'disabled' : ''}>Rotate</button>
         <button class="button button--secondary secret-disable" data-secret-id="${escapeHtml(secret.ref ?? secret.id)}" type="button" ${secret.status !== 'active' ? 'disabled' : ''}>Disable</button>
         <button class="button button--secondary secret-delete" data-secret-id="${escapeHtml(secret.ref ?? secret.id)}" type="button">Delete</button>
       </div>
     </article>
   `).join('');
+}
+
+function secretReadiness(secret) {
+  if (!secret || secret.status !== 'active') return 'missing secret';
+  if (secret.validationStatus === 'valid') return 'ready';
+  if (secret.validationStatus === 'invalid') return 'invalid secret';
+  if (secret.validationStatus === 'pending') return 'validation pending';
+  return secret.configured ? 'configured' : 'missing secret';
 }
 
 function renderJobObservabilityPanel() {
@@ -5777,8 +6127,58 @@ function currentWorkspace() {
   return (state.session?.workspaces ?? []).find((workspace) => workspace.id === state.selectedWorkspaceId) ?? null;
 }
 
+function currentOrganization() {
+  return (state.organizations ?? state.session?.organizations ?? []).find((organization) => organization.id === state.selectedOrganizationId)
+    ?? (state.organizations ?? state.session?.organizations ?? [])[0]
+    ?? null;
+}
+
 function currentProject() {
   return state.workspaceProjects.find((project) => project.id === state.selectedProjectId) ?? null;
+}
+
+function renderOrganizationSwitcher() {
+  const organizations = state.organizations ?? [];
+  if (!organizations.length) return '<span class="ha-badge">Demo organization</span>';
+  return `<label class="ha-inline-select"><span>Organization</span><select id="organization-select">${organizations.map((organization) => `
+    <option value="${escapeHtml(organization.id)}" ${organization.id === state.selectedOrganizationId ? 'selected' : ''}>${escapeHtml(organization.name)} · ${escapeHtml(organization.plan)}</option>
+  `).join('')}</select></label>`;
+}
+
+function orgPlanDefinition(plan = 'team') {
+  const plans = {
+    free: { label: 'Free', limits: { members: 1, projects: 1, monthlyRuns: 3, monthlyScenarios: 200, monthlyProviderCalls: 0, monthlyExecutionMinutes: 10 }, features: { hostedByok: false, ciGates: false, fullBenchmarks: false, reportExports: false, teamMembers: false, advancedTargets: false, priorityQueue: false, auditLogs: false } },
+    starter: { label: 'Starter', limits: { members: 3, projects: 1, monthlyRuns: 25, monthlyScenarios: 5000, monthlyProviderCalls: 5000, monthlyExecutionMinutes: 250 }, features: { hostedByok: true, ciGates: false, fullBenchmarks: false, reportExports: true, teamMembers: true, advancedTargets: false, priorityQueue: false, auditLogs: false } },
+    team: { label: 'Team', limits: { members: 15, projects: 5, monthlyRuns: 150, monthlyScenarios: 75000, monthlyProviderCalls: 75000, monthlyExecutionMinutes: 2500 }, features: { hostedByok: true, ciGates: true, fullBenchmarks: true, reportExports: true, teamMembers: true, advancedTargets: true, priorityQueue: false, auditLogs: false } },
+    business: { label: 'Business', limits: { members: 75, projects: 25, monthlyRuns: 1000, monthlyScenarios: 500000, monthlyProviderCalls: 500000, monthlyExecutionMinutes: 20000 }, features: { hostedByok: true, ciGates: true, fullBenchmarks: true, reportExports: true, teamMembers: true, advancedTargets: true, priorityQueue: true, auditLogs: false } },
+    enterprise: { label: 'Enterprise', limits: { members: 1000, projects: 1000, monthlyRuns: 1000000, monthlyScenarios: 100000000, monthlyProviderCalls: 100000000, monthlyExecutionMinutes: 1000000 }, features: { hostedByok: true, ciGates: true, fullBenchmarks: true, reportExports: true, teamMembers: true, advancedTargets: true, priorityQueue: true, auditLogs: true } },
+  };
+  return plans[plan] ?? plans.team;
+}
+
+function seededUsagePayload() {
+  const plan = orgPlanDefinition(currentOrganization()?.plan ?? 'team');
+  return {
+    plan: currentOrganization()?.plan ?? 'team',
+    period: { periodStart: 'current month' },
+    limits: plan.limits,
+    features: plan.features,
+    totals: {
+      runCount: 42,
+      scenarioCount: 38420,
+      mutationCount: 5103,
+      providerCallCount: 38420,
+      executionMinutes: 620,
+      reportExports: 18,
+      ciGateRuns: 12,
+    },
+    remaining: {
+      monthlyRuns: Math.max(0, plan.limits.monthlyRuns - 42),
+      monthlyScenarios: Math.max(0, plan.limits.monthlyScenarios - 38420),
+      monthlyProviderCalls: Math.max(0, plan.limits.monthlyProviderCalls - 38420),
+      monthlyExecutionMinutes: Math.max(0, plan.limits.monthlyExecutionMinutes - 620),
+    },
+  };
 }
 
 async function refreshSession() {
@@ -5792,12 +6192,19 @@ async function refreshSession() {
     }
     state.session = payload;
     state.sessionStatus = 'authenticated';
+    state.organizations = payload.organizations ?? [];
+    state.selectedOrganizationId = payload.currentOrganizationId || payload.organizations?.[0]?.id || state.selectedOrganizationId;
     state.selectedWorkspaceId = payload.currentWorkspaceId || payload.workspaces?.[0]?.id || state.selectedWorkspaceId;
     state.accountEmail = payload.user.email ?? state.accountEmail;
     await refreshProjectsForWorkspace(payload.defaultProjectId);
   } catch {
     state.session = null;
     state.sessionStatus = 'anonymous';
+    state.organizations = [];
+    state.organizationMembers = [];
+    state.organizationUsage = null;
+    state.organizationPlan = null;
+    state.selectedOrganizationId = '';
     state.workspaceProjects = [];
     state.projectReports = [];
     state.projectRunners = [];
@@ -5858,6 +6265,7 @@ async function refreshProjectResources() {
       state.selectedBenchmarkId = state.projectBenchmarks[0]?.id ?? '';
     }
     await refreshBenchmarkDetail();
+    await refreshOrganizationResources();
   } catch {
     state.projectReports = [];
     state.projectRunners = [];
@@ -5867,6 +6275,24 @@ async function refreshProjectResources() {
     state.benchmarkDetail = null;
   }
   persistState();
+}
+
+async function refreshOrganizationResources() {
+  if (state.sessionStatus !== 'authenticated' || !state.selectedOrganizationId) return;
+  try {
+    const [membersPayload, usagePayload, planPayload] = await Promise.all([
+      fetchJson(`/api/orgs/${encodeURIComponent(state.selectedOrganizationId)}/members`).catch(() => ({ members: [] })),
+      fetchJson(`/api/orgs/${encodeURIComponent(state.selectedOrganizationId)}/usage`).catch(() => ({ usage: null })),
+      fetchJson(`/api/orgs/${encodeURIComponent(state.selectedOrganizationId)}/plan`).catch(() => ({ plan: null })),
+    ]);
+    state.organizationMembers = membersPayload.members ?? [];
+    state.organizationUsage = usagePayload.usage ?? null;
+    state.organizationPlan = planPayload.plan ?? null;
+  } catch {
+    state.organizationMembers = [];
+    state.organizationUsage = null;
+    state.organizationPlan = null;
+  }
 }
 
 async function refreshBenchmarkDetail() {
@@ -5967,6 +6393,7 @@ async function createProjectSecretFromDraft() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         provider: state.secretDraftProvider,
+        environment: state.secretDraftEnvironment,
         name: state.secretDraftName,
         secretValue: state.secretDraftValue,
       }),
@@ -5986,12 +6413,37 @@ async function updateProjectSecret(secretId, action) {
     await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/secrets/${encodeURIComponent(secretId)}`, {
       method: action === 'delete' ? 'DELETE' : 'POST',
       headers: { 'content-type': 'application/json' },
-      body: action === 'delete' ? undefined : JSON.stringify({ action: 'disable' }),
+      body: action === 'delete' ? undefined : JSON.stringify({ action }),
     });
     if (state.selectedSecretRef === secretId) state.selectedSecretRef = '';
     await refreshProjectResources();
     renderWorkspacePanels();
-    showFeedback(action === 'delete' ? 'Provider key deleted' : 'Provider key disabled');
+    showFeedback(action === 'delete' ? 'Provider key deleted' : action === 'validate' ? 'Provider key validation updated' : 'Provider key disabled');
+  } catch (error) {
+    showFeedback(error.message);
+  }
+}
+
+async function rotateProjectSecretFromDraft(secretId) {
+  if (!state.selectedProjectId || !secretId || !state.secretDraftValue) {
+    showFeedback('Add the replacement key before rotating');
+    return;
+  }
+  try {
+    await fetchJson(`/api/projects/${encodeURIComponent(state.selectedProjectId)}/secrets/${encodeURIComponent(secretId)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: state.secretDraftProvider,
+        environment: state.secretDraftEnvironment,
+        name: state.secretDraftName,
+        secretValue: state.secretDraftValue,
+      }),
+    });
+    state.secretDraftValue = '';
+    await refreshProjectResources();
+    renderWorkspacePanels();
+    showFeedback('Provider key rotated');
   } catch (error) {
     showFeedback(error.message);
   }
@@ -6077,6 +6529,7 @@ function projectJobExecutionPayload() {
         type: 'hosted_provider',
         provider: state.hostedProvider,
         model: state.hostedProviderModel,
+        environment: state.secretDraftEnvironment,
         secretRef: state.selectedSecretRef,
       },
     };
@@ -6101,22 +6554,28 @@ function projectJobExecutionPayload() {
 
 function renderEndpointValidationPanel() {
   const validation = state.endpointValidation;
-  const items = endpointValidationItems(validation);
+  const matchesCurrentTarget = endpointValidationMatchesCurrentTarget(validation);
+  const items = endpointValidationItems(matchesCurrentTarget ? validation : null);
+  const message = validation?.message
+    ? validation.message
+    : matchesCurrentTarget
+      ? 'No blocking validation issue recorded.'
+      : 'Validate the selected execution target before launching a real run.';
   return `
     <div class="endpoint-validation" id="endpoint-validation-panel" data-state="${escapeHtml(validation?.status ?? 'pending')}">
       <div class="endpoint-validation__head">
-        <strong>Endpoint validation</strong>
-        <span>${escapeHtml(validationLabel(validation))}</span>
+        <strong>Target readiness</strong>
+        <span>${escapeHtml(matchesCurrentTarget ? validationLabel(validation) : readinessLabels.needsValidation)}</span>
       </div>
       <ul>
         ${items.map((item) => `
           <li class="endpoint-validation__item endpoint-validation__item--${escapeHtml(item.state)}">
             <span>${escapeHtml(item.label)}</span>
-            <strong>${escapeHtml(item.state)}</strong>
+            <strong>${escapeHtml(endpointCheckStatusLabel(item.state))}</strong>
           </li>
         `).join('')}
       </ul>
-      ${validation?.message ? `<p>${escapeHtml(validation.message)}</p>` : ''}
+      <p>${escapeHtml(message)}</p>
     </div>
   `;
 }
@@ -6137,20 +6596,25 @@ function endpointValidationItems(validation) {
   ];
 }
 
-function validationLabel(validation) {
-  if (!validation) return 'pending';
-  if (validation.status === 'validating') return 'pending';
-  return validation.ok ? 'pass' : 'fail';
-}
-
 function canDispatchExecutionTarget() {
   return state.executionTarget === 'vercel-ai-sdk'
-    ? Boolean(state.vercelAiSdkTarget)
+    ? Boolean(state.vercelAiSdkTarget.trim())
     : state.executionTarget === 'hosted-provider'
-      ? Boolean(state.hostedProvider && state.hostedProviderModel && state.selectedSecretRef)
+      ? hostedByokLaunchReady()
       : state.executionTarget === 'local-http-tunnel'
-        ? Boolean(state.localTunnelUrl)
+        ? isHttpsUrl(state.localTunnelUrl)
         : Boolean(state.selectedRunnerId);
+}
+
+function hostedByokLaunchReady() {
+  const usage = state.organizationUsage?.usage ?? seededUsagePayload();
+  const plan = state.organizationPlan?.definition ?? orgPlanDefinition(currentOrganization()?.plan ?? usage.plan ?? 'team');
+  const selected = state.projectSecrets.find((secret) => secret.id === state.selectedSecretRef || secret.ref === state.selectedSecretRef || secret.secretRef === state.selectedSecretRef);
+  return Boolean(plan.features.hostedByok
+    && state.hostedProvider
+    && state.hostedProviderModel.trim()
+    && state.selectedSecretRef
+    && selected?.status === 'active');
 }
 
 async function cancelActiveJob() {
@@ -6477,99 +6941,12 @@ function authStartHref() {
 }
 
 function getRoute(pathname = window.location.pathname) {
-  const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/u, '') : pathname;
-  const packMatch = normalizedPath.match(/^\/packs\/([^/]+)$/u);
-  if (packMatch) {
-    const packSlug = decodeURIComponent(packMatch[1]);
-    const pack = packBySlug(packSlug);
-    return {
-      kind: 'console',
-      routeType: 'pack-detail',
-      packSlug,
-      pathname: normalizedPath,
-      label: pack?.name ? `${pack.name} Pack` : 'Pack Detail',
-    };
-  }
-
-  const runSummaryMatch = normalizedPath.match(/^\/runs\/([^/]+)\/summary$/u);
-  if (runSummaryMatch) {
-    return {
-      kind: 'console',
-      routeType: 'run-summary',
-      runId: decodeURIComponent(runSummaryMatch[1]),
-      pathname: normalizedPath,
-      label: 'Run Summary',
-    };
-  }
-
-  const runProgressMatch = normalizedPath.match(/^\/runs\/([^/]+)$/u);
-  if (runProgressMatch && normalizedPath !== '/runs/new') {
-    return {
-      kind: 'console',
-      routeType: 'run-progress',
-      runId: decodeURIComponent(runProgressMatch[1]),
-      pathname: normalizedPath,
-      label: 'Run Progress',
-    };
-  }
-
-  const failureMatch = normalizedPath.match(/^\/failures\/([^/]+)$/u);
-  if (failureMatch) {
-    return {
-      kind: 'console',
-      routeType: 'failure',
-      failureId: decodeURIComponent(failureMatch[1]),
-      pathname: normalizedPath,
-      label: 'Failure Evidence',
-    };
-  }
-
-  if (Object.prototype.hasOwnProperty.call(saasRouteLabels, normalizedPath)) {
-    return {
-      kind: 'console',
-      routeType: 'static',
-      pathname: normalizedPath,
-      label: saasRouteLabels[normalizedPath],
-    };
-  }
-
-  const projectReportMatch = pathname.match(/^\/projects\/([^/]+)\/reports\/([^/]+)$/);
-  if (projectReportMatch) {
-    return {
-      kind: 'project-report',
-      projectId: decodeURIComponent(projectReportMatch[1]),
-      reportId: decodeURIComponent(projectReportMatch[2]),
-    };
-  }
-
-  const reportMatch = pathname.match(/^\/report\/([^/]+)$/);
-  if (reportMatch) {
-    return {
-      kind: 'report',
-      reportId: decodeURIComponent(reportMatch[1]),
-    };
-  }
-
-  if (normalizedPath === '/docs') {
-    return {
-      kind: 'docs',
-      slug: '',
-    };
-  }
-
-  const docsMatch = normalizedPath.match(/^\/docs\/(.+)$/u);
-  if (docsMatch) {
-    return {
-      kind: 'docs',
-      slug: decodeURIComponent(docsMatch[1]),
-    };
-  }
-
-  if (normalizedPath === '/app') {
-    return { kind: 'app' };
-  }
-
-  return { kind: 'home' };
+  return resolveRoute(pathname, {
+    packLabelForSlug: (packSlug) => {
+      const pack = packBySlug(packSlug);
+      return pack?.name ? `${pack.name} Pack` : 'Pack Detail';
+    },
+  });
 }
 
 function scrollToRouteTarget() {
@@ -6642,8 +7019,11 @@ function normalizeEndpointValidation(validation, ok, fallbackMessage = '') {
 
 function safeValidationMessage(message) {
   return String(message ?? '')
+    .replace(/bearer\s+[a-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(/\bsk-[a-z0-9_-]{8,}\b/gi, '[redacted-api-key]')
     .replace(/x-harnessamp-run-token\s*[:=]\s*[^&\s]+/gi, 'x-harnessamp-run-token=[redacted]')
-    .replace(/(authorization|token|secret|key|password|credential)=([^&\s]+)/gi, '$1=[redacted]');
+    .replace(/(authorization|token|secret|key|password|credential)=([^&\s]+)/gi, '$1=[redacted]')
+    .replace(/(authorization|token|secret|key|password|credential):\s*([^,\n]+)/gi, '$1: [redacted]');
 }
 
 function localTunnelSetupGuidance(message) {
@@ -6724,7 +7104,7 @@ function exportSaasReport(reportId, format) {
 function showReportExportStatus(title, message) {
   const panel = document.querySelector('#report-export-status');
   if (!panel) return;
-  panel.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
+  panel.innerHTML = `<strong>${escapeHtml(safeValidationMessage(title))}</strong><span>${escapeHtml(safeValidationMessage(message))}</span>`;
 }
 
 function reportPayload(reportId) {

@@ -6,7 +6,10 @@ import {
   disableProjectSecret,
   getProjectSecretMetadata,
   listProjectSecrets,
+  rotateProjectSecret,
+  validateProjectSecret,
 } from './_store.js';
+import { redactSecretText } from '../src/adapters/secrets.js';
 
 export default async function handler(request, response) {
   try {
@@ -53,14 +56,52 @@ export default async function handler(request, response) {
         response.status(200).json({ secret });
         return;
       }
+      if (secretId && (body.action === 'validate' || request.query?.action === 'validate')) {
+        const secret = await validateProjectSecret({
+          projectId,
+          secretId,
+          userId: session.user.id,
+          model: body.model,
+        });
+        if (!secret) {
+          response.status(404).json({ error: 'Secret not found' });
+          return;
+        }
+        response.status(200).json({ secret });
+        return;
+      }
       const secretValue = body.secretValue ?? body.apiKey ?? body.key;
       const secret = await createProjectSecret({
         projectId,
         userId: session.user.id,
         provider: body.provider,
+        environment: body.environment,
         name: body.name ?? body.displayName,
         secretValue,
       });
+      response.status(200).json({ secret });
+      return;
+    }
+
+    if (request.method === 'PATCH') {
+      if (!secretId) {
+        badRequest(response, 'Secret id is required');
+        return;
+      }
+      const body = await readJsonBody(request);
+      const secret = await rotateProjectSecret({
+        projectId,
+        secretId,
+        userId: session.user.id,
+        provider: body.provider,
+        environment: body.environment,
+        name: body.name ?? body.displayName,
+        secretValue: body.secretValue ?? body.apiKey ?? body.key,
+      });
+      if (!secret) {
+        response.status(404).json({ error: 'Secret not found' });
+        return;
+      }
       response.status(200).json({ secret });
       return;
     }
@@ -75,14 +116,14 @@ export default async function handler(request, response) {
       return;
     }
 
-    methodNotAllowed(response, ['GET', 'POST', 'DELETE']);
+    methodNotAllowed(response, ['GET', 'POST', 'PATCH', 'DELETE']);
   } catch (error) {
-    if (error instanceof Error && /Only owners and maintainers/.test(error.message)) {
+    if (error instanceof Error && (/Only owners and maintainers/.test(error.message) || /Organization permission denied|membership not found/i.test(error.message))) {
       response.status(403).json({ error: error.message });
       return;
     }
     if (error instanceof Error && /(required|disabled|configured|Provider|API key)/i.test(error.message)) {
-      badRequest(response, error.message);
+      badRequest(response, redactSecretText(error.message));
       return;
     }
     serverError(response, error);

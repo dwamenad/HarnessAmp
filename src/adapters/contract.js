@@ -5,13 +5,14 @@ export const ADAPTER_FAILURE_CLASSES = Object.freeze({
   REGISTERED_RUNNER_MISSING: 'registered_runner_missing',
   VERCEL_AI_SDK_ROUTE_MISSING: 'vercel_ai_sdk_route_missing',
   HOSTED_PROVIDER_DISABLED: 'hosted_provider_disabled',
-  HOSTED_PROVIDER_SECRET_MISSING: 'hosted_provider_secret_missing',
-  HOSTED_PROVIDER_SECRET_DISABLED: 'hosted_provider_secret_disabled',
-  HOSTED_PROVIDER_SECRET_PROVIDER_MISMATCH: 'hosted_provider_secret_provider_mismatch',
-  HOSTED_PROVIDER_AUTH_ERROR: 'hosted_provider_auth_error',
+  HOSTED_PROVIDER_MISSING_SECRET: 'hosted_provider_missing_secret',
+  HOSTED_PROVIDER_INVALID_SECRET: 'hosted_provider_invalid_secret',
+  HOSTED_PROVIDER_AUTH_FAILED: 'hosted_provider_auth_failed',
   HOSTED_PROVIDER_RATE_LIMITED: 'hosted_provider_rate_limited',
   HOSTED_PROVIDER_TIMEOUT: 'hosted_provider_timeout',
-  HOSTED_PROVIDER_INVALID_RESPONSE: 'hosted_provider_invalid_response',
+  HOSTED_PROVIDER_INVALID_REQUEST: 'hosted_provider_invalid_request',
+  HOSTED_PROVIDER_RESPONSE_INVALID: 'hosted_provider_response_invalid',
+  HOSTED_PROVIDER_NETWORK_ERROR: 'hosted_provider_network_error',
   HOSTED_PROVIDER_MODEL_MISSING: 'hosted_provider_model_missing',
   HOSTED_PROVIDER_UNKNOWN: 'hosted_provider_unknown_error',
   LOCAL_TUNNEL_UNREACHABLE: 'local_tunnel_unreachable',
@@ -46,10 +47,10 @@ const NON_RETRYABLE_FAILURES = new Set([
   ADAPTER_FAILURE_CLASSES.REGISTERED_RUNNER_MISSING,
   ADAPTER_FAILURE_CLASSES.VERCEL_AI_SDK_ROUTE_MISSING,
   ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_DISABLED,
-  ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_SECRET_MISSING,
-  ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_SECRET_DISABLED,
-  ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_SECRET_PROVIDER_MISMATCH,
-  ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_AUTH_ERROR,
+  ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_MISSING_SECRET,
+  ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_INVALID_SECRET,
+  ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_AUTH_FAILED,
+  ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_INVALID_REQUEST,
   ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_MODEL_MISSING,
   ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_REDIRECT_BLOCKED,
   ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_PRIVATE_IP_BLOCKED,
@@ -91,9 +92,8 @@ export function classifyAdapterError(error, context = {}) {
   if (/registered runner.*missing|runner not found/i.test(message)) return ADAPTER_FAILURE_CLASSES.REGISTERED_RUNNER_MISSING;
   if (/vercel ai sdk.*route.*missing|route target.*required/i.test(message)) return ADAPTER_FAILURE_CLASSES.VERCEL_AI_SDK_ROUTE_MISSING;
   if (/hosted provider.*disabled/i.test(message)) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_DISABLED;
-  if (/hosted provider.*secret.*missing|secret.*not found/i.test(message)) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_SECRET_MISSING;
-  if (/hosted provider.*secret.*disabled|secret.*disabled|secret.*deleted/i.test(message)) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_SECRET_DISABLED;
-  if (/provider.*mismatch/i.test(message)) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_SECRET_PROVIDER_MISMATCH;
+  if (/hosted provider.*secret.*missing|secret.*not found/i.test(message)) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_MISSING_SECRET;
+  if (/hosted provider.*secret.*disabled|secret.*disabled|secret.*deleted|provider.*mismatch|invalid secret/i.test(message)) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_INVALID_SECRET;
   if (/model.*missing|requires model/i.test(message)) return ADAPTER_FAILURE_CLASSES.HOSTED_PROVIDER_MODEL_MISSING;
   if (/local tunnel.*private|private.*blocked|metadata endpoint/i.test(message)) return ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_PRIVATE_IP_BLOCKED;
   if (/local tunnel.*redirect/i.test(message)) return ADAPTER_FAILURE_CLASSES.LOCAL_TUNNEL_REDIRECT_BLOCKED;
@@ -166,7 +166,9 @@ function redactText(value) {
   return text
     .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-[redacted]')
     .replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, 'sk-ant-[redacted]')
+    .replace(/AIza[A-Za-z0-9_-]{20,}/g, 'AIza[redacted]')
     .replace(/x-harnessamp-run-token\s*[:=]\s*[^&\s]+/gi, 'x-harnessamp-run-token=[redacted]')
+    .replace(/(authorization|x-api-key|api-key)\s*:\s*[^,\n\r}]+/gi, '$1: [redacted]')
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
     .replace(/(authorization|token|secret|key|password|credential|api[_-]?key)=([^&\s]+)/gi, '$1=[redacted]');
 }

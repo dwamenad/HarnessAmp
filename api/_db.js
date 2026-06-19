@@ -26,8 +26,33 @@ export async function ensureSchema() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists organizations (
+      id text primary key,
+      name text not null,
+      slug text not null unique,
+      plan text not null default 'free',
+      status text not null default 'active',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists organization_members (
+      id text primary key,
+      organization_id text not null references organizations(id) on delete cascade,
+      user_id text references users(id) on delete cascade,
+      email text not null,
+      role text not null,
+      status text not null,
+      invited_at timestamptz,
+      joined_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (organization_id, email)
+    );
+
     create table if not exists workspaces (
       id text primary key,
+      organization_id text references organizations(id) on delete cascade,
       name text not null,
       owner_user_id text not null references users(id) on delete cascade,
       created_at timestamptz not null default now()
@@ -35,6 +60,7 @@ export async function ensureSchema() {
 
     create table if not exists projects (
       id text primary key,
+      organization_id text references organizations(id) on delete cascade,
       workspace_id text not null references workspaces(id) on delete cascade,
       name text not null,
       slug text not null,
@@ -66,23 +92,29 @@ export async function ensureSchema() {
       id text primary key,
       project_id text not null references projects(id) on delete cascade,
       workspace_id text not null references workspaces(id) on delete cascade,
+      organization_id text references organizations(id) on delete cascade,
+      environment text not null default 'production',
       provider text not null,
       display_name text not null,
       masked_preview text not null,
       status text not null,
       validation_status text,
       last_validation_error_class text,
+      last_validation_error text,
       encrypted_secret jsonb not null,
       created_by text not null references users(id) on delete cascade,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       last_used_at timestamptz
     );
+    alter table project_secrets add column if not exists environment text not null default 'production';
+    alter table project_secrets add column if not exists last_validation_error text;
 
     create table if not exists reports (
       id text primary key,
       project_id text not null references projects(id) on delete cascade,
       workspace_id text not null references workspaces(id) on delete cascade,
+      organization_id text references organizations(id) on delete cascade,
       created_by text not null references users(id) on delete cascade,
       gate text not null,
       summary jsonb not null,
@@ -186,6 +218,7 @@ export async function ensureSchema() {
       id text primary key,
       project_id text not null references projects(id) on delete cascade,
       workspace_id text references workspaces(id) on delete cascade,
+      organization_id text references organizations(id) on delete cascade,
       runner_id text references runner_registrations(id) on delete cascade,
       created_by text not null references users(id) on delete cascade,
       report_id text references reports(id) on delete set null,
@@ -209,6 +242,7 @@ export async function ensureSchema() {
     );
 
     alter table runner_jobs add column if not exists workspace_id text references workspaces(id) on delete cascade;
+    alter table runner_jobs add column if not exists organization_id text references organizations(id) on delete cascade;
     alter table runner_jobs add column if not exists idempotency_key text;
     alter table runner_jobs add column if not exists history jsonb not null default '[]'::jsonb;
     alter table runner_jobs add column if not exists attempts integer not null default 0;
@@ -282,6 +316,25 @@ export async function ensureSchema() {
       payload jsonb not null,
       created_at timestamptz not null default now()
     );
+
+    create table if not exists usage_events (
+      id text primary key,
+      organization_id text not null references organizations(id) on delete cascade,
+      project_id text references projects(id) on delete cascade,
+      run_id text,
+      report_id text,
+      event_type text not null,
+      quantity numeric not null,
+      metadata jsonb not null default '{}'::jsonb,
+      idempotency_key text,
+      created_at timestamptz not null default now(),
+      unique (organization_id, idempotency_key)
+    );
+
+    alter table workspaces add column if not exists organization_id text references organizations(id) on delete cascade;
+    alter table projects add column if not exists organization_id text references organizations(id) on delete cascade;
+    alter table project_secrets add column if not exists organization_id text references organizations(id) on delete cascade;
+    alter table reports add column if not exists organization_id text references organizations(id) on delete cascade;
   `);
 
   schemaReady = true;

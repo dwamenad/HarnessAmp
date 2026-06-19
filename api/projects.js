@@ -166,6 +166,8 @@ export default async function handler(request, response) {
         maxAttempts: body.maxAttempts ?? 1,
         timeoutMs: body.timeoutMs ?? 0,
         retryBackoffMs: body.retryBackoffMs ?? 0,
+        runMode: body.mode ?? body.runMode ?? 'sample',
+        ciGate: Boolean(body.ciGate ?? body.ci_gate ?? body.mode === 'ci'),
       });
       response.status(200).json({
         jobId: job.id,
@@ -297,6 +299,14 @@ export default async function handler(request, response) {
       error instanceof Error
       && (error.message.includes('Only owners and maintainers') || error.message.includes('membership'))
     ) {
+      response.status(403).json({ error: error.message });
+      return;
+    }
+    if (error?.entitlement) {
+      response.status(error.statusCode ?? 402).json({ entitlement: error.entitlement, error: 'Run blocked by organization plan limits' });
+      return;
+    }
+    if (error instanceof Error && error.message.includes('Organization permission denied')) {
       response.status(403).json({ error: error.message });
       return;
     }

@@ -7,12 +7,29 @@ import benchmarksHandler from '../api/benchmarks.js';
 import failuresHandler from '../api/failures.js';
 import harnessSmokeHandler from '../api/harness-smoke.js';
 import jobsHandler from '../api/jobs.js';
+import orgsHandler from '../api/orgs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
 import secretsHandler from '../api/secrets.js';
 import { analyzeBundle, createDemoBundle } from '../src/core/engine.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
-import { listEventsForProject, seedDevSession } from '../api/_store.js';
+import {
+  createProject,
+  createRunnerRegistration,
+  createRunnerJob,
+  createWorkspace,
+  getOrCreateGitHubUser,
+  getOrgUsageForPeriod,
+  inviteOrganizationMember,
+  listEventsForProject,
+  listOrganizationMembers,
+  listProjectsForWorkspace,
+  listWorkspacesForUser,
+  removeOrganizationMember,
+  seedDevSession,
+  updateOrganizationMember,
+  updateOrganizationPlan,
+} from '../api/_store.js';
 import { HARNESSAMP_ADAPTER_CONTRACT_VERSION } from '../src/adapters/harnessamp-contract.js';
 
 const supportMvpPack = JSON.parse(
@@ -118,6 +135,188 @@ test('dev-auth session endpoint returns a seeded user context', async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.user.login, 'dev-user');
   assert.ok(Array.isArray(response.body.workspaces));
+});
+
+test('organization APIs expose owner context, members, usage, and plan estimates', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  await seedDevSession();
+
+  const createResponse = createMockResponse();
+  await orgsHandler({
+    method: 'POST',
+    headers: {},
+    query: {},
+    body: { name: 'API Org Controls' },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.body.organization.plan, 'free');
+
+  const orgId = createResponse.body.organization.id;
+  const membersResponse = createMockResponse();
+  await orgsHandler({
+    method: 'GET',
+    headers: {},
+    query: { orgId, resource: 'members' },
+  }, membersResponse);
+
+  assert.equal(membersResponse.statusCode, 200);
+  assert.equal(membersResponse.body.members[0].role, 'owner');
+
+  const estimateResponse = createMockResponse();
+  await orgsHandler({
+    method: 'POST',
+    headers: {},
+    query: { orgId, resource: 'estimate-run' },
+    body: {
+      executionTarget: { type: 'hosted_provider', provider: 'openai', secretRef: 'sec_missing' },
+      pack: createDemoBundle(),
+    },
+  }, estimateResponse);
+
+  assert.equal(estimateResponse.statusCode, 200);
+  assert.equal(estimateResponse.body.entitlement.allowed, false);
+  assert.ok(estimateResponse.body.entitlement.reasons.some((reason) => reason.code === 'plan_hosted_byok_required'));
+
+  const usageResponse = createMockResponse();
+  await orgsHandler({
+    method: 'GET',
+    headers: {},
+    query: { orgId, resource: 'usage' },
+  }, usageResponse);
+
+  assert.equal(usageResponse.statusCode, 200);
+  assert.equal(usageResponse.body.usage.plan, 'free');
+  assert.equal(usageResponse.body.usage.totals.runCount, 0);
+});
+
+test('organization RBAC follows active member roles and removal', async () => {
+  const owner = await getOrCreateGitHubUser({
+    githubId: 'owner-rbac-user',
+    login: 'owner-rbac-user',
+    name: 'Owner RBAC',
+    email: 'owner-rbac@harnessamp.local',
+    avatarUrl: null,
+  });
+  const developer = await getOrCreateGitHubUser({
+    githubId: 'developer-rbac-user',
+    login: 'developer-rbac-user',
+    name: 'Developer RBAC',
+    email: 'developer-rbac@harnessamp.local',
+    avatarUrl: null,
+  });
+  const workspace = await createWorkspace(owner.id, 'RBAC Org Workspace');
+  const project = await createProject(owner.id, workspace.id, 'RBAC Project');
+
+  const member = await inviteOrganizationMember({
+    organizationId: workspace.organizationId,
+    userId: owner.id,
+    email: developer.email,
+    role: 'developer',
+  });
+
+  assert.equal(member.status, 'active');
+  assert.equal(member.userId, developer.id);
+  assert.ok((await listWorkspacesForUser(developer.id)).some((item) => item.id === workspace.id));
+  assert.ok((await listProjectsForWorkspace(developer.id, workspace.id)).some((item) => item.id === project.id));
+  assert.equal((await listOrganizationMembers({ organizationId: workspace.organizationId, userId: owner.id })).length, 2);
+
+  const updated = await updateOrganizationMember({
+    organizationId: workspace.organizationId,
+    memberId: member.id,
+    userId: owner.id,
+    role: 'viewer',
+  });
+  assert.equal(updated.role, 'viewer');
+
+  await assert.rejects(
+    () => createProject(developer.id, workspace.id, 'Viewer Created Project'),
+    /Organization permission denied/,
+  );
+
+  await removeOrganizationMember({
+    organizationId: workspace.organizationId,
+    memberId: member.id,
+    userId: owner.id,
+  });
+  assert.equal((await listProjectsForWorkspace(developer.id, workspace.id)).length, 0);
+});
+
+test('plan enforcement blocks gated run types and usage metering tracks completed runs', async () => {
+  const previousHostedByok = process.env.HARNESSAMP_ENABLE_HOSTED_BYOK;
+  process.env.HARNESSAMP_ENABLE_HOSTED_BYOK = '1';
+  const owner = await getOrCreateGitHubUser({
+    githubId: 'usage-owner-user',
+    login: 'usage-owner-user',
+    name: 'Usage Owner',
+    email: 'usage-owner@harnessamp.local',
+    avatarUrl: null,
+  });
+  const workspace = await createWorkspace(owner.id, 'Usage Metering Workspace');
+  const project = await createProject(owner.id, workspace.id, 'Usage Metering Project');
+
+  const blockedHosted = await createRunnerJob({
+    projectId: project.id,
+    userId: owner.id,
+    pack: createDemoBundle(),
+    executionTarget: { type: 'hosted_provider', provider: 'openai', model: 'gpt-4.1-mini', secretRef: 'sec_missing' },
+  }).then(
+    () => null,
+    (error) => error,
+  );
+  assert.equal(blockedHosted.statusCode, 402);
+  assert.ok(blockedHosted.entitlement.reasons.some((reason) => reason.code === 'plan_hosted_byok_required'));
+
+  await updateOrganizationPlan({ organizationId: workspace.organizationId, userId: owner.id, plan: 'team' });
+  const runner = await createRunnerRegistration({
+    projectId: project.id,
+    userId: owner.id,
+    name: 'Usage HTTP Runner',
+    endpointUrl: 'https://runner.example.test/usage',
+  });
+
+  const originalFetch = globalThis.fetch;
+  const previousWorkerToken = process.env.WORKER_SERVICE_TOKEN;
+  const previousDevAuth = process.env.HARNESSAMP_DEV_AUTH;
+  try {
+    process.env.WORKER_SERVICE_TOKEN = 'usage-worker-token';
+    delete process.env.HARNESSAMP_DEV_AUTH;
+    globalThis.fetch = async () => createFetchResponse({
+      body: {
+        observations: [
+          { scenarioId: 'usage-1', response: 'ok', score: 1 },
+          { scenarioId: 'usage-2', response: 'ok', score: 1 },
+        ],
+      },
+    });
+    const job = await createRunnerJob({
+      projectId: project.id,
+      userId: owner.id,
+      runnerId: runner.id,
+      pack: createDemoBundle(),
+      idempotencyKey: 'usage-metering-job-001',
+    });
+
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: { authorization: 'Bearer usage-worker-token' },
+      query: { id: job.id, action: 'run' },
+      body: { projectId: project.id, workerId: 'usage-worker' },
+    }, runResponse);
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'completed');
+
+    const usage = await getOrgUsageForPeriod({ organizationId: workspace.organizationId, userId: owner.id });
+    assert.equal(usage.totals.runCount, 1);
+    assert.equal(usage.totals.runCompletedCount, 1);
+    assert.ok(usage.totals.scenarioCount > 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv('WORKER_SERVICE_TOKEN', previousWorkerToken);
+    restoreEnv('HARNESSAMP_DEV_AUTH', previousDevAuth);
+    restoreEnv('HARNESSAMP_ENABLE_HOSTED_BYOK', previousHostedByok);
+  }
 });
 
 test('session endpoint returns anonymous payload without auth', async () => {
@@ -1832,6 +2031,78 @@ test('project secrets are encrypted and list safe metadata only', async () => {
   assert.equal(deleteResponse.body.secret.status, 'deleted');
 });
 
+test('project secrets validate and rotate without returning plaintext', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  process.env.HARNESSAMP_ENABLE_HOSTED_BYOK = '1';
+  process.env.HARNESSAMP_SECRET_ENCRYPTION_KEY = 'test-secret-encryption-key';
+  const session = await seedDevSession();
+  const originalFetch = globalThis.fetch;
+
+  try {
+    const createResponse = createMockResponse();
+    await secretsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId },
+      body: {
+        provider: 'anthropic',
+        environment: 'staging',
+        name: 'Anthropic staging key',
+        secretValue: 'sk-ant-test-secret-rotate-1234',
+      },
+    }, createResponse);
+
+    assert.equal(createResponse.statusCode, 200);
+    assert.equal(createResponse.body.secret.environment, 'staging');
+    assert.equal(createResponse.body.secret.configured, true);
+    assert.doesNotMatch(JSON.stringify(createResponse.body), /sk-ant-test-secret-rotate/);
+
+    globalThis.fetch = async (url, init = {}) => {
+      assert.equal(url, 'https://api.anthropic.com/v1/messages');
+      assert.equal(init.headers['x-api-key'], 'sk-ant-test-secret-rotate-1234');
+      return createFetchResponse({
+        ok: false,
+        status: 401,
+        body: { error: { message: 'bad key sk-ant-test-secret-rotate-1234 Authorization: Bearer sk-ant-test-secret-rotate-1234' } },
+      });
+    };
+
+    const validateResponse = createMockResponse();
+    await secretsHandler({
+      method: 'POST',
+      headers: {},
+      query: { projectId: session.defaultProjectId, id: createResponse.body.secret.id, action: 'validate' },
+      body: { action: 'validate', model: 'claude-test' },
+    }, validateResponse);
+
+    assert.equal(validateResponse.statusCode, 200);
+    assert.equal(validateResponse.body.secret.validationStatus, 'invalid');
+    assert.equal(validateResponse.body.secret.lastValidationErrorClass, 'hosted_provider_auth_failed');
+    assert.doesNotMatch(JSON.stringify(validateResponse.body), /sk-ant-test-secret-rotate/);
+    assert.doesNotMatch(JSON.stringify(validateResponse.body), /Bearer sk-ant/);
+
+    const rotateResponse = createMockResponse();
+    await secretsHandler({
+      method: 'PATCH',
+      headers: {},
+      query: { projectId: session.defaultProjectId, id: createResponse.body.secret.id },
+      body: {
+        provider: 'anthropic',
+        environment: 'production',
+        name: 'Anthropic production key',
+        secretValue: 'sk-ant-test-secret-new-5678',
+      },
+    }, rotateResponse);
+
+    assert.equal(rotateResponse.statusCode, 200);
+    assert.equal(rotateResponse.body.secret.environment, 'production');
+    assert.equal(rotateResponse.body.secret.validationStatus, 'pending');
+    assert.doesNotMatch(JSON.stringify(rotateResponse.body), /sk-ant-test-secret-new/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('hosted provider jobs run through worker with safe metadata only', async () => {
   process.env.HARNESSAMP_DEV_AUTH = '1';
   process.env.HARNESSAMP_ENABLE_HOSTED_BYOK = '1';
@@ -1898,6 +2169,69 @@ test('hosted provider jobs run through worker with safe metadata only', async ()
     assert.equal(runResponse.body.result.execution.provider, 'openai');
     assert.equal(runResponse.body.result.execution.model, 'gpt-test');
     assert.doesNotMatch(JSON.stringify(runResponse.body), /sk-worker-secret/);
+    assert.doesNotMatch(JSON.stringify(runResponse.body), /authorization/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('hosted provider worker failures redact provider secrets and normalize auth failures', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  process.env.HARNESSAMP_ENABLE_HOSTED_BYOK = '1';
+  process.env.HARNESSAMP_SECRET_ENCRYPTION_KEY = 'test-secret-encryption-key';
+  const session = await seedDevSession();
+  const secretResponse = createMockResponse();
+  await secretsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId },
+    body: {
+      provider: 'openai',
+      environment: 'production',
+      name: 'OpenAI invalid key',
+      secretValue: 'sk-worker-invalid-secret-9999',
+    },
+  }, secretResponse);
+
+  const createResponse = createMockResponse();
+  await projectsHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId: session.defaultProjectId, resource: 'jobs' },
+    body: {
+      executionTarget: {
+        type: 'hosted_provider',
+        provider: 'openai',
+        model: 'gpt-test',
+        environment: 'production',
+        secretRef: secretResponse.body.secret.id,
+      },
+      pack: createDemoBundle(),
+      idempotencyKey: 'hosted-provider-invalid-key-job-001',
+      timeoutMs: 5000,
+    },
+  }, createResponse);
+
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => createFetchResponse({
+      ok: false,
+      status: 401,
+      body: { error: { message: 'Invalid bearer sk-worker-invalid-secret-9999 Authorization: Bearer sk-worker-invalid-secret-9999' } },
+    });
+    const runResponse = createMockResponse();
+    await jobsHandler({
+      method: 'POST',
+      headers: {},
+      query: { id: createResponse.body.jobId, action: 'run' },
+      body: { workerId: 'hosted-worker' },
+    }, runResponse);
+
+    assert.equal(runResponse.statusCode, 200);
+    assert.equal(runResponse.body.status, 'failed');
+    assert.equal(runResponse.body.result.failureClass, 'hosted_provider_auth_failed');
+    assert.doesNotMatch(JSON.stringify(runResponse.body), /sk-worker-invalid-secret/);
+    assert.doesNotMatch(JSON.stringify(runResponse.body), /Bearer sk-worker/);
   } finally {
     globalThis.fetch = originalFetch;
   }

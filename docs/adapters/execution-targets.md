@@ -15,7 +15,7 @@ The Execution Targets console area is the operator-facing workflow for connectin
 | Registered runner | Durable reusable endpoint registered to a project | Production-grade |
 | Vercel AI SDK route | Deployed adapter-compatible route that owns provider keys | Production-grade when HTTPS and contract-valid |
 | Local HTTPS tunnel | Short-lived forwarding URL for a local adapter | Ephemeral local test target, run-scoped, not reusable |
-| Hosted BYOK | Project-owned provider key through encrypted secrets | Gated until feature flag and encrypted project secret storage are ready |
+| Hosted BYOK | Project-owned OpenAI or Anthropic key through encrypted project secrets | Feature-flagged; ready when the project secret is active and validated |
 
 Local tunnels must not be treated like durable targets. Completed, expired, or failed local tunnel runs can remain in historical run metadata, but reusable production pickers should prefer registered runners and deployed HTTPS adapter routes.
 
@@ -75,4 +75,4 @@ harnessamp_http_runner_v1
 
 Preflight must return readiness plus a supported contract version. Unsupported or missing versions fail explicitly as `adapter_contract_version_unsupported`.
 
-Hosted BYOK must stay gated. Use wording such as **Encrypted BYOK gated**, **BYOK for approved projects**, or **Hosted BYOK unavailable until encrypted project secret storage is enabled**.
+Hosted BYOK stays feature-flagged. Use wording such as **Encrypted BYOK**, **BYOK for approved projects**, or **Hosted BYOK unavailable until encrypted project secret storage is enabled**. Gemini/custom secrets can be stored as metadata scaffolding, but the hosted worker dispatch path executes only OpenAI and Anthropic until provider adapters are added.

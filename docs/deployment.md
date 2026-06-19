@@ -113,7 +113,7 @@ DATABASE_URL=<optional Postgres URL>
 POSTGRES_URL=<optional Postgres URL alternative>
 WORKER_SERVICE_TOKEN=<optional shared worker token for API polling>
 HARNESSAMP_ENABLE_HOSTED_BYOK=0
-HARNESSAMP_SECRET_ENCRYPTION_KEY=<required only when hosted BYOK is enabled>
+HARNESSAMP_SECRET_ENCRYPTION_KEY=<required when hosted BYOK is enabled; 32-byte base64 key or passphrase>
 HARNESSAMP_SECRET_ENCRYPTION_KEY_VERSION=<optional key version label>
 ```
 
@@ -195,9 +195,9 @@ Recommended target options:
 - `registered_runner`: deploy your own runner endpoint near the agent or model. The runner calls OpenAI, Anthropic, Gemini, Mistral, Groq, Together, a self-hosted model, or an internal agent service with credentials stored in your infrastructure.
 - `vercel_ai_sdk`: point HarnessAmp at a Next.js/Vercel route that calls your agent. Provider keys stay in the app or worker environment.
 - `local_http_tunnel`: expose a local HarnessAmp-compatible agent endpoint through a short-lived public HTTPS tunnel for testing. ngrok is the common path, but any compatible HTTPS tunnel works. Do not use this as a durable production execution target.
-- `hosted_provider`: gated encrypted BYOK mode. Enable only with encrypted project secret storage, feature flag approval, and explicit team acceptance of that security model.
+- `hosted_provider`: feature-flagged encrypted BYOK mode for OpenAI and Anthropic. Enable only with encrypted project secret storage, `HARNESSAMP_SECRET_ENCRYPTION_KEY`, and explicit team acceptance of that security model.
 
-HarnessAmp stores only safe execution-target metadata such as target type, runner id, route URL/path, tunnel endpoint URL, provider, model label, masked secret preview, and timing/error diagnostics. Hosted BYOK stores encrypted provider keys in `project_secrets`; job records reference `secretRef` only. Raw provider keys must not appear in job records, dashboard views, worker logs, API responses, CLI output, or reports.
+HarnessAmp stores only safe execution-target metadata such as target type, runner id, route URL/path, tunnel endpoint URL, provider, model label, environment, masked secret preview, and timing/error diagnostics. Hosted BYOK stores encrypted provider keys in `project_secrets`; job records reference `secretRef` only. Workers decrypt secrets only inside trusted server-side dispatch, then clear the local reference after the provider call. Raw provider keys must not appear in job records, dashboard views, worker logs, API responses, CLI output, exports, or reports.
 
 For local tunnel testing:
 

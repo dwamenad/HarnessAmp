@@ -63,10 +63,10 @@ Recommended production path:
 | `registered_runner` | Production-grade reusable runner endpoint |
 | `vercel_ai_sdk` | Deployed HTTPS adapter route or local route module during development |
 | `local_http_tunnel` | Ephemeral, run-scoped local test target. Not reusable |
-| `hosted_provider` | Hosted BYOK for approved projects via encrypted project secrets |
+| `hosted_provider` | Hosted BYOK for OpenAI and Anthropic via encrypted project secrets |
 | `mock` | Local deterministic development |
 
-Hosted BYOK is gated. Use wording and product behavior like "Encrypted BYOK gated", "Hosted BYOK for approved projects", or "BYOK via encrypted project secrets". Registered runners and deployed adapter routes remain the recommended production paths.
+Hosted BYOK is feature-flagged and requires `HARNESSAMP_SECRET_ENCRYPTION_KEY`. OpenAI and Anthropic are executable first; Gemini/custom providers can be represented as secrets but are not dispatched by the hosted worker path yet. Registered runners and deployed adapter routes remain the broadest production paths.
 
 ## Run Workflow
 
@@ -74,7 +74,7 @@ The console separates seeded demos from real execution:
 
 - `/targets` is the execution target registry and validation surface.
 - `/runs/new` launches a benchmark against a selected execution target.
-- Project secrets save encrypted provider keys for gated hosted runs only.
+- Project secrets save encrypted provider keys for hosted OpenAI/Anthropic runs without exposing raw keys after submission.
 - Reports show benchmark outcomes, not setup instructions.
 - Docs hold deeper implementation details.
 
@@ -177,7 +177,7 @@ Gated Hosted BYOK:
 
 ```text
 HARNESSAMP_ENABLE_HOSTED_BYOK=1
-HARNESSAMP_SECRET_ENCRYPTION_KEY
+HARNESSAMP_SECRET_ENCRYPTION_KEY=<32-byte base64 key or passphrase>
 ```
 
 Local seeded auth:
@@ -186,12 +186,20 @@ Local seeded auth:
 HARNESSAMP_DEV_AUTH=1
 ```
 
+## Organizations and Plans
+
+HarnessAmp groups workspaces, projects, secrets, reports, runner jobs, and usage under organizations. Organization roles are `owner`, `admin`, `developer`, and `viewer`; owners manage billing and destructive org settings, admins manage members and project operations, developers can create runs and export reports, and viewers can inspect reports without launching work.
+
+Plan checks run before job enqueue. Free organizations cannot use Hosted BYOK, CI gates, or full benchmark runs; Starter enables Hosted BYOK; Team enables CI gates and full benchmarks; Business and Enterprise raise limits and add higher operational allowances. Usage is metered monthly for runs, scenarios, mutations, provider calls, execution minutes, CI gate runs, and report exports.
+
 ## Security Model
 
 - Registered runners and deployed adapter routes keep provider keys in user-controlled infrastructure.
 - Local tunnel targets are ephemeral, run-scoped, and not reusable production targets.
 - HarnessAmp blocks localhost, private IP ranges, link-local ranges, cloud metadata endpoints, unsafe redirects, unsupported contract versions, oversized responses, and non-JSON preflight responses for local tunnel targets.
-- Hosted BYOK is gated and uses encrypted project secrets for approved projects.
+- Hosted BYOK is feature-flagged and uses encrypted project secrets for approved OpenAI/Anthropic runs.
+- Organization RBAC is enforced on projects, secrets, runners, reports, runs, and billing surfaces before side effects are written.
+- Usage events are idempotent per run phase and are stored with organization/project/run identifiers, safe metadata, and no raw provider credentials.
 - Raw provider keys are not returned by API responses and should not be sent to job creation endpoints for registered runner or deployed adapter execution.
 - Validation audit events store safe metadata only: target type, phase, status, duration, failure class, contract version, and timestamp.
 
@@ -203,7 +211,7 @@ HARNESSAMP_DEV_AUTH=1
 | `src/mutations/` | v1 mutation registry, generated tiers, sharding, risk filters |
 | `src/v2/` | Domain packs, contract checkers, generated scenario engines, v2 runner |
 | `src/adapters/` | Execution target adapters and contracts |
-| `api/` | Auth, projects, runners, jobs, reports, secrets, and event endpoints |
+| `api/` | Auth, organizations, projects, runners, jobs, reports, secrets, usage, and event endpoints |
 | `docs/` | Concepts, adapters, deployment, API reference, and screenshots |
 | `examples/` | Demo bundles, benchmark packs, Replit runner, Vercel AI SDK fixture |
 | `tests/` | Engine, adapter, API, UI, and E2E coverage |

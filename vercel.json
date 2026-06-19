@@ -51,6 +51,34 @@
       "destination": "/api/secrets"
     },
     {
+      "source": "/api/orgs/:orgId/members/invite",
+      "destination": "/api/orgs?resource=members"
+    },
+    {
+      "source": "/api/orgs/:orgId/members/:memberId",
+      "destination": "/api/orgs?resource=member"
+    },
+    {
+      "source": "/api/orgs/:orgId/members",
+      "destination": "/api/orgs?resource=members"
+    },
+    {
+      "source": "/api/orgs/:orgId/usage/estimate-run",
+      "destination": "/api/orgs?resource=estimate-run"
+    },
+    {
+      "source": "/api/orgs/:orgId/usage",
+      "destination": "/api/orgs?resource=usage"
+    },
+    {
+      "source": "/api/orgs/:orgId/plan",
+      "destination": "/api/orgs?resource=plan"
+    },
+    {
+      "source": "/api/orgs/:orgId",
+      "destination": "/api/orgs"
+    },
+    {
       "source": "/api/jobs/:id/cancel",
       "destination": "/api/jobs?action=cancel"
     },

@@ -126,6 +126,39 @@ describe('report export payloads', () => {
     assert.match(csv, /retrieval_contradictory_evidence_001/);
   });
 
+  test('report exports redact provider keys in json, csv, markdown, and print html', () => {
+    const runWithSecret = {
+      ...failedRetrievalRun,
+      id: 'run-secret-redaction',
+      name: 'Secret Redaction',
+      runnerObservations: [
+        {
+          ...failedRetrievalRun.runnerObservations[0],
+          final_answer: 'Leaked sk-test-redaction-1234abcd and Bearer sk-ant-redaction-5678wxyz',
+          metadata: {
+            authorization: 'Bearer sk-test-redaction-1234abcd',
+            apiKey: 'sk-ant-redaction-5678wxyz',
+            note: 'x-api-key: sk-test-redaction-1234abcd',
+          },
+        },
+      ],
+    };
+    const report = buildReportPayload(localRunReportId(runWithSecret), {
+      localRuns: [runWithSecret],
+      harnesses,
+    });
+    const serialized = [
+      JSON.stringify(report),
+      reportCsv(report),
+      reportMarkdown(report),
+      reportPrintHtml(report),
+    ].join('\n');
+
+    assert.doesNotMatch(serialized, /sk-test-redaction-1234abcd/);
+    assert.doesNotMatch(serialized, /sk-ant-redaction-5678wxyz/);
+    assert.doesNotMatch(serialized, /Bearer sk-/);
+  });
+
   test('passing local reports do not invent failure evidence', () => {
     const passingRun = {
       ...failedRetrievalRun,

@@ -116,6 +116,107 @@ Important outputs:
 - `metrics.robustnessGap` - original pass rate minus mutated pass rate
 - `checks` - threshold-by-threshold pass/fail results
 
+## Organization API
+
+Organizations are the billing, RBAC, and usage boundary for workspaces, projects, secrets, reports, and runner jobs. All organization endpoints require an authenticated session.
+
+Roles:
+
+- `owner` - billing, organization settings, members, secrets, targets, runs, exports, and destructive operations
+- `admin` - organization operations, members, secrets, targets, runs, and exports
+- `developer` - project work, target creation, run creation, report viewing, and exports
+- `viewer` - report and run visibility without launch or mutation permissions
+
+Plans:
+
+- `free` - local/runner evaluation basics with low monthly limits; no Hosted BYOK, CI gates, or full benchmarks
+- `starter` - Hosted BYOK and report exports for small projects
+- `team` - CI gates, full benchmark runs, advanced targets, and higher team limits
+- `business` - larger limits and priority queue allowance
+- `enterprise` - highest limits and audit-log entitlement
+
+### `GET /api/orgs`
+
+Lists organizations for the authenticated user, including the user's role and permissions.
+
+### `POST /api/orgs`
+
+Creates an organization, owner membership, and default workspace.
+
+Body:
+
+- `name` - organization name
+- `plan` - optional plan; defaults to `free`
+
+### `GET /api/orgs/<org-id>`
+
+Returns one organization when the authenticated user is an active member.
+
+### `PATCH /api/orgs/<org-id>`
+
+Updates organization name or status. Requires organization settings permission.
+
+### `DELETE /api/orgs/<org-id>`
+
+Marks the organization deleted. Requires owner permission.
+
+### `GET /api/orgs/<org-id>/members`
+
+Lists non-removed organization members. Requires member visibility.
+
+### `POST /api/orgs/<org-id>/members`
+
+Invites a member by email. If a user with that email already exists, the membership is activated immediately; otherwise it remains `invited`.
+
+Body:
+
+- `email` - invitee email
+- `role` - one of `owner`, `admin`, `developer`, or `viewer`
+
+### `PATCH /api/orgs/<org-id>/members/<member-id>`
+
+Changes a member role or status. HarnessAmp prevents removing or demoting the last active owner.
+
+### `DELETE /api/orgs/<org-id>/members/<member-id>`
+
+Marks a member as removed. Removed members lose project visibility and run permissions inherited from the organization.
+
+### `GET /api/orgs/<org-id>/usage`
+
+Returns monthly organization usage and remaining allowance. Optional query parameters:
+
+- `periodStart`
+- `periodEnd`
+
+Metered counters include `runCount`, `runStartedCount`, `runCompletedCount`, `scenarioCount`, `mutationCount`, `providerCallCount`, `executionMinutes`, `reportExports`, and `ciGateRuns`.
+
+### `GET /api/orgs/<org-id>/plan`
+
+Returns the current plan definition, limits, features, usage, and remaining monthly allowance.
+
+### `PATCH /api/orgs/<org-id>/plan`
+
+Updates the plan. Requires owner billing permission.
+
+Body:
+
+- `plan` - `free`, `starter`, `team`, `business`, or `enterprise`
+
+### `POST /api/orgs/<org-id>/usage/estimate-run`
+
+Estimates run usage and plan eligibility before enqueue.
+
+Body:
+
+- `pack` or `benchmark`
+- `tier`
+- `runMode` or `mode`
+- `mutationConfig`
+- `executionTarget`
+- `ciGate`
+
+Returns an entitlement object with `allowed`, blocking `reasons`, estimated run counters, current usage, limits, and remaining allowance.
+
 ## Runner Job API
 
 Runner jobs are durable queue records for workspace-backed external runner work. Creating a job persists `queued` state and returns immediately; a worker action claims and executes the job separately.
@@ -180,27 +281,36 @@ The formal adapter contract and copy-paste route examples are documented in `doc
 
 ## Project Secrets API
 
-Project secrets store encrypted provider keys for hosted BYOK. Raw keys are accepted only on create and are never returned by API responses.
+Project secrets store encrypted provider keys for hosted BYOK. Raw keys are accepted only on create or rotate and are never returned by API responses. OpenAI and Anthropic are executable hosted providers; Gemini and custom are scaffolded metadata providers.
 
 ### `POST /api/projects/<project-id>/secrets`
 
 Body:
 
-- `provider` - `openai`, `anthropic`, `google`, `mistral`, `groq`, or `together`
+- `provider` - `openai`, `anthropic`, `gemini`, or `custom`
+- `environment` - `development`, `staging`, or `production`
 - `name` - display name
 - `secretValue` - raw provider API key; accepted only for encryption and never returned
 
 Returns:
 
-- `secret` - safe metadata with `id`, `ref`, `provider`, `displayName`, `maskedPreview`, `status`, timestamps, and validation metadata
+- `secret` - safe metadata with `id`, `ref`, `projectId`, `environment`, `provider`, `name`, `displayName`, `configured`, `maskedValue`, `maskedPreview`, `status`, timestamps, and validation metadata
 
 ### `GET /api/projects/<project-id>/secrets`
 
 Lists safe metadata for non-deleted project secrets.
 
+### `POST /api/projects/<project-id>/secrets/<secret-id>/validate`
+
+Validates OpenAI or Anthropic credentials with a minimal provider request. Validation updates safe metadata only: `validationStatus`, `lastValidationErrorClass`, and redacted `lastValidationError`.
+
+### `PATCH /api/projects/<project-id>/secrets/<secret-id>`
+
+Rotates the encrypted value or updates provider/name/environment metadata. Raw values are accepted only in the request body and never returned.
+
 ### `POST /api/projects/<project-id>/secrets/<secret-id>`
 
-With `{ "action": "disable" }`, disables a secret so hosted provider jobs cannot use it.
+With `{ "action": "disable" }`, disables a secret so hosted provider jobs cannot use it. With `{ "action": "validate" }`, performs the same validation as the `/validate` route for local/dev runtimes that route actions through query params.
 
 ### `DELETE /api/projects/<project-id>/secrets/<secret-id>`
 
@@ -236,7 +346,7 @@ Body:
 
 `executionTarget`, `runnerId`, or `adapter.type` is required. Adapter-backed jobs use the same queue, claim, retry, cancellation, and report-linking lifecycle as registered HTTP runners.
 
-Execution targets are validated before enqueueing when possible. Local tunnel job creation rejects invalid URLs, non-HTTPS URLs, localhost, private IP ranges, link-local ranges, cloud metadata endpoints, DNS resolutions to private/internal IPs, unsafe redirects, unreachable tunnel endpoints, preflight timeouts, oversized responses, non-2xx preflight responses, non-JSON preflight responses, missing production token secrets, unsupported contract versions, and preflight responses that do not confirm readiness with `{ "ok": true, "contractVersion": "harnessamp_http_runner_v1" }` or `{ "ready": true, "contractVersion": "harnessamp_http_runner_v1" }`. The same URL and redirect safety checks run during worker dispatch. Hosted provider job creation rejects disabled gated BYOK, missing `secretRef`, missing model, unsupported provider, provider mismatch, disabled/deleted secrets, cross-project secrets, and raw provider API keys in job payloads.
+Execution targets are validated before enqueueing when possible. Local tunnel job creation rejects invalid URLs, non-HTTPS URLs, localhost, private IP ranges, link-local ranges, cloud metadata endpoints, DNS resolutions to private/internal IPs, unsafe redirects, unreachable tunnel endpoints, preflight timeouts, oversized responses, non-2xx preflight responses, non-JSON preflight responses, missing production token secrets, unsupported contract versions, and preflight responses that do not confirm readiness with `{ "ok": true, "contractVersion": "harnessamp_http_runner_v1" }` or `{ "ready": true, "contractVersion": "harnessamp_http_runner_v1" }`. The same URL and redirect safety checks run during worker dispatch. Hosted provider job creation rejects disabled BYOK, missing `secretRef`, missing model, unsupported provider, provider/environment mismatch, disabled/deleted secrets, cross-project secrets, raw provider API keys in job payloads, and organization plans that do not include Hosted BYOK. Full benchmark and CI gate runs are blocked before enqueue unless the organization plan includes those features and has enough monthly capacity.
 
 ### `POST /api/projects/<project-id>/validate-target`
 
@@ -288,7 +398,7 @@ Body:
 
 Claims and executes a job through the registered runner or configured adapter. The action moves the job from `claimed` to `running`, dispatches execution from the worker/API process, writes exactly one report on success, and links it through `reportId`. On retryable failure it marks the job `retrying` until attempts are exhausted, then `failed`.
 
-Non-retryable execution classes currently stop immediately: `execution_target_missing`, `execution_target_invalid`, `execution_target_unsupported`, `registered_runner_missing`, `vercel_ai_sdk_route_missing`, `hosted_provider_disabled`, `hosted_provider_secret_missing`, `hosted_provider_secret_disabled`, `hosted_provider_secret_provider_mismatch`, `hosted_provider_auth_error`, `hosted_provider_model_missing`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `local_tunnel_token_secret_missing`, `adapter_contract_version_unsupported`, `adapter_observation_scenario_mismatch`, `adapter_target_missing`, `adapter_invalid_response`, `adapter_schema_mismatch`, and `adapter_worker_canceled`.
+Non-retryable execution classes currently stop immediately: `execution_target_missing`, `execution_target_invalid`, `execution_target_unsupported`, `registered_runner_missing`, `vercel_ai_sdk_route_missing`, `hosted_provider_disabled`, `hosted_provider_missing_secret`, `hosted_provider_invalid_secret`, `hosted_provider_auth_failed`, `hosted_provider_invalid_request`, `hosted_provider_model_missing`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `local_tunnel_token_secret_missing`, `adapter_contract_version_unsupported`, `adapter_observation_scenario_mismatch`, `adapter_target_missing`, `adapter_invalid_response`, `adapter_schema_mismatch`, and `adapter_worker_canceled`.
 
 Local tunnel-specific failure classes include `local_tunnel_unreachable`, `local_tunnel_timeout`, `local_tunnel_tls_error`, `local_tunnel_dns_error`, `local_tunnel_redirect_blocked`, `local_tunnel_private_ip_blocked`, `local_tunnel_contract_mismatch`, `local_tunnel_invalid_json`, `local_tunnel_token_secret_missing`, `local_tunnel_http_error`, and `local_tunnel_closed_or_expired`.
 
