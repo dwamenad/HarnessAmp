@@ -762,8 +762,6 @@ function routeRenderContext() {
     renderSaasNewRun,
     renderSaasRunSummary,
     renderSaasRunProgress,
-    renderExecutionTargets,
-    renderSaasReports,
     renderSaasFailuresList,
     renderSaasFailureDetail,
     renderOrgOverview,
@@ -775,6 +773,15 @@ function routeRenderContext() {
     renderDocsExperience,
     renderAppSurface,
     renderHomeSurface,
+    executionTargetRegistryRows,
+    primaryTargetEvidence,
+    renderDataSourceStrip,
+    renderEndpointValidationPanel,
+    renderExecutionTargetCard,
+    renderNextActions,
+    renderReportsTable,
+    renderSaasMetric,
+    reportTableRows,
   };
 }
 
@@ -1806,55 +1813,6 @@ function renderSaasCompare() {
         <article class="ha-panel"><h3>Pack metric changes</h3>${renderGovernanceList(comparison.metricChanges)}</article>
         <article class="ha-panel"><h3>Resolved failures</h3>${comparison.resolvedFailures.length ? comparison.resolvedFailures.map(renderFailureMini).join('') : renderEmptyState('No resolved critical failures.', 'Resolve or accept risk on a failure to populate this section.', '/failures', 'Open failures')}</article>
       </div>
-    </section>
-  `;
-}
-
-function renderSaasReports() {
-  const reportRows = reportTableRows();
-  return `
-    <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Run reports</h2><p>Pass/fail gates, robustness gap, failed contracts, mutation failures, and reproducible diagnostics.</p></div>${renderDataSourceStrip('Local preview', 'Real local reports appear before seeded samples.')}</div>
-      ${renderNextActions([
-        ['Export executive report', '#reports-table', 'Share release decision and failure evidence'],
-        ['Create CI gate', '/ci', 'Use report thresholds in pull requests'],
-        ['Compare latest run', '/compare', 'Inspect regressions against baseline'],
-      ])}
-      <article class="ha-panel ha-report-status" id="report-export-status" aria-live="polite">
-        <strong>Exports ready</strong>
-        <span>Seeded sample rows stay labeled. Choose a format for review.</span>
-      </article>
-      <article class="ha-panel" id="reports-table">${renderReportsTable(reportRows)}</article>
-    </section>
-  `;
-}
-
-function renderExecutionTargets() {
-  const targets = executionTargetRegistryRows();
-  const productionTargets = targets.filter((target) => target.evidence.target.isProductionGrade && target.evidence.target.readinessLabel === readinessLabels.healthy);
-  const ephemeralTargets = targets.filter((target) => target.ephemeral);
-  const failingTargets = targets.filter((target) => target.failureClass && target.failureClass !== 'none');
-  const primaryEvidence = primaryTargetEvidence(targets);
-  return `
-    <section class="ha-page">
-      <div class="ha-section-head">
-        <div><h2>Execution Targets</h2><p>Canonical readiness surface for release evidence.</p></div>
-        <div class="ha-run-links"><a class="ha-primary" href="/runs/new">Start run</a><a href="/docs/adapters/adapter-contract">Adapter contract</a></div>
-      </div>
-      <div class="ha-metrics ha-metrics--priority">
-        ${renderSaasMetric('Targets', String(targets.length), `${productionTargets.length} validated production-grade`, 'neutral')}
-        ${renderSaasMetric('Local preview', String(ephemeralTargets.length), 'ephemeral, not release evidence', ephemeralTargets.length ? 'warn' : 'neutral')}
-        ${renderSaasMetric('Attention', String(failingTargets.length), 'failure class present', failingTargets.length ? 'critical' : 'passed')}
-      </div>
-      ${renderTargetReadinessSnapshot(primaryEvidence)}
-      <div class="target-registry">
-        ${targets.map(renderExecutionTargetCard).join('')}
-      </div>
-      <article class="ha-panel ha-panel--wide">
-        <div class="ha-panel__head"><h3>Validation controls</h3><span>safe diagnostics only</span></div>
-        <p class="ha-section-note">Validate reachability, tokens, JSON, contract version, scenario mapping, and private-network blocking before enqueueing real runs.</p>
-        ${renderEndpointValidationPanel()}
-      </article>
     </section>
   `;
 }

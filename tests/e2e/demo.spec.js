@@ -31,9 +31,18 @@ test('reports keep seeded samples labeled after the route cleanup', async ({ pag
   await page.goto('/reports');
   await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Run reports' })).toBeVisible();
+  await expect(page.getByText('Loading HarnessAmp')).toHaveCount(0);
   await page.locator('.ha-report-export summary').first().click();
   await expect(page.getByRole('button', { name: 'Print HTML' }).first()).toBeVisible();
   await expect(page.getByText('seeded sample').first()).toBeVisible();
+});
+
+test('targets route cold-loads without the bootstrap loading screen', async ({ page }) => {
+  await page.goto('/targets');
+  await expect(page.getByRole('heading', { name: 'Execution Targets' }).first()).toBeVisible();
+  await expect(page.getByText('Canonical readiness surface for release evidence.')).toBeVisible();
+  await expect(page.getByText('Loading HarnessAmp')).toHaveCount(0);
+  await expect(page.getByText('Preparing the console')).toHaveCount(0);
 });
 
 test('runs the default diagnosis and shows schema validation', async ({ page }) => {
