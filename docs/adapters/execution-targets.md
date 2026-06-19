@@ -8,14 +8,32 @@ The Execution Targets console area is the operator-facing workflow for connectin
 4. Start a worker-backed run.
 5. Watch lifecycle and diagnostics.
 
+`/targets` is the canonical readiness surface. Dashboard cards, run summaries, report exports, and organization/admin status should consume the same production evidence snapshot instead of inferring their own labels.
+
+## Production Evidence Snapshot
+
+The shared snapshot answers: **Can this agent be released?**
+
+It includes:
+
+- project mode: `Sample workspace`, `Connected project`, or `Production run`
+- evidence source: `Sample data` or `Real execution`
+- target readiness, validation status, latest pass/fail, failure class, and contract version
+- run lifecycle, benchmark id/version, scoring profile, and gate profile
+- release gate status, blocking reasons, warnings, and informational diagnostics
+- failure triage across agent behavior, adapter contract, execution target, validation, and worker lifecycle failures
+- organization plan, usage, entitlement, secret, and RBAC status where relevant
+
+Sample data is never production release evidence. Local tunnel evidence is always `Local preview` / `Ephemeral`, even when a local preflight passes.
+
 ## Target Types
 
 | Target | Product behavior | Production posture |
 | --- | --- | --- |
-| Registered runner | Durable reusable endpoint registered to a project | Production-grade |
-| Vercel AI SDK route | Deployed adapter-compatible route that owns provider keys | Production-grade when HTTPS and contract-valid |
-| Local HTTPS tunnel | Short-lived forwarding URL for a local adapter | Ephemeral local test target, run-scoped, not reusable |
-| Hosted BYOK | Project-owned OpenAI or Anthropic key through encrypted project secrets | Feature-flagged; ready when the project secret is active and validated |
+| Registered runner | Durable reusable endpoint registered to a project | Production-grade only after validation supports it |
+| Vercel AI SDK route | Deployed adapter-compatible route that owns provider keys | Production-grade only when HTTPS and contract-valid |
+| Local HTTPS tunnel | Short-lived forwarding URL for a local adapter | Local preview, ephemeral, run-scoped, not release evidence |
+| Hosted BYOK | Project-owned OpenAI or Anthropic key through encrypted project secrets | Gated; disabled unless encrypted project secret storage and feature flags are enabled |
 
 Local tunnels must not be treated like durable targets. Completed, expired, or failed local tunnel runs can remain in historical run metadata, but reusable production pickers should prefer registered runners and deployed HTTPS adapter routes.
 

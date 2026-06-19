@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "test": "node --test",
     "test:e2e": "playwright test",
+    "verify": "npm test && npm run build",
     "analyze": "node scripts/analyze.mjs",
     "compile:traces": "node scripts/compile-traces.mjs",
     "collect:failures": "node scripts/collect-failures.mjs",

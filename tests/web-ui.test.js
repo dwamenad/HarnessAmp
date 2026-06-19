@@ -2,9 +2,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const mainSource = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const source = await readFile(new URL('../src/console/app-shell.js', import.meta.url), 'utf8');
 const routerSource = await readFile(new URL('../src/console/router.js', import.meta.url), 'utf8');
 const labelsSource = await readFile(new URL('../src/console/lib/labels.js', import.meta.url), 'utf8');
+const dashboardRouteSource = await readFile(new URL('../src/console/routes/dashboard.js', import.meta.url), 'utf8');
+const runsRouteSource = await readFile(new URL('../src/console/routes/runs.js', import.meta.url), 'utf8');
+const targetsRouteSource = await readFile(new URL('../src/console/routes/targets.js', import.meta.url), 'utf8');
+const reportsRouteSource = await readFile(new URL('../src/console/routes/reports.js', import.meta.url), 'utf8');
+const failuresRouteSource = await readFile(new URL('../src/console/routes/failures.js', import.meta.url), 'utf8');
+const orgRouteSource = await readFile(new URL('../src/console/routes/org.js', import.meta.url), 'utf8');
+const publicDemoRouteSource = await readFile(new URL('../src/console/routes/public-demo.js', import.meta.url), 'utf8');
 const packCatalogSource = await readFile(new URL('../src/v2/domain-pack-catalog.js', import.meta.url), 'utf8');
 const styleSource = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
 const reportExportSource = await readFile(new URL('../src/console/report-export.js', import.meta.url), 'utf8');
@@ -149,6 +157,9 @@ test('web app splits the product landing page from the operator surface', () => 
     'executionTargetRegistryRows',
     'executionTargetTerms',
     'readinessLabels',
+    'buildProductionEvidence',
+    'productionEvidenceForDashboard',
+    'renderTargetReadinessSnapshot',
     'targetReliabilityForRegistryTarget',
     'readinessStatusForTarget',
     'target-card__readiness',
@@ -463,6 +474,7 @@ test('saas pack catalog exposes RetrievalGuard, CustomerCareGuard, and LegalGuar
 });
 
 test('saas console exposes strengthened operator controls', () => {
+  const consoleRouteSources = [source, routerSource, orgRouteSource, runsRouteSource, dashboardRouteSource].join('\n');
   [
     'renderSaasPackDetail',
     'packContractNames',
@@ -493,13 +505,15 @@ test('saas console exposes strengthened operator controls', () => {
     'renderOrgMembers',
     'renderOrgUsage',
     'renderOrgBilling',
+    'Project secrets',
+    'Raw values',
     'renderRunUsageEstimate',
     'Estimated usage',
     '/org/members',
     '/org/usage',
     '/org/billing',
     'organization-select',
-  ].forEach((text) => assert.match(source, new RegExp(text)));
+  ].forEach((text) => assert.match(consoleRouteSources, new RegExp(text)));
 });
 
 test('saas sidebar nests organization administration', () => {
@@ -519,10 +533,33 @@ test('saas sidebar nests organization administration', () => {
   assert.match(routerSource, /\['\/org\/members', 'Members', 'MB'\]/);
   assert.match(routerSource, /\['\/org\/usage', 'Usage', 'US'\]/);
   assert.match(routerSource, /\['\/org\/billing', 'Billing', 'BL'\]/);
-  assert.match(routerSource, /\['\/team', 'Team', 'TM'\]/);
+  assert.doesNotMatch(routerSource, /\['\/team', 'Team', 'TM'\]/);
+  assert.match(routerSource, /'\/team': 'Members'/);
   assert.match(source, /state\.organizationNavCollapsed = !state\.organizationNavCollapsed/);
   assert.doesNotMatch(routerSource, /\['\/usage', 'Usage', 'UB'\]/);
   assert.match(routerSource, /return '\/org\/usage'/);
+});
+
+test('console app shell lazy-loads route modules from a small bootstrap', () => {
+  assert.match(mainSource, /import\('\.\/console\/app-shell\.js'\)/);
+  assert.match(mainSource, /renderBootstrapLoading/);
+  assert.match(mainSource, /renderBootstrapError/);
+  assert.match(source, /routeModuleLoaders/);
+  assert.match(source, /import\('\.\/routes\/dashboard\.js'\)/);
+  assert.match(source, /import\('\.\/routes\/runs\.js'\)/);
+  assert.match(source, /import\('\.\/routes\/targets\.js'\)/);
+  assert.match(source, /import\('\.\/routes\/reports\.js'\)/);
+  assert.match(source, /import\('\.\/routes\/failures\.js'\)/);
+  assert.match(source, /import\('\.\/routes\/org\.js'\)/);
+  assert.match(source, /renderRouteLoadingState/);
+  assert.match(source, /renderRouteErrorState/);
+  assert.match(dashboardRouteSource, /renderSaasDashboard/);
+  assert.match(runsRouteSource, /renderSaasNewRun/);
+  assert.match(targetsRouteSource, /renderExecutionTargets/);
+  assert.match(reportsRouteSource, /renderSaasReports/);
+  assert.match(failuresRouteSource, /renderSaasFailuresList/);
+  assert.match(orgRouteSource, /route\.pathname === '\/team'/);
+  assert.match(publicDemoRouteSource, /renderHomeSurface/);
 });
 
 test('saas console includes keyboard and motion accessibility styles', () => {

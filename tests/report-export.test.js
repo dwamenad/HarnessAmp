@@ -73,8 +73,10 @@ describe('report export payloads', () => {
     assert.equal(report.adapterMode, 'contract-smoke');
     assert.equal(report.gate.thresholds[0].result, 'fail');
     assert.equal(report.releaseGate.canRelease, false);
-    assert.equal(report.releaseGate.status, 'failed');
+    assert.equal(report.releaseGate.status, 'blocked');
     assert.match(report.releaseGate.answer, /Can this agent be released\? No/);
+    assert.equal(report.productionEvidence.releaseGate.status, 'blocked');
+    assert.equal(report.productionEvidence.failureTriage.agentBehaviorFailures > 0, true);
     assert.equal(report.failureTriage.buckets.some((bucket) => bucket.label === 'Agent behavior failures'), true);
     assert.equal(report.historicalComparison.status, 'not_available');
     assert.equal(report.targetReliability.readinessStatus, 'Needs validation');
@@ -187,6 +189,8 @@ describe('report export payloads', () => {
     assert.equal(report.benchmark.benchmarkRunType, 'sample');
     assert.equal(report.benchmark.benchmarkSnapshot.description, 'Seeded sample report. Not real benchmark evidence.');
     assert.equal(report.benchmark.name, 'Seeded sample');
+    assert.equal(report.productionEvidence.releaseGate.status, 'not_applicable');
+    assert.equal(report.productionEvidence.releaseGate.canRelease, false);
     assert.match(reportMarkdown(report), /Benchmark: Seeded sample - not a real benchmark result/);
   });
 });

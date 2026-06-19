@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 test('public site funnels into the console while keeping sandbox and docs reachable', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('link', { name: 'Open console' }).first()).toHaveAttribute('href', '/dashboard');
-  await expect(page.getByRole('link', { name: 'Try seeded demo' }).first()).toHaveAttribute('href', '/app#demo');
+  await expect(page.getByRole('link', { name: 'View seeded demo' }).first()).toHaveAttribute('href', '/app#demo');
   await expect(page.getByRole('link', { name: 'Adapter contract' }).first()).toHaveAttribute('href', '/docs/adapters/adapter-contract');
   await expect(page.getByText('Connect the agent you operate.')).toBeVisible();
   await expect(page.getByText('Reports that explain the gate.')).toBeVisible();
@@ -37,7 +37,7 @@ test('reports keep seeded samples labeled after the route cleanup', async ({ pag
 });
 
 test('runs the default diagnosis and shows schema validation', async ({ page }) => {
-  await expect(page.getByText('Seeded demo first. Real execution when connected.')).toBeVisible();
+  await expect(page.getByText('Sample data first. Real execution when connected.')).toBeVisible();
   await expect(page.locator('#demo-gate')).toContainText(/PASS|WARN|BLOCK/);
   await expect(page.getByText('Data validation')).toBeVisible();
   await expect(page.locator('#schema-status-list')).toContainText('Source workflow');

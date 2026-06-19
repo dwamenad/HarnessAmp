@@ -19,7 +19,7 @@ export const saasRouteLabels = {
   '/org/billing': 'Billing',
   '/project/settings': 'Project Settings',
   '/usage': 'Usage & Billing',
-  '/team': 'Team',
+  '/team': 'Members',
 };
 
 export const saasNav = [
@@ -39,7 +39,6 @@ export const organizationNav = [
   ['/org/members', 'Members', 'MB'],
   ['/org/usage', 'Usage', 'US'],
   ['/org/billing', 'Billing', 'BL'],
-  ['/team', 'Team', 'TM'],
 ];
 
 export function resolveRoute(pathname = '/', { packLabelForSlug = null } = {}) {

@@ -4126,6 +4126,64 @@ section[id] {
   margin-top: 10px;
 }
 
+.target-readiness-snapshot {
+  display: grid;
+  gap: 12px;
+}
+
+.target-readiness-snapshot__grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.target-readiness-snapshot__grid div {
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.target-readiness-snapshot__grid span {
+  color: var(--ha-muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.target-readiness-snapshot__grid strong {
+  color: var(--ha-text);
+  display: block;
+  font-size: 13px;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.target-readiness-snapshot--compact .target-readiness-snapshot__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ha-route-state,
+.route-loading-state,
+.route-error-state {
+  display: grid;
+  gap: 10px;
+}
+
+.ha-route-state {
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.ha-route-state > .ha-panel,
+.route-loading-state,
+.route-error-state {
+  max-width: 680px;
+  width: 100%;
+}
+
 .ha-compact-list {
   margin: 12px 0 0 18px;
   padding: 0;
@@ -5487,6 +5545,8 @@ section[id] {
   .run-workflow,
   .target-choice-grid,
   .target-registry,
+  .target-readiness-snapshot__grid,
+  .target-readiness-snapshot--compact .target-readiness-snapshot__grid,
   .target-card__meta,
   .docs-meta {
     grid-template-columns: 1fr;

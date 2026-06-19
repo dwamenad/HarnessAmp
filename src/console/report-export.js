@@ -1,6 +1,11 @@
 import { benchmarkForRun, classifyBenchmarkRun, createBenchmarkSnapshot, evaluateBenchmarkGate, releaseDecisionForGate, scoreBenchmark } from '../benchmarks/registry.js';
 import { extractBenchmarkMetrics } from '../benchmarks/results.js';
 import { sanitizeDebugPayload } from '../adapters/contract.js';
+import {
+  buildFailureTriageBuckets,
+  buildProductionEvidence,
+  buildReleaseGate,
+} from './lib/production-evidence.js';
 
 export function reportSlug(name, index = 0) {
   return `${String(name).toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/(^-|-$)/gu, '')}-${index + 1}`;
@@ -116,6 +121,14 @@ export function enrichReportPayload(report, context = {}) {
   const retrievalEvidence = isRetrievalReport(report) ? retrievalEvidenceForReport(report) : null;
   const failureTriage = failureTriageForReport(report, failureEvidence, releaseGate);
   const historicalComparison = historicalComparisonForReport(report, context);
+  const productionEvidence = buildProductionEvidence({
+    target: targetReliability,
+    run: report,
+    report,
+    releaseGate,
+    failureTriage,
+    org: context.orgEvidence,
+  });
   return {
     ...report,
     evidenceMode: report.evidenceMode ?? 'seeded-sample',
@@ -125,6 +138,7 @@ export function enrichReportPayload(report, context = {}) {
     owner: packOwner(report.pack),
     gate,
     releaseGate,
+    productionEvidence,
     targetReliability,
     lifecycleSummary: lifecycle,
     failureTriage,
@@ -743,81 +757,14 @@ function gateForReport(report, releaseDecision, releaseGate = null) {
 }
 
 function releaseGateForReport(report, { releaseDecision, failureEvidence, targetReliability, lifecycle }) {
-  const critical = numericRunValue(report.criticalFailures);
-  const score = numericRunValue(report.score);
-  const benchmarkGate = String(report.benchmark?.gateResult ?? '').toLowerCase();
-  const failedContracts = report.benchmark?.failedContracts ?? [];
-  const reasonDetails = [];
-
-  if (critical > 0) {
-    reasonDetails.push(blockingReason('benchmark', `${critical} critical benchmark failure${critical === 1 ? '' : 's'} recorded.`));
-  }
-  if (score > 0 && score < 86) {
-    reasonDetails.push(blockingReason('benchmark', `Robustness score ${score} is below the 86 baseline.`));
-  }
-  if (['block', 'fail', 'failed'].includes(benchmarkGate)) {
-    reasonDetails.push(blockingReason('benchmark', `Benchmark gate result is ${benchmarkGate}.`));
-  } else if (benchmarkGate === 'warn') {
-    reasonDetails.push(warningReason('benchmark', 'Benchmark gate returned warn.'));
-  }
-  if (failedContracts.length) {
-    reasonDetails.push(blockingReason('contract', `Failed contracts: ${failedContracts.join(', ')}.`));
-  }
-  if (['failed', 'canceled', 'cancelled'].includes(lifecycle.status)) {
-    reasonDetails.push(blockingReason('lifecycle', `Worker lifecycle ended as ${lifecycle.status}.`));
-  }
-  if (/adapter|schema|contract|invalid|unsupported/iu.test(`${report.adapterMode} ${targetReliability.failureClasses.join(' ')}`)) {
-    reasonDetails.push(blockingReason('adapter', 'Adapter or contract diagnostics indicate an invalid execution path.'));
-  }
-  if (['Recently failing', 'Unstable', 'Contract mismatch', 'Expired'].includes(targetReliability.readinessStatus)) {
-    reasonDetails.push(blockingReason('target', `Execution target readiness is ${targetReliability.readinessStatus}.`));
-  }
-  if (['failed', 'blocked'].includes(targetReliability.validationState)) {
-    reasonDetails.push(blockingReason('validation', `Target validation state at run time is ${targetReliability.validationState}.`));
-  }
-  if (targetReliability.readinessStatus === 'Needs validation') {
-    reasonDetails.push(warningReason('validation', 'Execution target needs validation before production release.'));
-  }
-  if (targetReliability.ephemeral) {
-    reasonDetails.push(warningReason('target', 'Local tunnel target is ephemeral and keeps limited session history.'));
-  }
-  if (!failureEvidence.length && !reasonDetails.some((item) => item.blocking)) {
-    reasonDetails.push({
-      category: 'release',
-      severity: 'pass',
-      blocking: false,
-      message: 'Passed all required benchmark, worker, adapter, target, validation, and contract checks available for this report.',
-    });
-  }
-
-  const blockingFailures = reasonDetails.filter((item) => item.blocking).length;
-  const warningCount = reasonDetails.filter((item) => item.severity === 'warning').length;
-  const canRelease = blockingFailures === 0 && !['block', 'fail', 'failed'].includes(benchmarkGate);
-  const decision = canRelease ? releaseDecision : 'Block release';
-  const status = canRelease ? (warningCount ? 'warning' : 'passed') : 'failed';
-  return {
-    status,
-    canRelease,
-    decision,
-    answer: canRelease
-      ? (warningCount ? 'Can this agent be released? Yes, with warnings.' : 'Can this agent be released? Yes.')
-      : 'Can this agent be released? No.',
-    blockingFailures,
-    warningCount,
-    failedContracts,
-    reasons: reasonDetails.map((item) => item.message),
-    reasonDetails,
+  return buildReleaseGate({
+    report,
+    run: report,
     target: targetReliability,
     lifecycle,
-  };
-}
-
-function blockingReason(category, message) {
-  return { category, severity: 'blocking', blocking: true, message };
-}
-
-function warningReason(category, message) {
-  return { category, severity: 'warning', blocking: false, message };
+    failureEvidence,
+    releaseDecision,
+  });
 }
 
 function targetReliabilityForReport(report, context) {
@@ -842,7 +789,7 @@ function targetReliabilityForReport(report, context) {
     lastFail: fromContext?.lastFail ?? 'not recorded',
     failureClasses,
     latency: fromContext?.latency ?? 'not recorded',
-    contractVersion: fromContext?.contractVersion ?? executionTarget.contractVersion ?? report.benchmark?.benchmarkSnapshot?.schemaVersion ?? 'unknown',
+    contractVersion: fromContext?.contractVersion ?? executionTarget.contractVersion ?? 'unknown',
     ephemeral: Boolean(fromContext?.ephemeral ?? executionTarget.ephemeral),
   };
 }
@@ -872,46 +819,7 @@ function lifecycleSummaryForReport(report) {
 }
 
 function failureTriageForReport(report, failureEvidence, releaseGate) {
-  const buckets = [
-    ['agent_behavior', 'Agent behavior failures'],
-    ['adapter_contract', 'Adapter contract failures'],
-    ['execution_target', 'Execution target failures'],
-    ['validation', 'Validation failures'],
-    ['worker_lifecycle', 'Worker lifecycle failures'],
-  ].map(([id, label]) => ({ id, label, count: 0, reasons: [] }));
-  const bucketById = Object.fromEntries(buckets.map((bucket) => [bucket.id, bucket]));
-
-  failureEvidence.forEach((failure) => {
-    const triageClass = classifyFailureCause(failure);
-    failure.triageClass = triageClass;
-    bucketById[triageClass].count += 1;
-    bucketById[triageClass].reasons.push(failure.contract || failure.why || failure.id || 'failure evidence');
-  });
-  releaseGate.reasonDetails.forEach((reason) => {
-    const bucketId = reason.category === 'adapter' || reason.category === 'contract'
-      ? 'adapter_contract'
-      : reason.category === 'target'
-        ? 'execution_target'
-        : reason.category === 'validation'
-          ? 'validation'
-          : reason.category === 'lifecycle'
-            ? 'worker_lifecycle'
-            : null;
-    if (!bucketId) return;
-    bucketById[bucketId].count += reason.blocking ? 1 : 0;
-    bucketById[bucketId].reasons.push(reason.message);
-  });
-
-  return { buckets: buckets.map((bucket) => ({ ...bucket, reasons: uniqueStrings(bucket.reasons).slice(0, 3) })) };
-}
-
-function classifyFailureCause(failure) {
-  const text = `${failure.failureClass ?? ''} ${failure.contract ?? ''} ${failure.mutationId ?? ''} ${failure.why ?? ''}`;
-  if (/validation|private|reachability|token|auth/iu.test(text)) return 'validation';
-  if (/worker|queue|claim|retry|timeout|lifecycle/iu.test(text)) return 'worker_lifecycle';
-  if (/target|endpoint|network|tunnel|unavailable/iu.test(text)) return 'execution_target';
-  if (/adapter|schema|contract|json|unsupported|version/iu.test(text)) return 'adapter_contract';
-  return 'agent_behavior';
+  return buildFailureTriageBuckets(failureEvidence, releaseGate);
 }
 
 function historicalComparisonForReport(report, context) {
