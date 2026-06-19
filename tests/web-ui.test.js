@@ -542,8 +542,9 @@ test('saas sidebar nests organization administration', () => {
 
 test('console app shell lazy-loads route modules from a small bootstrap', () => {
   assert.match(mainSource, /import\('\.\/console\/app-shell\.js'\)/);
-  assert.match(mainSource, /renderBootstrapLoading/);
   assert.match(mainSource, /renderBootstrapError/);
+  assert.doesNotMatch(mainSource, /renderBootstrapLoading/);
+  assert.doesNotMatch(mainSource, /Loading HarnessAmp/);
   assert.match(source, /routeModuleLoaders/);
   assert.match(source, /import\('\.\/routes\/dashboard\.js'\)/);
   assert.match(source, /import\('\.\/routes\/runs\.js'\)/);
