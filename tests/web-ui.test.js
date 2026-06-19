@@ -90,8 +90,6 @@ test('web report exposes export and persistence actions', () => {
   ].forEach((id) => assert.match(source, new RegExp(`id="${id}"`)));
   [
     'Release decision',
-    'Create CI gate',
-    'Compare latest run',
     'reportTableRows',
     'localRunReportRows',
     'localRunReportId',
@@ -125,6 +123,13 @@ test('web report exposes export and persistence actions', () => {
 });
 
 test('web app splits the product landing page from the operator surface', () => {
+  const consoleSurfaceSources = [
+    source,
+    targetsRouteSource,
+    reportsRouteSource,
+    runsRouteSource,
+    failuresRouteSource,
+  ].join('\n');
   [
     'schema-status-list',
     'benchmark-contract-panel',
@@ -152,18 +157,14 @@ test('web app splits the product landing page from the operator surface', () => 
     'Connect the agent you operate.',
     'Sample data first. Real execution when connected.',
     'Adapter contract kit',
-    'Execution Targets',
-    'renderExecutionTargets',
     'executionTargetRegistryRows',
     'executionTargetTerms',
-    'readinessLabels',
     'buildProductionEvidence',
     'productionEvidenceForDashboard',
     'renderTargetReadinessSnapshot',
     'targetReliabilityForRegistryTarget',
     'readinessStatusForTarget',
     'target-card__readiness',
-    'target-registry',
     'Registered runner',
     'Vercel AI SDK route',
     'Hosted BYOK unavailable',
@@ -228,7 +229,15 @@ test('web app splits the product landing page from the operator surface', () => 
     'Governance ownership',
     "BYOK', 'gated",
     'Hosted BYOK \\(gated\\)',
-  ].forEach((text) => assert.match(source, new RegExp(text)));
+  ].forEach((text) => assert.match(consoleSurfaceSources, new RegExp(text)));
+  [
+    'Execution Targets',
+    'renderExecutionTargets',
+    'readinessLabels',
+    'target-registry',
+    'Canonical readiness surface for release evidence.',
+    'Validate reachability, tokens, JSON, contract version',
+  ].forEach((text) => assert.match(targetsRouteSource, new RegExp(text)));
   [
     'Sample workspace',
     'Connected project',
@@ -297,6 +306,7 @@ test('saas console persists harnesses and exposes smoke-test controls', () => {
 });
 
 test('saas failure page exposes actionable workflow controls', () => {
+  const failureSources = `${source}\n${failuresRouteSource}`;
   [
     'renderSaasFailuresList',
     'failure-search',
@@ -359,10 +369,11 @@ test('saas failure page exposes actionable workflow controls', () => {
     'Release blocker suite',
     'Suggested control fix',
     'Exported failure evidence',
-  ].forEach((text) => assert.match(source, new RegExp(text)));
+  ].forEach((text) => assert.match(failureSources, new RegExp(text)));
 });
 
 test('saas start run supports end-to-end queued run flow', () => {
+  const runSources = `${source}\n${runsRouteSource}`;
   [
     'run-config-form',
     'run-workflow',
@@ -418,7 +429,7 @@ test('saas start run supports end-to-end queued run flow', () => {
     '/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs',
     'window.location.href = `/runs/${encodeURIComponent(run.id)}`',
     'window.location.href = `/runs/${encodeURIComponent(updatedCurrent.id)}/summary`',
-  ].forEach((text) => assert.match(source, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
+  ].forEach((text) => assert.match(runSources, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 });
 
 test('saas reports page exposes working export controls', () => {
@@ -428,7 +439,6 @@ test('saas reports page exposes working export controls', () => {
     'reportExportDetail',
     'Browser-ready review copy',
     'data-report-export',
-    'report-export-status',
     'bindReportExportEvents',
     'exportSaasReport',
     'reportPayload',
@@ -441,8 +451,16 @@ test('saas reports page exposes working export controls', () => {
     'Bearer \\[redacted\\]',
     '\\[redacted-api-key\\]',
     'Benchmark',
-    'Seeded sample rows stay labeled',
   ].forEach((text) => assert.match(source, new RegExp(text)));
+  [
+    'renderSaasReports',
+    'report-export-status',
+    'Run reports',
+    'Seeded sample rows stay labeled',
+    'Export executive report',
+    'Create CI gate',
+    'Compare latest run',
+  ].forEach((text) => assert.match(reportsRouteSource, new RegExp(text)));
 });
 
 test('saas pack catalog exposes RetrievalGuard, CustomerCareGuard, and LegalGuard manifests', () => {
