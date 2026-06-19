@@ -49,6 +49,8 @@ HarnessAmp is the control plane. Customer workloads stay on your runner, deploye
 4. Start a worker-backed run.
 5. Review lifecycle, diagnostics, and release gate output.
 
+The console uses one production evidence snapshot across `/dashboard`, `/targets`, run summaries, reports, and organization/admin surfaces. That snapshot labels the project as `Sample workspace`, `Connected project`, or `Production run`; labels evidence as `Sample data` or `Real execution`; and derives the release gate from target readiness, validation, lifecycle, benchmark result, failure triage, contract state, and entitlement metadata.
+
 ## Execution Targets
 
 Recommended production path:
@@ -102,11 +104,12 @@ node scripts/harnessamp.mjs run --pack healthguard-core --generated smoke --fail
 
 Reports emphasize:
 
-- pass/fail release gate
+- release gate status: `Release eligible`, `Release blocked`, `Warnings present`, or sample-data not applicable
 - robustness gap
 - failed contracts
 - mutation failures
 - reproducible diagnostics
+- target readiness and failure-class context
 - exportable Markdown, JSON, CSV, and Print HTML evidence
 
 ## Local Development
@@ -121,7 +124,7 @@ npm run dev
 Open:
 
 ```text
-http://127.0.0.1:4174/dashboard
+http://127.0.0.1:4173/dashboard
 ```
 
 Seeded local auth:
@@ -185,6 +188,14 @@ Local seeded auth:
 ```text
 HARNESSAMP_DEV_AUTH=1
 ```
+
+Local verification:
+
+```bash
+npm run verify
+```
+
+`npm run verify` runs the Node test suite and production build. Browser checks remain available separately with `npm run test:e2e -- --reporter=line`.
 
 ## Organizations and Plans
 

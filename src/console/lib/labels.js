@@ -20,8 +20,8 @@ export const dataModeLabels = {
   sampleData: 'Sample data',
   realExecution: 'Real execution',
   localPreview: 'Local preview',
-  ephemeralTarget: 'Ephemeral target',
-  productionGradeTarget: 'Production-grade target',
+  ephemeralTarget: 'Ephemeral',
+  productionGradeTarget: 'Production-grade',
 };
 
 export const readinessLabels = {
@@ -33,6 +33,8 @@ export const readinessLabels = {
   contractMismatch: 'Contract mismatch',
   releaseBlocked: 'Release blocked',
   releaseEligible: 'Release eligible',
+  warningsPresent: 'Warnings present',
+  notApplicable: 'Not release evidence',
   sample: 'Sample data',
   realExecution: 'Real execution',
 };
