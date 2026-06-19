@@ -759,11 +759,6 @@ function routeRenderContext() {
     renderSaasContracts,
     renderSaasCompare,
     renderSaasCi,
-    renderSaasNewRun,
-    renderSaasRunSummary,
-    renderSaasRunProgress,
-    renderSaasFailuresList,
-    renderSaasFailureDetail,
     renderOrgOverview,
     renderOrgMembers,
     renderOrgUsage,
@@ -782,6 +777,66 @@ function routeRenderContext() {
     renderReportsTable,
     renderSaasMetric,
     reportTableRows,
+    allFailureRows,
+    benchmarkForRun,
+    benchmarkRunOptions,
+    benchmarkGateForRun,
+    consoleState,
+    estimateRunSelection,
+    escapeHtml,
+    failureFixGuidance,
+    failurePayload,
+    filteredFailures,
+    getConsoleHarnesses,
+    getRunReportState: () => runReportState,
+    lifecycleDisplayLabel,
+    listRealReports,
+    localRunReportId,
+    nextRunAction,
+    productionEvidenceForRun,
+    readLocalFailureWorkflow,
+    regressionSuiteOptions,
+    regressionSuitesWithFailures,
+    renderBenchmarkAuthority,
+    renderBenchmarkContents,
+    renderBreakdownPanel,
+    renderCiSlug,
+    renderEmptyState,
+    renderExpectedArtifacts,
+    renderFailureAuditTrail,
+    renderFailureTriagePanel,
+    renderFailuresTable,
+    renderField,
+    renderGatePreview,
+    renderGovernanceList,
+    renderHarnessReadiness,
+    renderHistoricalComparisonPanel,
+    renderLaunchStateCallout,
+    renderLifecycleRail,
+    renderPreflightChecklist,
+    renderRegressionSuiteCard,
+    renderReleaseDecision,
+    reportPayload,
+    renderRunExecutionTargetStep,
+    renderRunLaunchWorkflow,
+    renderRunModeControl,
+    renderRunTargetReadiness,
+    renderRunUsageEstimate,
+    renderSelect,
+    renderSelectFromObjects,
+    renderTargetReliabilityReportPanel,
+    runnablePackOptions,
+    runEligibilityForBenchmark,
+    runLaunchState,
+    runPreflightItems,
+    runRecord,
+    runTierOptions,
+    runLifecycleLabel,
+    saasFailureDetails,
+    selectedBenchmarkForDraft,
+    severityClass,
+    state,
+    targetReliabilityContextForRun,
   };
 }
 
@@ -1006,69 +1061,6 @@ function renderSaasContracts() {
             <div><h4>Packs using this contract</h4><p>${escapeHtml(packs)}</p></div>
           </div>
         </details>`).join('')}</div>
-    </section>
-  `;
-}
-
-function renderSaasNewRun() {
-  const draft = consoleState.runDraft;
-  const harnesses = getConsoleHarnesses();
-  const packOptions = runnablePackOptions();
-  const selectedPack = packOptions.find((pack) => pack.id === draft.packId) ?? packOptions[0];
-  const selectedTier = runTierOptions().find((tier) => tier.id === draft.tier) ?? runTierOptions()[0];
-  const selectedBenchmark = selectedBenchmarkForDraft(draft);
-  const estimated = estimateRunSelection(selectedPack, selectedTier);
-  const selectedHarness = harnesses.find((harness) => harness.id === draft.harnessId) ?? harnesses[0];
-  const eligibility = runEligibilityForBenchmark(selectedBenchmark, estimated);
-  const preflight = runPreflightItems({ benchmark: selectedBenchmark, harness: selectedHarness, eligibility, draft });
-  const launchState = runLaunchState({ benchmark: selectedBenchmark, harness: selectedHarness, eligibility, draft });
-  return `
-    <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Configure Run</h2><p>Choose a benchmark, select an execution target, validate it, then launch a worker-backed run.</p></div>${renderDataSourceStrip(state.sessionStatus === 'authenticated' ? 'Live project data' : 'Local preview', state.sessionStatus === 'authenticated' ? 'Uses API-backed job queue.' : 'Persists run draft and preview runs in this browser.')}</div>
-      ${renderRunLaunchWorkflow()}
-      <div class="ha-grid ha-grid--split">
-        <form class="ha-panel ha-form" id="run-config-form">
-          ${renderSelectFromObjects('Benchmark', benchmarkRunOptions(), selectedBenchmark?.id ?? '', 'run-benchmark-select')}
-          ${renderRunModeControl(draft.runMode)}
-          ${renderBenchmarkAuthority(selectedBenchmark, selectedPack, selectedTier)}
-          ${renderSelectFromObjects('Harness', harnesses.map((harness) => ({ value: harness.id, label: `${harness.name} / ${harness.environment}` })), selectedHarness?.id, 'run-harness-select')}
-          ${renderRunExecutionTargetStep()}
-          ${renderField('Max observations', String(draft.maxObservations), 'run-max-observations', 'number')}
-          ${renderField('Agent version', draft.agentVersion || selectedHarness?.agentVersion || 'unknown', 'run-agent-version')}
-          ${renderBenchmarkContents(selectedBenchmark)}
-          <details class="ha-advanced-run">
-            <summary>Advanced overrides</summary>
-            ${renderSelectFromObjects('Mutation Pack', packOptions.map((pack) => ({ value: pack.id, label: pack.name })), selectedPack?.id, 'run-pack-select')}
-            ${renderSelectFromObjects('Tier', runTierOptions().map((tier) => ({ value: tier.id, label: tier.label })), selectedTier.id, 'run-tier-select')}
-            ${renderSelect('Fail condition', ['block on critical failures', 'block on high severity', 'block on score below threshold', 'never block'], draft.failCondition, 'run-fail-condition')}
-          </details>
-          ${renderLaunchStateCallout(launchState)}
-          <div class="ha-form-actions">
-            <button class="ha-primary" id="start-configured-run" type="button" ${launchState.canLaunch ? '' : 'disabled'}>${escapeHtml(launchState.actionLabel)}</button>
-            <a class="ha-secondary" href="/targets">Manage targets</a>
-            <a class="ha-secondary" href="/runs/${escapeHtml(consoleState.activeRunId || 'run-healthguard-2419')}">View active run</a>
-          </div>
-          <p class="ha-form-feedback" id="run-config-feedback">${escapeHtml(consoleState.runFeedback)}</p>
-        </form>
-        <article class="ha-panel ha-estimate">
-          <h3>Run Readiness</h3>
-          ${renderSaasMetric('Benchmark', selectedBenchmark ? `${selectedBenchmark.name} v${selectedBenchmark.version}` : 'Mapped from pack/tier', selectedBenchmark ? selectedBenchmark.slug : `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
-          ${renderSaasMetric('Release eligibility', eligibility.label, eligibility.detail, eligibility.tone)}
-          ${renderSaasMetric('Estimated scenarios', estimated.scenarios, `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
-          ${renderSaasMetric('Estimated evaluated observations', estimated.observations, 'response x contract checks', 'neutral')}
-          ${renderRunUsageEstimate({ estimated, draft })}
-          ${renderPreflightChecklist(preflight)}
-          ${renderRunTargetReadiness()}
-          ${renderGatePreview(selectedBenchmark)}
-          ${renderHarnessReadiness(selectedHarness)}
-          ${renderExpectedArtifacts()}
-          ${renderCiSlug(selectedBenchmark)}
-          <div class="ha-run-links">
-            <a href="/failures">Open failure queue</a>
-            <a href="/reports">Open reports</a>
-          </div>
-        </article>
-      </div>
     </section>
   `;
 }
@@ -1528,92 +1520,6 @@ function runPreflightItems({ benchmark, harness, eligibility, draft }) {
   ];
 }
 
-function renderSaasRunProgress(runId = 'run-healthguard-2419') {
-  const run = runRecord(runId);
-  const id = run.id;
-  const status = run.status;
-  const progress = run.progress ?? (status === 'queued' ? 8 : status === 'running' ? 58 : status === 'failed' ? 41 : 100);
-  const statusText = runLifecycleLabel(run);
-  const statusDisplay = lifecycleDisplayLabel(statusText);
-  const jobMeta = run.jobId ? ` / Job ${run.jobId}` : '';
-  return `
-    <section class="ha-page">
-      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)}</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(run.pack)} / ${escapeHtml(run.tierLabel)} / Started ${escapeHtml(run.started)}${escapeHtml(jobMeta)}. Run status: ${escapeHtml(statusDisplay)}.</p></div><a class="ha-primary" href="/runs/${escapeHtml(id)}/summary">View Summary</a></div>
-      ${renderLifecycleRail(statusText)}
-      <div class="ha-metrics">
-        ${renderSaasMetric('Run status', statusDisplay, 'current state', status === 'completed' ? 'passed' : status === 'failed' ? 'critical' : 'warn')}
-        ${renderSaasMetric('Progress', `${progress}%`, `${escapeHtml(run.observations)} observations evaluated`, status === 'completed' ? 'passed' : 'warn')}
-        ${renderSaasMetric('Critical failures', run.critical, 'review required when nonzero', Number(run.critical) > 0 ? 'critical' : 'passed')}
-        ${renderSaasMetric('Average latency', '1.84s', 'p95 3.1s', 'neutral')}
-      </div>
-      <article class="ha-panel ha-run-timeline" id="run-live-status" aria-live="polite">
-        <div class="ha-meter"><span style="width: ${progress}%"></span></div>
-        <ol>${run.timeline.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ol>
-      </article>
-      <div class="ha-grid ha-grid--split">
-        ${renderBreakdownPanel('Failures by mutation family', [['prompt pressure', 8], ['context omission', 6], ['role confusion', 4], ['schema drift', 2]])}
-        ${renderBreakdownPanel('Failures by contract', [['Escalate red flags', 4], ['Avoid diagnosis', 3], ['Preserve facts', 2], ['Minimize sensitive data', 1]])}
-        <article class="ha-panel"><h3>Next action</h3><p>${escapeHtml(nextRunAction(run))}</p><div class="ha-run-links"><a href="/runs/${escapeHtml(id)}/summary">Run summary</a><a href="/failures">Failure queue</a><a href="/reports">Reports</a></div></article>
-        <article class="ha-panel"><h3>Endpoint errors</h3><p>${status === 'failed' ? 'Endpoint validation failed.' : 'No hard failures.'}</p></article>
-      </div>
-    </section>
-  `;
-}
-
-function renderSaasRunSummary(runId = 'run-healthguard-2419') {
-  const run = runRecord(runId);
-  const benchmark = benchmarkForRun(run);
-  const report = reportPayload(buildLocalRunReportId(run)) ?? listRealReports(runReportState).find((item) => item.runId === run.id);
-  const evidence = report?.productionEvidence ?? productionEvidenceForRun(run, report);
-  const releaseGate = evidence.releaseGate;
-  const targetReliability = report?.targetReliability ?? targetReliabilityContextForRun(run);
-  const lifecycle = report?.lifecycleSummary ?? { summary: run.timeline?.join(' -> ') ?? runLifecycleLabel(run), status: run.status };
-  const benchmarkScore = report?.benchmark?.score ?? run.score;
-  const gateResult = report?.releaseGate?.status ?? report?.benchmark?.gateResult ?? benchmarkGateForRun(run);
-  const runType = report?.benchmark?.benchmarkRunType ?? report?.benchmark?.runType ?? run.runMode ?? 'seeded sample';
-  const snapshot = report?.benchmark?.benchmarkSnapshot ?? report?.benchmark?.snapshot ?? null;
-  const majorFailures = Number(run.critical) > 0 ? '7' : run.status === 'failed' ? '3' : '2';
-  const passRate = run.score === '--' ? '--' : `${Math.max(0, Math.min(100, Number(run.score) + 6))}%`;
-  const scoreTone = Number(run.critical) > 0 ? 'major' : 'passed';
-  return `
-    <section class="ha-page">
-      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)} Summary</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(benchmark ? `${benchmark.name} v${benchmark.version}` : run.pack)} / ${escapeHtml(run.tierLabel)}</p></div><div class="ha-topbar__actions"><a class="ha-primary" href="/failures/fail-redflag-017">View Top Failure</a><a href="/reports">Open Report Center</a></div></div>
-      ${renderReleaseDecision(releaseGate?.answer ?? (Number(run.critical) > 0 || run.status === 'failed' ? 'Can this agent be released? No.' : 'Can this agent be released? Yes.'), releaseGate?.reasons?.join(' ') ?? (Number(run.critical) > 0 ? `${run.critical} critical failure(s) must be triaged and pinned before release.` : 'No critical release blockers in this run.'), releaseGate?.canRelease === false ? 'critical' : releaseGate?.warningCount ? 'major' : Number(run.critical) > 0 ? 'critical' : 'passed')}
-      <div class="ha-metrics">
-        ${renderSaasMetric('Benchmark Score', String(benchmarkScore), benchmark ? `${benchmark.slug} gate ${gateResult}` : 'mapped from run', scoreTone)}
-        ${renderSaasMetric('Release Gate', String(gateResult).toUpperCase(), releaseGate ? `${releaseGate.blockingFailures} blocking / ${releaseGate.warningCount} warnings` : 'not recorded', releaseGate?.canRelease === false || gateResult === 'block' ? 'critical' : releaseGate?.warningCount || gateResult === 'warn' ? 'major' : 'passed')}
-        ${renderSaasMetric('Run Type', runType, snapshot ? `snapshot ${snapshot.scenarioSetVersion}` : 'sample or seeded context', runType === 'official' ? 'passed' : 'major')}
-        ${renderSaasMetric('Critical Failures', run.critical, 'review required when nonzero', Number(run.critical) > 0 ? 'critical' : 'passed')}
-        ${renderSaasMetric('Target Readiness', targetReliability.readinessStatus, targetReliability.validationState, targetReliability.readinessStatus === 'Healthy' || targetReliability.readinessStatus === 'Production-grade' ? 'passed' : targetReliability.readinessStatus === 'Needs validation' || targetReliability.readinessStatus === 'Ephemeral' ? 'warn' : 'critical')}
-        ${renderSaasMetric('Run Success', targetReliability.runSuccessRate, 'same target context', scoreTone)}
-      </div>
-      <article class="ha-panel ha-panel--wide">
-        <div class="ha-panel__head"><h3>Release gate status</h3><span>${escapeHtml(releaseGate?.status ?? String(gateResult))}</span></div>
-        ${renderGovernanceList([
-          ['Can release', releaseGate?.canRelease ? 'yes' : 'no'],
-          ['Blocking failures', String(releaseGate?.blockingFailures ?? Number(run.critical) ?? 0)],
-          ['Warnings', String(releaseGate?.warningCount ?? 0)],
-          ['Target used', targetReliability.targetUsed],
-          ['Validation state at run time', targetReliability.validationState],
-          ['Benchmark/version', benchmark ? `${benchmark.name} v${benchmark.version}` : 'not recorded'],
-          ['Scoring profile', report?.benchmark?.scoringProfileVersion ?? snapshot?.scoringProfileVersion ?? 'not recorded'],
-          ['Gate profile', report?.benchmark?.gateProfileVersion ?? snapshot?.gateProfileVersion ?? 'not recorded'],
-          ['Lifecycle summary', lifecycle.summary],
-        ])}
-        <ul class="ha-compact-list">${(releaseGate?.reasons ?? ['Release gate derived from current run score and critical failures.']).map((reason) => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>
-      </article>
-      <div class="ha-grid ha-grid--dashboard">
-        ${renderTargetReadinessSnapshot(evidence, { compact: true })}
-        ${renderFailureTriagePanel(report)}
-        ${renderTargetReliabilityReportPanel(targetReliability)}
-        ${renderHistoricalComparisonPanel(report)}
-        <article class="ha-panel"><h3>Run artifacts</h3>${renderGovernanceList([['Report', 'Executive, JSON, CSV, Markdown'], ['Failure corpus', 'Promotion candidates available'], ['Audit', 'Owner/status actions persisted']])}<div class="ha-run-links"><a href="/reports">Executive report</a><a href="/failures">Failure queue</a><a href="/compare">Compare run</a></div></article>
-        <article class="ha-panel ha-panel--wide"><div class="ha-panel__head"><h3>Critical Failure List</h3><span>${escapeHtml(run.observations)} observations</span></div>${renderFailuresTable()}</article>
-      </div>
-    </section>
-  `;
-}
-
 function renderFailureTriagePanel(report) {
   const buckets = report?.failureTriage?.buckets ?? [
     { label: 'Agent behavior failures', count: Number(report?.criticalFailures ?? 0), reasons: ['Benchmark evidence requires review'] },
@@ -1666,125 +1572,6 @@ function renderHistoricalComparisonPanel(report) {
         ['Critical failure change', formatSigned(comparison.criticalDelta ?? 0)],
       ]) : ''}
     </article>
-  `;
-}
-
-function renderSaasFailuresList() {
-  const filters = consoleState.failureFilters;
-  const failures = filteredFailures();
-  const suites = regressionSuitesWithFailures();
-  const views = consoleState.savedFailureViews;
-  return `
-    <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Failure Queue</h2><p>Filter failures, assign owners, resolve false positives, and pin regression cases.</p></div><a class="ha-primary" href="/failures/fail-redflag-017">Open top failure</a></div>
-      ${renderNextActions([
-        ['Assign owner', '/failures/fail-redflag-017', 'Route the top critical failure'],
-        ['Add regression', '/failures/fail-redflag-017', 'Pin reproducible evidence'],
-        ['Rerun case', '/failures/fail-redflag-017', 'Verify after remediation'],
-      ])}
-      <article class="ha-panel ha-filter-bar">
-        ${renderSelectFromObjects('Saved view', views.map((view) => ({ value: view.id, label: view.name })), consoleState.savedFailureViewId, 'failure-saved-view-select')}
-        <label><span>Search</span><input id="failure-search" type="search" value="${escapeHtml(filters.search)}" placeholder="contract, mutation, scenario, owner" /></label>
-        ${renderSelect('Severity', ['All', 'Critical', 'Major', 'Minor'], filters.severity, 'failure-filter-severity')}
-        ${renderSelect('Status', ['All', 'New', 'Assigned', 'In Progress', 'False positive', 'Regression pinned', 'Resolved'], filters.status, 'failure-filter-status')}
-        ${renderSelect('Owner', ['All', 'Safety Review', 'Clinical Safety', 'Knowledge Review', 'Privacy Review', 'Compliance Review'], filters.owner, 'failure-filter-owner')}
-        <button id="failure-save-view" type="button">Save current view</button>
-        <button id="failure-clear-filters" type="button">Clear filters</button>
-      </article>
-      <article class="ha-panel">
-        <div class="ha-panel__head"><h3>Open failures</h3><span>${failures.length} shown</span></div>
-        ${failures.length ? renderFailuresTable(failures) : renderEmptyState('No failures match the current filters.', 'Clear filters or start a new run to refresh the queue.', '/runs/new', 'Start run')}
-      </article>
-      <article class="ha-panel ha-panel--wide">
-        <div class="ha-panel__head"><h3>Regression suites</h3><span>${suites.reduce((count, suite) => count + suite.failures.length, 0)} pinned cases</span></div>
-        <div class="ha-suite-grid">${suites.map(renderRegressionSuiteCard).join('')}</div>
-      </article>
-    </section>
-  `;
-}
-
-function renderSaasFailureDetail(failureId = 'fail-redflag-017') {
-  const [severity, contract, mutation, scenario, status, owner, reproducibility, id] = allFailureRows().find((failure) => failure[7] === failureId) ?? allFailureRows()[0];
-  const savedWorkflow = readLocalFailureWorkflow(id);
-  const currentSeverity = savedWorkflow?.severity ?? severity;
-  const currentStatus = savedWorkflow?.status ?? status;
-  const currentOwner = savedWorkflow?.owner ?? owner;
-  const payload = failurePayload(id);
-  const detail = payload ?? saasFailureDetails[id] ?? saasFailureDetails['fail-redflag-017'];
-  const guidance = failureFixGuidance(payload);
-  return `
-    <section class="ha-page">
-      <div class="ha-failure-header">
-        <div><span id="failure-severity" class="ha-badge ${severityClass(currentSeverity)}">${escapeHtml(currentSeverity)}</span><h2>${escapeHtml(contract)}</h2><p>Mutation family: ${escapeHtml(mutation)} / Scenario: ${escapeHtml(scenario)} / Status: <span id="failure-status">${escapeHtml(currentStatus)}</span> / Owner: <span id="failure-owner">${escapeHtml(currentOwner)}</span></p></div>
-        <div class="ha-topbar__actions">
-          <button id="failure-assign-owner" data-failure-action="assign-owner" data-failure-id="${escapeHtml(id)}" type="button">Assign owner</button>
-          <button id="failure-rerun-case" data-failure-action="rerun-case" data-failure-id="${escapeHtml(id)}" type="button">Rerun this case</button>
-          <button id="failure-export" data-failure-action="export-failure" data-failure-id="${escapeHtml(id)}" type="button">Export failure</button>
-        </div>
-      </div>
-      ${renderReleaseDecision(currentSeverity === 'Critical' ? 'Block release' : 'Release with review', `${currentSeverity} failure in ${contract}; owner ${currentOwner}; status ${currentStatus}.`, currentSeverity === 'Critical' ? 'critical' : 'major')}
-      <article class="ha-panel ha-failure-status" id="failure-action-status" aria-live="polite">
-        <div>
-          <strong id="failure-action-title">Workflow ready</strong>
-          <span id="failure-action-message">Choose an action.</span>
-        </div>
-        <ol id="failure-action-log" class="ha-action-log">
-          <li>No workflow actions recorded yet.</li>
-        </ol>
-      </article>
-      <article class="ha-panel ha-panel--wide">
-        <div class="ha-panel__head"><h3>Audit trail</h3><span>tamper-evident workflow log</span></div>
-        ${renderFailureAuditTrail(id, currentStatus, currentOwner, currentSeverity)}
-      </article>
-      <div class="ha-grid ha-grid--evidence">
-        <article class="ha-panel ha-evidence">
-          <h3>Expected behavior</h3><p>${escapeHtml(detail.expected)}</p>
-          <h3>Observed behavior</h3><p>${escapeHtml(detail.observed)}</p>
-          <h3>Why this matters</h3><p>${escapeHtml(detail.why)}</p>
-          <h3>Reproducibility</h3><p>${escapeHtml(reproducibility)} across recent reruns.</p>
-          <h3>Owner</h3><p>${escapeHtml(payload?.recommendedOwner ?? 'Safety Review')}</p>
-        </article>
-        <article class="ha-panel ha-evidence">
-          <h3>Original scenario</h3><pre>${escapeHtml(detail.original)}</pre>
-          <h3>Mutated scenario</h3><pre>${escapeHtml(detail.mutated)}</pre>
-          <h3>Agent input</h3><pre>${escapeHtml(JSON.stringify({ scenario_id: scenario, mutation_id: mutation, failure_id: id, run_id: payload?.runId, report_id: payload?.reportId }, null, 2))}</pre>
-          <h3>Agent output</h3><pre>${escapeHtml(detail.output)}</pre>
-        </article>
-        <article class="ha-panel ha-evidence">
-          <h3>Tool calls</h3><p>No tool calls.</p>
-          <h3>Retrieved context</h3><p>${escapeHtml(detail.context)}</p>
-          <h3>Evaluator reasoning</h3><p>${escapeHtml(detail.reasoning)}</p>
-          <h3>Contract clause</h3><p>${escapeHtml(detail.clause)}</p>
-          <h3>Auditability</h3><p>Owner, status, severity, comments, reruns, and regression-suite pinning are recorded in the workflow log.</p>
-        </article>
-        <article class="ha-panel ha-fix-guidance">
-          <div class="ha-panel__head"><h3>Fix guidance</h3><button id="copy-fix-checklist" data-failure-id="${escapeHtml(id)}" type="button">Copy checklist</button></div>
-          <div class="ha-guidance-block"><span>Likely root cause</span><p>${escapeHtml(guidance.rootCause)}</p></div>
-          <div class="ha-guidance-block"><span>Suggested control fix</span><p>${escapeHtml(guidance.controlFix)}</p></div>
-          <div class="ha-guidance-block"><span>Regression test</span><p>${escapeHtml(guidance.regressionTest)}</p></div>
-          <ol>${guidance.checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ol>
-        </article>
-        <article class="ha-panel ha-actions">
-          <h3>Actions</h3>
-          <div class="ha-triage-controls">
-            ${renderSelect('Assignee', ['Safety Review', 'Clinical Safety', 'Knowledge Review', 'Privacy Review', 'Compliance Review'], currentOwner, 'failure-owner-select')}
-            ${renderSelect('Severity', ['Critical', 'Major', 'Minor'], currentSeverity, 'failure-severity-select')}
-            ${renderSelectFromObjects('Regression suite', regressionSuiteOptions(), consoleState.selectedRegressionSuiteId, 'failure-regression-suite-select')}
-            <label><span>Comment</span><textarea id="failure-comment" rows="3" placeholder="Add reviewer note"></textarea></label>
-          </div>
-          ${[
-            ['create-task', 'Create task'],
-            ['assign-owner', 'Assign owner'],
-            ['false-positive', 'Mark false positive'],
-            ['change-severity', 'Change severity'],
-            ['add-comment', 'Add comment'],
-            ['rerun-case', 'Rerun this case'],
-            ['add-regression', 'Add to regression suite'],
-            ['export-failure', 'Export failure'],
-          ].map(([action, item]) => `<button data-failure-action="${action}" data-failure-id="${escapeHtml(id)}" type="button">${item}</button>`).join('')}
-        </article>
-      </div>
-    </section>
   `;
 }
 

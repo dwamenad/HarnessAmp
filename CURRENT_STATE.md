@@ -9,21 +9,21 @@ Branch: `codex/harnessamp-v2-contracts`
 Checked-out commit:
 
 ```text
-26c938c Fix bootstrap shell test
+e505719 Split targets and reports route ownership
 ```
 
 Full commit:
 
 ```text
-26c938c1c5e9dfa963c1c22ae8449f42c424cd68
+e505719bb0e31c26478f41a4cab02946bdba4763
 ```
 
-Working tree: dirty. Current local changes are the route ownership pass after the green `26c938c` CI repair. The pass moves `/targets` and `/reports` page-level rendering into `src/console/routes/targets.js` and `src/console/routes/reports.js`, leaves shared card/table helpers in `src/console/app-shell.js`, updates static ownership tests, adds a cold-load `/targets` browser guard, and refreshes this state file.
+Working tree: dirty. Current local changes are the next route ownership pass after `e505719`. The pass moves `/runs/new`, `/runs/:id`, `/runs/:id/summary`, `/failures`, and `/failures/:id` page-level rendering into `src/console/routes/runs.js` and `src/console/routes/failures.js`, leaves shared run/failure helpers in `src/console/app-shell.js`, updates static ownership tests, adds cold-load browser guards for run/failure routes, and refreshes this state file.
 
 Current local browser target observed in this thread:
 
 ```text
-http://localhost:4173/targets
+http://localhost:4173/reports
 ```
 
 ## Current Product State
@@ -57,7 +57,7 @@ The console now distinguishes sample/demo behavior from real execution through s
 - `org.js`: organization overview, members, usage, billing, settings, `/team` compatibility alias
 - `public-demo.js`: home, docs, app/demo, report path surfaces
 
-The route modules are being split incrementally. `/targets` and `/reports` now own their page-level render bodies in their route modules while consuming shared helper functions from `src/console/app-shell.js`. The remaining route modules still delegate page bodies back into the shell; the next split should continue with `/runs/new`, run summary, `/failures`, and dashboard.
+The route modules are being split incrementally. `/targets`, `/reports`, `/runs/new`, run progress, run summary, `/failures`, and failure detail now own their page-level render bodies in route modules while consuming shared helper functions from `src/console/app-shell.js`. The remaining route modules still delegate page bodies back into the shell; the next split should continue with dashboard, harnesses, packs, contracts, compare, CI, org, and public/demo.
 
 Primary product routes:
 
@@ -97,7 +97,7 @@ The sidebar treats `Organization` as a collapsible admin group with `Overview`, 
 - safe bootstrap failure state
 - no visible normal-path loading screen; `Loading HarnessAmp` was removed to avoid a pre-render flash
 
-`src/console/app-shell.js` is now the largest frontend module, currently about 8,900 lines after the route-loader extraction. It still owns:
+`src/console/app-shell.js` is now the largest frontend module, currently about 8,600 lines after the route-loader extraction. It still owns:
 
 - app boot and render orchestration
 - public landing page rendering
@@ -107,9 +107,9 @@ The sidebar treats `Organization` as a collapsible admin group with `Overview`, 
 - dashboard route rendering
 - harnesses and smoke-test UI
 - mutation pack catalog/detail views
-- run launch, run progress, and run summary views
+- shared run launch, run progress, and run summary helpers used by the `/runs` route module
 - execution-target registry helpers, target cards, and validation panels used by the `/targets` route module
-- failure list/detail workflow
+- shared failure workflow helpers used by the `/failures` route module
 - compare route and shared report table/export helpers used by the `/reports` route module
 - CI/runners route
 - org/admin route rendering
@@ -144,19 +144,19 @@ The app no longer ships the console shell through the initial Vite entry. `src/m
 ```text
 dist/assets/index-*.js ~2.75 kB minified
 dist/assets/dashboard-*.js ~0.47 kB minified
-dist/assets/runs-*.js ~0.24 kB minified
+dist/assets/runs-*.js ~11.00 kB minified
 dist/assets/targets-*.js ~1.82 kB minified
 dist/assets/reports-*.js ~1.04 kB minified
-dist/assets/failures-*.js ~0.14 kB minified
+dist/assets/failures-*.js ~7.48 kB minified
 dist/assets/org-*.js ~0.34 kB minified
 dist/assets/public-demo-*.js ~0.23 kB minified
 dist/assets/vendor-marked-*.js ~39.67 kB minified
 dist/assets/console-report-export-*.js ~50.23 kB minified
 dist/assets/benchmark-runtime-*.js ~91.19 kB minified
-dist/assets/app-shell-*.js ~688.36 kB minified
+dist/assets/app-shell-*.js ~673.33 kB minified
 ```
 
-The Vite large chunk warning remains for `dist/assets/app-shell-*.js` because most route bodies and route-specific data imports still live in the shell. `/targets` and `/reports` now carry their page-level markup in their own chunks, which is why those route chunks are larger and the shell is slightly smaller. Eliminating the warning requires moving dashboard/runs/failures/org/public-demo render bodies and route-specific data imports into their route modules. No heavy dependency was added.
+The Vite large chunk warning remains for `dist/assets/app-shell-*.js` because dashboard, harnesses, packs, contracts, compare, CI, org, public/demo, docs, and many route-specific data imports still live in the shell. `/targets`, `/reports`, `/runs`, and `/failures` now carry page-level markup in their own chunks, which is why those route chunks are larger and the shell is smaller. Eliminating the warning requires moving the remaining page bodies and route-specific data imports into their route modules. No heavy dependency was added.
 
 ## Test Coverage Inventory
 
@@ -174,10 +174,10 @@ Focused verification for this cleanup slice:
 
 ```bash
 node --test tests/web-ui.test.js
-node --input-type=module <route browser smoke against http://localhost:4173/targets and /reports>
+node --input-type=module <route browser smoke against http://localhost:4173/runs/new, /runs/run-healthguard-2419/summary, /failures, and /failures/fail-redflag-017>
 ```
 
-Result: `tests/web-ui.test.js` passed 14 tests. Browser smoke confirmed `/targets` and `/reports` render expected headings/copy, do not show `Loading HarnessAmp` or `Preparing the console`, and report no browser errors.
+Result: `tests/web-ui.test.js` passed 14 tests. Browser smoke confirmed run and failure routes render expected headings/copy, do not show `Loading HarnessAmp` or `Preparing the console`, and report no browser errors.
 
 Full verification:
 
@@ -186,7 +186,7 @@ npm test
 npm run build
 ```
 
-Result: `npm test` passed 285 tests. `npm run build` passed with the remaining `dist/assets/app-shell-*.js ~688.36 kB` chunk warning. The configured `npm run test:e2e` was not run during this pass because its webServer starts a fresh API server on `127.0.0.1:3000`, which is already used by the live local app server in this thread.
+Result: `npm test` passed 285 tests. `npm run build` passed with the remaining `dist/assets/app-shell-*.js ~673.33 kB` chunk warning. The configured `npm run test:e2e` was not run during this pass because its webServer starts a fresh API server on `127.0.0.1:3000`, which is already used by the live local app server in this thread.
 
 Syntax verification:
 
@@ -215,8 +215,8 @@ Result: passing.
 
 Highest-priority remaining cleanup:
 
-1. Continue moving real route render bodies and route-specific state/data imports from `src/console/app-shell.js` into `src/console/routes/*`; `/targets` and `/reports` page-level bodies are now split.
-2. Move `/runs/new`, run summary, `/failures`, dashboard, org, and public/demo page bodies next.
+1. Continue moving real route render bodies and route-specific state/data imports from `src/console/app-shell.js` into `src/console/routes/*`; `/targets`, `/reports`, `/runs`, and `/failures` page-level bodies are now split.
+2. Move dashboard, harnesses, packs, contracts, compare, CI, org, and public/demo page bodies next.
 3. Split docs/public-demo data and benchmark catalog imports so they are loaded only by their route modules.
 4. Continue replacing older "demo" and "ready" copy where it bypasses the shared evidence labels.
 5. Expand `/targets` browser-level coverage so production-capable, ephemeral, failed, and contract-mismatched targets are verified through rendered DOM, not only static guards.

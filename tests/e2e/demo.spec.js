@@ -45,6 +45,31 @@ test('targets route cold-loads without the bootstrap loading screen', async ({ p
   await expect(page.getByText('Preparing the console')).toHaveCount(0);
 });
 
+test('run routes cold-load without the bootstrap loading screen', async ({ page }) => {
+  await page.goto('/runs/new');
+  await expect(page.getByRole('heading', { name: 'New Run', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Configure Run' })).toBeVisible();
+  await expect(page.getByText('Loading HarnessAmp')).toHaveCount(0);
+  await expect(page.getByText('Preparing the console')).toHaveCount(0);
+
+  await page.goto('/runs/run-healthguard-2419/summary');
+  await expect(page.getByRole('heading', { name: 'Run Summary', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'HealthGuard Standard Summary' })).toBeVisible();
+  await expect(page.getByText('Loading HarnessAmp')).toHaveCount(0);
+});
+
+test('failure routes cold-load without the bootstrap loading screen', async ({ page }) => {
+  await page.goto('/failures');
+  await expect(page.getByRole('heading', { name: 'Failures', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Failure Queue' })).toBeVisible();
+  await expect(page.getByText('Loading HarnessAmp')).toHaveCount(0);
+
+  await page.goto('/failures/fail-redflag-017');
+  await expect(page.getByRole('heading', { name: 'Failure Evidence', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Escalate red flags' })).toBeVisible();
+  await expect(page.getByText('Loading HarnessAmp')).toHaveCount(0);
+});
+
 test('runs the default diagnosis and shows schema validation', async ({ page }) => {
   await expect(page.getByText('Sample data first. Real execution when connected.')).toBeVisible();
   await expect(page.locator('#demo-gate')).toContainText(/PASS|WARN|BLOCK/);

@@ -123,6 +123,13 @@ test('web report exposes export and persistence actions', () => {
 });
 
 test('web app splits the product landing page from the operator surface', () => {
+  const consoleSurfaceSources = [
+    source,
+    targetsRouteSource,
+    reportsRouteSource,
+    runsRouteSource,
+    failuresRouteSource,
+  ].join('\n');
   [
     'schema-status-list',
     'benchmark-contract-panel',
@@ -222,7 +229,7 @@ test('web app splits the product landing page from the operator surface', () => 
     'Governance ownership',
     "BYOK', 'gated",
     'Hosted BYOK \\(gated\\)',
-  ].forEach((text) => assert.match(source, new RegExp(text)));
+  ].forEach((text) => assert.match(consoleSurfaceSources, new RegExp(text)));
   [
     'Execution Targets',
     'renderExecutionTargets',
@@ -299,6 +306,7 @@ test('saas console persists harnesses and exposes smoke-test controls', () => {
 });
 
 test('saas failure page exposes actionable workflow controls', () => {
+  const failureSources = `${source}\n${failuresRouteSource}`;
   [
     'renderSaasFailuresList',
     'failure-search',
@@ -361,10 +369,11 @@ test('saas failure page exposes actionable workflow controls', () => {
     'Release blocker suite',
     'Suggested control fix',
     'Exported failure evidence',
-  ].forEach((text) => assert.match(source, new RegExp(text)));
+  ].forEach((text) => assert.match(failureSources, new RegExp(text)));
 });
 
 test('saas start run supports end-to-end queued run flow', () => {
+  const runSources = `${source}\n${runsRouteSource}`;
   [
     'run-config-form',
     'run-workflow',
@@ -420,7 +429,7 @@ test('saas start run supports end-to-end queued run flow', () => {
     '/api/projects/${encodeURIComponent(state.selectedProjectId)}/jobs',
     'window.location.href = `/runs/${encodeURIComponent(run.id)}`',
     'window.location.href = `/runs/${encodeURIComponent(updatedCurrent.id)}/summary`',
-  ].forEach((text) => assert.match(source, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
+  ].forEach((text) => assert.match(runSources, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 });
 
 test('saas reports page exposes working export controls', () => {
