@@ -2168,7 +2168,7 @@ function renderReportEvidenceCard(report) {
   const failures = payload?.classifiedFailures ?? [];
   const blocking = failures.filter((failure) => failure.severity === 'blocking');
   const warnings = failures.filter((failure) => failure.severity === 'warning');
-  const replayable = (payload?.failureEvidence ?? []).filter((failure) => failure.replay || failure.reproducibility).length;
+  const replayable = (payload?.failureEvidence ?? []).filter((failure) => failure.traceEvidence?.replayPayload || failure.replay || failure.reproducibility).length;
   const status = gate.status ?? (report.tone === 'critical' ? 'blocked' : 'eligible');
   const tone = status === 'blocked' ? 'critical' : status === 'warning' ? 'major' : status === 'eligible' ? 'passed' : 'neutral';
   const topClasses = failureClassList(failures.slice(0, 4)) || 'No failure classes recorded';
@@ -2187,6 +2187,7 @@ function renderReportEvidenceCard(report) {
       </div>
       <div class="ha-evidence-card__actions">
         <a href="${report.runId ? `/runs/${escapeHtml(report.runId)}/summary` : '/reports'}">Open summary</a>
+        <a href="/runs/new?mode=failed-scenarios&reportId=${escapeHtml(report.id)}">Rerun failures</a>
         ${renderReportExportButtons(report)}
       </div>
     </article>
@@ -7732,6 +7733,37 @@ function failurePayload(failureId) {
   if (!failure) return null;
   const [severity, contract, mutation, scenario, status, owner, reproducibility, id] = failure;
   const detail = saasFailureDetails[id] ?? saasFailureDetails['fail-redflag-017'];
+  const traceId = `seeded:${id}`;
+  const failureOrigin = seededFailureOrigin(contract, mutation, detail);
+  const traceEvidence = {
+    traceId,
+    origin: failureOrigin,
+    originLabel: humanizeDocSegment(failureOrigin),
+    keyTraceEvents: [
+      { step: 1, eventType: 'agent_invocation', label: `Scenario ${scenario} invoked`, status: 'ok' },
+      { step: 2, eventType: 'evaluator_step', label: detail.reasoning ?? detail.why, status: 'failed' },
+      { step: 3, eventType: 'failure_classification', label: mutation, status: 'failed' },
+    ],
+    toolCalls: [],
+    retrievedEvidence: detail.context ? [detail.context] : [],
+    citations: [],
+    replayStatus: 'replayable_metadata_captured',
+    replayPayload: { run_id: 'seeded-sample', scenario_id: scenario, mutation_id: mutation, trace_id: traceId },
+    regressionStatus: 'candidate',
+    regressionCase: {
+      scenario_id: scenario,
+      mutation_id: mutation,
+      failure_class: mutation,
+      agent_version: 'seeded-sample',
+      expected_behavior: detail.expected,
+      actual_behavior: detail.observed,
+      trace_id: traceId,
+      replay_payload: { run_id: 'seeded-sample', scenario_id: scenario, mutation_id: mutation, trace_id: traceId },
+      fixed_status: 'not_rerun',
+      first_seen_at: '',
+      last_seen_at: '',
+    },
+  };
   return {
     id,
     severity,
@@ -7752,7 +7784,27 @@ function failurePayload(failureId) {
     clause: detail.clause,
     recommendedOwner: 'Safety Review',
     recommendedFix: 'Retain urgent escalation behavior when user wording minimizes a red-flag symptom.',
+    failureOrigin,
+    traceEvidence,
+    regressionCase: traceEvidence.regressionCase,
+    toolCalls: traceEvidence.toolCalls,
+    retrievedEvidence: traceEvidence.retrievedEvidence,
+    citations: traceEvidence.citations,
+    replayMetadata: traceEvidence.replayPayload,
+    regressionStatus: traceEvidence.regressionStatus,
   };
+}
+
+function seededFailureOrigin(contract, mutation, detail = {}) {
+  const text = `${contract} ${mutation} ${detail.why ?? ''} ${detail.context ?? ''}`.toLowerCase();
+  if (/retrieval|citation|source|document/u.test(text)) return 'retrieval';
+  if (/tool/u.test(text)) return 'tool_use';
+  if (/policy|refund|mfa|privacy|authority|unauthorized/u.test(text)) return 'policy_boundary';
+  if (/adapter|contract|schema/u.test(text)) return 'adapter_contract';
+  if (/timeout|latency|endpoint/u.test(text)) return 'execution_target';
+  if (/worker|queue|retry/u.test(text)) return 'worker_lifecycle';
+  if (/evaluator|score/u.test(text)) return 'evaluator';
+  return 'model_behavior';
 }
 
 function wait(ms) {

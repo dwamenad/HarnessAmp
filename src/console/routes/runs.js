@@ -82,6 +82,11 @@ export function renderSaasNewRun(context) {
           </details>
           ${renderLaunchStateCallout(launchState)}
           </section>
+          <section class="ha-run-step-section">
+            <div class="ha-panel__head"><h3>Targeted rerun</h3><span>trace-backed failures only</span></div>
+            ${renderSelect('Rerun scope', ['Rerun blocking failures', 'Rerun warnings', 'Rerun selected failure class', 'Rerun failed scenarios from this report'], 'Rerun blocking failures', 'run-rerun-scope')}
+            <p class="ha-muted">Use trace provenance to rerun only failed scenarios, then classify outcomes as Fixed, Still failing, Newly failing, Regressed, or Not rerun.</p>
+          </section>
           <div class="ha-form-actions">
             <button class="ha-primary" id="start-configured-run" type="button" ${launchState.canLaunch ? '' : 'disabled'}>${escapeHtml(launchState.actionLabel)}</button>
             <a class="ha-secondary" href="/targets">Manage targets</a>

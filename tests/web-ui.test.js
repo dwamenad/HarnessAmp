@@ -346,6 +346,11 @@ test('saas failure page exposes actionable workflow controls', () => {
     'Regression suite',
     'Auditability',
     'Pin reproducible evidence',
+    'Trace provenance',
+    'Failure origin',
+    'Promotion candidate',
+    'renderTraceProvenance',
+    'provenanceLabel',
     'bindFailureWorkflowEvents',
     'handleFailureAction',
     'hydrateFailureWorkflow',
@@ -420,6 +425,10 @@ test('saas start run supports end-to-end queued run flow', () => {
     'Agent under test',
     'Harness / benchmark',
     'Release gate preview',
+    'Targeted rerun',
+    'Rerun blocking failures',
+    'Rerun failed scenarios from this report',
+    'Fixed, Still failing, Newly failing, Regressed, or Not rerun',
     'Behavioral release gate',
     'Sample evidence only',
     'Validate the selected execution target before launch.',
@@ -456,6 +465,7 @@ test('saas reports page exposes working export controls', () => {
     'renderReportEvidenceLibrary',
     'renderReportEvidenceCard',
     'ha-evidence-library',
+    'Rerun failures',
     'ha-report-table',
     'Failure intelligence',
     'renderFailureIntelligencePanel',
@@ -475,6 +485,12 @@ test('saas reports page exposes working export controls', () => {
     '\\[redacted-api-key\\]',
     'Benchmark',
   ].forEach((text) => assert.match(source, new RegExp(text)));
+  [
+    'Trace-backed evidence',
+    'trace_id',
+    'regression_status',
+    'Rerun failed scenarios from this report',
+  ].forEach((text) => assert.match(reportExportSource, new RegExp(text)));
   [
     'renderSaasReports',
     'report-export-status',

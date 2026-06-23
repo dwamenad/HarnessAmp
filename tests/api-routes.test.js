@@ -11,6 +11,7 @@ import orgsHandler from '../api/orgs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
 import secretsHandler from '../api/secrets.js';
+import tracesHandler from '../api/traces.js';
 import { analyzeBundle, createDemoBundle } from '../src/core/engine.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
 import {
@@ -135,6 +136,55 @@ test('dev-auth session endpoint returns a seeded user context', async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.user.login, 'dev-user');
   assert.ok(Array.isArray(response.body.workspaces));
+});
+
+test('trace ingestion accepts redacted trace batches and exposes run-scoped lookup', async () => {
+  process.env.HARNESSAMP_DEV_AUTH = '1';
+  const session = await seedDevSession();
+  const projectId = session.defaultProjectId;
+
+  const createResponse = createMockResponse();
+  await tracesHandler({
+    method: 'POST',
+    headers: {},
+    query: { projectId, runId: 'run-trace-api-test' },
+    body: {
+      trace_id: 'trace-api-test',
+      scenario_id: 'scenario-api-test',
+      mutation_id: 'mutation-api-test',
+      events: [
+        {
+          event_type: 'adapter_request',
+          safe_payload: {
+            headers: {
+              authorization: 'Bearer sk-test-secret-value',
+            },
+          },
+        },
+        {
+          event_type: 'tool_call',
+          tool_name: 'lookup_customer',
+          output_summary: 'Customer customer@example.com found.',
+        },
+      ],
+    },
+  }, createResponse);
+
+  assert.equal(createResponse.statusCode, 200);
+  assert.equal(createResponse.body.accepted, 2);
+  assert.deepEqual(createResponse.body.traceIds, ['trace-api-test']);
+
+  const lookupResponse = createMockResponse();
+  await tracesHandler({
+    method: 'GET',
+    headers: {},
+    query: { projectId, runId: 'run-trace-api-test' },
+  }, lookupResponse);
+
+  assert.equal(lookupResponse.statusCode, 200);
+  assert.equal(lookupResponse.body.events.length, 2);
+  assert.equal(lookupResponse.body.events[0].safe_payload.headers.authorization, '[redacted]');
+  assert.match(lookupResponse.body.events[1].output_summary, /\[redacted-email\]/);
 });
 
 test('organization APIs expose owner context, members, usage, and plan estimates', async () => {

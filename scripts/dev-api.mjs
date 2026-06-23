@@ -14,6 +14,7 @@ import orgsHandler from '../api/orgs.js';
 import projectsHandler from '../api/projects.js';
 import reportsHandler from '../api/reports.js';
 import secretsHandler from '../api/secrets.js';
+import tracesHandler from '../api/traces.js';
 import workspacesHandler from '../api/workspaces.js';
 
 const SCRIPT_DIR = fileURLToPath(new URL('.', import.meta.url));
@@ -30,6 +31,7 @@ const HANDLERS = {
   projects: projectsHandler,
   reports: reportsHandler,
   secrets: secretsHandler,
+  traces: tracesHandler,
   workspaces: workspacesHandler,
 };
 
@@ -133,6 +135,18 @@ const ROUTES = [
     pattern: /^\/api\/reports\/([^/]+)$/u,
     handler: HANDLERS.reports,
     buildQuery: (url, match) => withQuery(url, { id: decodeURIComponent(match[1]) }),
+  },
+  {
+    name: 'traces',
+    pattern: /^\/api\/runs\/([^/]+)\/traces$/u,
+    handler: HANDLERS.traces,
+    buildQuery: (url, match) => withQuery(url, { runId: decodeURIComponent(match[1]) }),
+  },
+  {
+    name: 'traces',
+    pattern: /^\/api\/traces\/events$/u,
+    handler: HANDLERS.traces,
+    buildQuery: (url) => withQuery(url),
   },
   {
     name: 'workspaces',

@@ -23,6 +23,14 @@
       "destination": "/api/reports"
     },
     {
+      "source": "/api/traces/events",
+      "destination": "/api/traces"
+    },
+    {
+      "source": "/api/runs/:runId/traces",
+      "destination": "/api/traces?runId=:runId"
+    },
+    {
       "source": "/api/workspaces/:workspaceId/projects",
       "destination": "/api/workspaces?resource=projects"
     },

@@ -16,6 +16,7 @@ import {
   buildSupportQualityLoop,
   supportQualityLoopRows,
 } from './lib/support-quality-loop.js';
+import { traceEvidenceForFailure } from '../core/trace-provenance.js';
 
 export function reportSlug(name, index = 0) {
   return `${String(name).toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/(^-|-$)/gu, '')}-${index + 1}`;
@@ -120,7 +121,7 @@ export function enrichReportPayload(report, context = {}) {
   const environment = reportEnvironment(report);
   const targetReliability = targetReliabilityForReport(report, context);
   const lifecycle = lifecycleSummaryForReport(report);
-  const rawFailureEvidence = failureEvidenceForReport(report, context);
+  const rawFailureEvidence = failureEvidenceForReport(report, context).map((failure) => ensureTraceEvidence(failure, report));
   const classifiedFailures = classifyRunFailures({
     ...report,
     failureEvidence: rawFailureEvidence,
@@ -197,7 +198,7 @@ export function enrichReportPayload(report, context = {}) {
 export function reportCsv(report) {
   report = sanitizeDebugPayload(report);
   const rows = [
-    ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'release_gate_status', 'can_release', 'gate_reasons', 'blocking_failures', 'warnings', 'failure_classes', 'failure_domains', 'support_loop_status', 'support_inputs', 'generated_eval_cases', 'generated_eval_case_ids', 'instruction_stack_risks', 'target_used', 'target_readiness', 'target_validation_state', 'target_run_success_rate', 'target_validation_success_rate', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'failure_class', 'failure_class_label', 'release_impact', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'triage_class', 'recommended_control'],
+    ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'release_gate_status', 'can_release', 'gate_reasons', 'blocking_failures', 'warnings', 'failure_classes', 'failure_domains', 'support_loop_status', 'support_inputs', 'generated_eval_cases', 'generated_eval_case_ids', 'instruction_stack_risks', 'target_used', 'target_readiness', 'target_validation_state', 'target_run_success_rate', 'target_validation_success_rate', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'failure_class', 'failure_class_label', 'release_impact', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'origin', 'trace_id', 'key_trace_events', 'retrieved_evidence', 'tool_calls', 'replay_status', 'regression_status', 'triage_class', 'recommended_control'],
     ...(report.failureEvidence.length ? report.failureEvidence : [{}]).map((failure) => [
       report.id,
       report.name,
@@ -247,6 +248,13 @@ export function reportCsv(report) {
       failure.contract ?? '',
       failure.scenarioId ?? '',
       failure.mutationId ?? '',
+      failure.origin ?? failure.traceEvidence?.origin ?? '',
+      failure.traceId ?? failure.traceEvidence?.traceId ?? '',
+      traceEventSummary(failure.traceEvidence).join('; '),
+      (failure.traceEvidence?.retrievedEvidence ?? failure.evidence ?? []).join('; '),
+      (failure.traceEvidence?.toolCalls ?? []).map((tool) => `${tool.name}:${tool.status}`).join('; '),
+      failure.traceEvidence?.replayStatus ?? failure.replayStatus ?? '',
+      failure.traceEvidence?.regressionStatus ?? failure.regressionStatus ?? '',
       failure.triageClass ?? '',
       failure.recommendedControl ?? '',
     ]),
@@ -340,6 +348,10 @@ ${markdownFailureClassCards(report.failureEvidence)}
 
 ${report.failureEvidence.length ? markdownTable(['Scenario', 'Mutation', 'Failure class', 'Severity', 'Expected behavior', 'Actual behavior', 'Replay'], report.failureEvidence.map((failure) => [failure.scenarioId, failure.mutationId, failure.failureClass ?? failure.label, failure.severity, failure.expected, failure.actual ?? failure.observed, replaySummary(failure)])) : 'No scenario evidence recorded.'}
 
+## Trace-backed evidence
+
+${report.failureEvidence.length ? markdownTable(['Failure class', 'Origin', 'Trace id', 'Key trace events', 'Retrieved evidence', 'Tool calls', 'Replay status', 'Regression status'], report.failureEvidence.map((failure) => [failure.failureClass ?? failure.label, failure.origin ?? failure.traceEvidence?.origin ?? 'unknown', failure.traceId ?? failure.traceEvidence?.traceId ?? 'not recorded', traceEventSummary(failure.traceEvidence).join('; ') || 'not recorded', (failure.traceEvidence?.retrievedEvidence ?? failure.evidence ?? []).join(', ') || 'none', (failure.traceEvidence?.toolCalls ?? []).map((tool) => `${tool.name}:${tool.status}`).join(', ') || 'none', failure.traceEvidence?.replayStatus ?? failure.replayStatus ?? 'not recorded', failure.traceEvidence?.regressionStatus ?? failure.regressionStatus ?? 'not recorded'])) : 'No trace-backed failure evidence recorded.'}
+
 ## Historical comparison
 
 ${report.historicalComparison.summary}
@@ -369,7 +381,11 @@ ${report.remediation.map((item) => `- ${item}`).join('\n')}
 
 - Suite: ${report.regressionPlan.suite}
 - Cadence: ${report.regressionPlan.cadence}
-- Cases: ${report.regressionPlan.cases.length ? report.regressionPlan.cases.map((item) => `${item.scenarioId}/${item.mutationId}`).join(', ') : 'none'}
+- Targeted rerun modes: ${(report.regressionPlan.rerunModes ?? []).join(', ') || 'none'}
+- Cases: ${report.regressionPlan.cases.length ? report.regressionPlan.cases.map((item) => `${item.scenarioId}/${item.mutationId}/${item.fixedStatus ?? 'not_rerun'}`).join(', ') : 'none'}
+- Fixed: ${(report.regressionPlan.comparisonStates?.fixed ?? []).join(', ') || 'none'}
+- Still failing: ${(report.regressionPlan.comparisonStates?.stillFailing ?? []).join(', ') || 'none'}
+- Newly failing: ${(report.regressionPlan.comparisonStates?.newlyFailing ?? []).join(', ') || 'none'}
 `;
 }
 
@@ -399,6 +415,8 @@ export function reportPrintHtml(report) {
     ${htmlFailureClassCards(report.failureEvidence)}
     <h3>Scenario evidence table</h3>
     ${report.failureEvidence.length ? reportHtmlTable(['Scenario', 'Mutation', 'Failure class', 'Severity', 'Expected behavior', 'Actual behavior', 'Replay'], report.failureEvidence.map((failure) => [failure.scenarioId, failure.mutationId, failure.failureClass ?? failure.label, failure.severity, failure.expected, failure.actual ?? failure.observed, replaySummary(failure)])) : '<p>No scenario evidence recorded.</p>'}
+    <h3>Trace-backed evidence</h3>
+    ${report.failureEvidence.length ? reportHtmlTable(['Failure class', 'Origin', 'Trace id', 'Key trace events', 'Retrieved evidence', 'Tool calls', 'Replay status', 'Regression status'], report.failureEvidence.map((failure) => [failure.failureClass ?? failure.label, failure.origin ?? failure.traceEvidence?.origin ?? 'unknown', failure.traceId ?? failure.traceEvidence?.traceId ?? 'not recorded', traceEventSummary(failure.traceEvidence).join('; ') || 'not recorded', (failure.traceEvidence?.retrievedEvidence ?? failure.evidence ?? []).join(', ') || 'none', (failure.traceEvidence?.toolCalls ?? []).map((tool) => `${tool.name}:${tool.status}`).join(', ') || 'none', failure.traceEvidence?.replayStatus ?? failure.replayStatus ?? 'not recorded', failure.traceEvidence?.regressionStatus ?? failure.regressionStatus ?? 'not recorded'])) : '<p>No trace-backed failure evidence recorded.</p>'}
   </section>`;
   return `<!doctype html>
 <html lang="en">
@@ -525,7 +543,11 @@ export function reportPrintHtml(report) {
     <dl>
       <dt>Suite</dt><dd>${escapeHtml(report.regressionPlan.suite)}</dd>
       <dt>Cadence</dt><dd>${escapeHtml(report.regressionPlan.cadence)}</dd>
-      <dt>Cases</dt><dd>${escapeHtml(report.regressionPlan.cases.length ? report.regressionPlan.cases.map((item) => `${item.scenarioId}/${item.mutationId}`).join(', ') : 'none')}</dd>
+      <dt>Targeted rerun modes</dt><dd>${escapeHtml((report.regressionPlan.rerunModes ?? []).join(', ') || 'none')}</dd>
+      <dt>Cases</dt><dd>${escapeHtml(report.regressionPlan.cases.length ? report.regressionPlan.cases.map((item) => `${item.scenarioId}/${item.mutationId}/${item.fixedStatus ?? 'not_rerun'}`).join(', ') : 'none')}</dd>
+      <dt>Fixed</dt><dd>${escapeHtml((report.regressionPlan.comparisonStates?.fixed ?? []).join(', ') || 'none')}</dd>
+      <dt>Still failing</dt><dd>${escapeHtml((report.regressionPlan.comparisonStates?.stillFailing ?? []).join(', ') || 'none')}</dd>
+      <dt>Newly failing</dt><dd>${escapeHtml((report.regressionPlan.comparisonStates?.newlyFailing ?? []).join(', ') || 'none')}</dd>
     </dl>
   </section>
   <section>
@@ -550,6 +572,61 @@ function mergeClassifiedFailureEvidence(failureEvidence, classifiedFailures) {
     )) ?? classifiedFailures[index];
     return classified ? { ...failure, ...classified, severity: classified.severity } : failure;
   });
+}
+
+function ensureTraceEvidence(failure, report) {
+  if (failure.traceEvidence) return failure;
+  const origin = fallbackFailureOrigin(failure);
+  const traceId = failure.traceId ?? `${report.id}:${failure.scenarioId ?? failure.id}`;
+  const keyTraceEvents = [
+    { step: 1, eventType: 'agent_invocation', label: `Scenario ${failure.scenarioId ?? 'unknown'} invoked`, status: 'ok', timestamp: report.runDate, origin: 'model_behavior' },
+    { step: 2, eventType: 'evaluator_step', label: failure.why ?? failure.contract ?? 'Evaluator flagged failure', status: 'failed', timestamp: report.runDate, origin },
+    { step: 3, eventType: 'failure_classification', label: failure.failureClass ?? failure.label ?? failure.mutationId ?? 'failure classified', status: 'failed', timestamp: report.runDate, origin },
+  ];
+  const traceEvidence = {
+    traceId,
+    origin,
+    originLabel: origin.replace(/_/gu, ' '),
+    keyTraceEvents,
+    toolCalls: [],
+    retrievedEvidence: Array.isArray(failure.evidence) ? failure.evidence : [],
+    citations: [],
+    replayStatus: failure.replay?.runId || failure.scenarioId ? 'replayable_metadata_captured' : 'trace_not_recorded',
+    replayPayload: {
+      run_id: report.runId ?? report.id,
+      scenario_id: failure.scenarioId ?? '',
+      mutation_id: failure.mutationId ?? '',
+      trace_id: traceId,
+    },
+    regressionStatus: 'candidate',
+    regressionCase: {
+      scenario_id: failure.scenarioId ?? '',
+      mutation_id: failure.mutationId ?? '',
+      failure_class: failure.failureClass ?? failure.label ?? '',
+      agent_version: report.agentVersion ?? '',
+      expected_behavior: failure.expected ?? '',
+      actual_behavior: failure.actual ?? failure.observed ?? '',
+      trace_id: traceId,
+      replay_payload: {
+        run_id: report.runId ?? report.id,
+        scenario_id: failure.scenarioId ?? '',
+        mutation_id: failure.mutationId ?? '',
+        trace_id: traceId,
+      },
+      fixed_status: 'not_rerun',
+      first_seen_at: report.runDate,
+      last_seen_at: report.runDate,
+    },
+  };
+  return {
+    ...failure,
+    origin,
+    traceId,
+    traceEvidence,
+    replayStatus: traceEvidence.replayStatus,
+    regressionStatus: traceEvidence.regressionStatus,
+    regressionCase: traceEvidence.regressionCase,
+  };
 }
 
 function benchmarkPayloadForRun(run) {
@@ -712,16 +789,45 @@ function observationFailureEvidence(report) {
     const evidence = Array.isArray(observation.curated_evidence)
       ? observation.curated_evidence.map((item) => item.doc_id ?? item.title ?? JSON.stringify(item))
       : [];
+    const normalizedObservation = {
+      id: `${report.runId ?? report.id}:obs-${index + 1}`,
+      runId: report.runId ?? report.id,
+      scenarioId: observation.scenario_id ?? report.runId ?? report.id,
+      mutationId: observation.mutation_id ?? 'runner_observation',
+      contractId: observation.contract_id ?? 'Preserve source facts',
+      status: failureModes.length || numericRunValue(report.criticalFailures) > 0 ? 'fail' : 'pass',
+      severity: numericRunValue(report.criticalFailures) > 0 ? 'critical' : 'major',
+      input: observation.input ?? observation.query ?? null,
+      output: observation.final_answer ?? observation.output ?? '',
+      evaluatorReason: failureModes.length ? failureModes.join(', ') : 'Runner observation requires reviewer validation.',
+      createdAt: report.completedAt ?? report.runDate,
+    };
+    const expected = 'Runner response should preserve required sources and cite only supported evidence.';
+    const observed = observation.final_answer ?? 'No final answer captured.';
+    const traceEvidence = traceEvidenceForFailure({
+      run: report,
+      observation: normalizedObservation,
+      rawObservation: observation,
+      failureClass: String(failureModes[0] ?? ''),
+      expected,
+      actual: observed,
+    });
     return [{
       id: `runner-observation-${index + 1}`,
       severity: numericRunValue(report.criticalFailures) > 0 ? 'Critical' : 'Major',
-      scenarioId: observation.scenario_id ?? report.runId ?? report.id,
-      mutationId: observation.mutation_id ?? 'runner_observation',
+      scenarioId: normalizedObservation.scenarioId,
+      mutationId: normalizedObservation.mutationId,
       contract: 'Preserve source facts',
-      expected: 'Runner response should preserve required sources and cite only supported evidence.',
-      observed: observation.final_answer ?? 'No final answer captured.',
+      expected,
+      observed,
       why: failureModes.length ? failureModes.join(', ') : 'Runner observation requires reviewer validation.',
       evidence,
+      origin: traceEvidence.origin,
+      traceId: traceEvidence.traceId,
+      traceEvidence,
+      replayStatus: traceEvidence.replayStatus,
+      regressionStatus: traceEvidence.regressionStatus,
+      regressionCase: traceEvidence.regressionCase,
       recommendedControl: 'Use captured runner observations to pin regression cases and validate source provenance.',
     }];
   }).slice(0, Math.max(1, Math.min(4, numericRunValue(report.criticalFailures) || 1)));
@@ -1006,10 +1112,28 @@ function regressionPlanForReport(report, failureEvidence, supportQualityLoop = n
       ? 'Support production failure blockers'
       : isRetrievalReport(report) ? 'RetrievalGuard release blockers' : `${report.pack} release blockers`,
     cadence: numericRunValue(report.criticalFailures) > 0 ? 'rerun on every candidate branch' : 'nightly',
+    rerunModes: [
+      'Rerun blocking failures',
+      'Rerun warnings',
+      'Rerun selected failure class',
+      'Rerun failed scenarios from this report',
+    ],
+    comparisonStates: {
+      fixed: [],
+      stillFailing: failureEvidence.map((failure) => failure.failureClass ?? failure.label ?? failure.mutationId).filter(Boolean).slice(0, 4),
+      newlyFailing: [],
+      regressed: [],
+      notRerun: failureEvidence.map((failure) => failure.scenarioId).filter(Boolean).slice(0, 4),
+    },
     cases: generatedCases ?? failureEvidence.map((failure) => ({
       scenarioId: failure.scenarioId,
       mutationId: failure.mutationId,
       severity: failure.severity,
+      failureClass: failure.failureClass ?? failure.label ?? '',
+      origin: failure.origin ?? failure.traceEvidence?.origin ?? 'unknown',
+      traceId: failure.traceId ?? failure.traceEvidence?.traceId ?? '',
+      replayPayload: failure.traceEvidence?.replayPayload ?? null,
+      fixedStatus: failure.traceEvidence?.regressionCase?.fixed_status ?? 'not_rerun',
     })),
   };
 }
@@ -1101,7 +1225,31 @@ function reportHtmlList(items) {
 
 function replaySummary(failure) {
   const replay = failure.replay ?? {};
-  return [replay.runId, replay.scenarioId, replay.mutationId, replay.target].filter(Boolean).join(' / ') || 'not recorded';
+  const traceReplay = failure.traceEvidence?.replayPayload ?? {};
+  return [
+    replay.runId ?? traceReplay.run_id,
+    replay.scenarioId ?? traceReplay.scenario_id,
+    replay.mutationId ?? traceReplay.mutation_id,
+    replay.target ?? traceReplay.trace_id,
+  ].filter(Boolean).join(' / ') || 'not recorded';
+}
+
+function traceEventSummary(traceEvidence = {}) {
+  const events = Array.isArray(traceEvidence?.keyTraceEvents) ? traceEvidence.keyTraceEvents : [];
+  return events.map((event) => `${event.step}. ${event.eventType}: ${event.label}`);
+}
+
+function fallbackFailureOrigin(failure) {
+  const text = `${failure.failureClass ?? ''} ${failure.label ?? ''} ${failure.contract ?? ''} ${failure.mutationId ?? ''} ${failure.why ?? ''}`.toLowerCase();
+  if (/retrieval|citation|source|document|qrel/u.test(text)) return 'retrieval';
+  if (/tool/u.test(text)) return 'tool_use';
+  if (/policy|refund|mfa|privacy|authority|unauthorized/u.test(text)) return 'policy_boundary';
+  if (/adapter|contract|schema/u.test(text)) return 'adapter_contract';
+  if (/timeout|latency|target|endpoint/u.test(text)) return 'execution_target';
+  if (/worker|queue|retry/u.test(text)) return 'worker_lifecycle';
+  if (/evaluator|score/u.test(text)) return 'evaluator';
+  if (/model|answer|response|hallucination/u.test(text)) return 'model_behavior';
+  return 'unknown';
 }
 
 function markdownFailureClassCards(failures) {

@@ -4916,6 +4916,58 @@ section[id] {
   line-height: 1.55;
 }
 
+.ha-trace-provenance {
+  grid-column: span 2;
+}
+
+.ha-trace-origin {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 12px 0;
+}
+
+.ha-trace-origin div {
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface-2);
+  padding: 10px;
+}
+
+.ha-trace-origin span,
+.ha-trace-timeline span {
+  color: var(--ha-muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ha-trace-origin strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.ha-trace-timeline {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+}
+
+.ha-trace-timeline li {
+  border-left: 3px solid var(--ha-accent);
+  margin: 0 0 10px;
+  padding: 0 0 0 12px;
+}
+
+.ha-trace-timeline p {
+  margin: 3px 0;
+}
+
+.ha-trace-timeline small {
+  color: var(--ha-muted);
+}
+
 .ha-actions {
   align-content: start;
   display: grid;
@@ -5851,6 +5903,7 @@ section[id] {
   .ha-evidence-grid,
   .ha-evidence-card__grid,
   .ha-failure-split,
+  .ha-trace-origin,
   .target-readiness-snapshot__grid,
   .target-readiness-snapshot--compact .target-readiness-snapshot__grid,
   .target-card__meta,
@@ -5859,6 +5912,10 @@ section[id] {
   }
 
   .benchmark-editor-wide {
+    grid-column: auto;
+  }
+
+  .ha-trace-provenance {
     grid-column: auto;
   }
 

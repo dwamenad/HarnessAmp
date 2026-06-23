@@ -44,6 +44,14 @@ test('resolveApiRequest mirrors Vercel rewrite params', () => {
 
   const smokeRoute = resolveApiRequest('http://127.0.0.1:3000/api/harness-smoke');
   assert.equal(smokeRoute?.name, 'harnessSmoke');
+
+  const traceEventsRoute = resolveApiRequest('http://127.0.0.1:3000/api/traces/events?projectId=project_123');
+  assert.equal(traceEventsRoute?.name, 'traces');
+  assert.equal(traceEventsRoute?.query.projectId, 'project_123');
+
+  const runTracesRoute = resolveApiRequest('http://127.0.0.1:3000/api/runs/run_123/traces');
+  assert.equal(runTracesRoute?.name, 'traces');
+  assert.equal(runTracesRoute?.query.runId, 'run_123');
 });
 
 test('dev api server returns a seeded session when dev auth is enabled', async () => {

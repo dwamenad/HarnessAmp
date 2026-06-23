@@ -20,6 +20,7 @@ import {
 } from '../src/core/plans.js';
 import { canRole, normalizeOrgRole, rolePermissions } from '../src/core/rbac.js';
 import { buildReportSnapshot } from '../src/shared/report-snapshot.js';
+import { normalizeTraceBatch, orderTraceEvents } from '../src/core/trace-provenance.js';
 import {
   executeVercelAiSdkAdapterBenchmark,
   validateVercelAiSdkAdapterConfig,
@@ -67,6 +68,7 @@ const memory = globalThis.__harnessAmpStore ?? {
   promotionCandidates: new Map(),
   goldenCases: new Map(),
   events: [],
+  traceEvents: new Map(),
   usageEvents: new Map(),
 };
 
@@ -87,6 +89,7 @@ memory.organizationMembers ??= new Map();
 memory.usageEvents ??= new Map();
 memory.failureWorkflows ??= new Map();
 memory.failureRegressionSuites ??= new Map();
+memory.traceEvents ??= new Map();
 
 export async function getOrCreateGitHubUser(profile) {
   if (useMemory()) {
@@ -1688,6 +1691,65 @@ export async function saveEvent(event, session = {}) {
     [createId('evt'), event.name, session.userId ?? null, session.workspaceId ?? null, session.projectId ?? null, event],
   );
   return { storage: 'postgres' };
+}
+
+export async function saveTraceEvents({ events, projectId = null, userId = null }) {
+  const normalizedEvents = orderTraceEvents(events);
+  if (projectId && userId) {
+    await requireProjectPermission({ userId, projectId, permission: 'exportReports' });
+  }
+
+  if (useMemory()) {
+    const saved = normalizedEvents.map((event) => ({
+      id: createId('trace_evt'),
+      projectId,
+      userId,
+      ...event,
+      createdAt: new Date().toISOString(),
+    }));
+    saved.forEach((event) => memory.traceEvents.set(event.id, event));
+    return {
+      storage: 'memory',
+      accepted: saved.length,
+      traceIds: Array.from(new Set(saved.map((event) => event.trace_id).filter(Boolean))),
+      events: saved,
+    };
+  }
+
+  await Promise.all(normalizedEvents.map((event) => saveEvent({
+    name: 'trace.event.ingested',
+    projectId,
+    traceEvent: event,
+  }, { userId, projectId })));
+  return {
+    storage: 'events',
+    accepted: normalizedEvents.length,
+    traceIds: Array.from(new Set(normalizedEvents.map((event) => event.trace_id).filter(Boolean))),
+    events: normalizedEvents,
+  };
+}
+
+export async function listTraceEvents({ projectId = null, userId = null, runId = null, traceId = null } = {}) {
+  if (projectId && userId) {
+    await requireProjectPermission({ userId, projectId, permission: 'viewReports' });
+  }
+
+  if (useMemory()) {
+    return orderTraceEvents(Array.from(memory.traceEvents.values())
+      .filter((event) => !projectId || event.projectId === projectId)
+      .filter((event) => !runId || event.run_id === runId)
+      .filter((event) => !traceId || event.trace_id === traceId));
+  }
+
+  if (!projectId || !userId) return [];
+  const stored = await listEventsForProject({ projectId, userId, name: 'trace.event.ingested' });
+  return orderTraceEvents(stored
+    .map((event) => event.payload?.traceEvent)
+    .filter((event) => event && (!runId || event.run_id === runId) && (!traceId || event.trace_id === traceId)));
+}
+
+export function normalizeTraceEventsPayload(payload, defaults = {}) {
+  return normalizeTraceBatch(payload, defaults);
 }
 
 export async function listEventsForProject({ projectId, userId, name = null }) {

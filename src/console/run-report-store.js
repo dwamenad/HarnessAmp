@@ -7,6 +7,10 @@ import {
 } from './report-export.js';
 import { benchmarkForRun } from '../benchmarks/registry.js';
 import { benchmarkMetadataForResult, generateBenchmarkResult } from '../benchmarks/results.js';
+import {
+  traceEvidenceForFailure,
+  traceEventsForObservation,
+} from '../core/trace-provenance.js';
 
 export const RUN_REPORT_STORAGE_KEY = 'harnessamp.runReportState.v1';
 
@@ -21,6 +25,7 @@ export function emptyRunReportState() {
     observations: [],
     failures: [],
     benchmarkResults: [],
+    traceEvents: [],
     reports: [],
     artifacts: [],
     updatedAt: '',
@@ -132,7 +137,8 @@ export function completeRun(state, run, context = {}) {
   if (!persistedRun || persistedRun.status !== 'completed') return existingState;
 
   const observations = normalizeObservationsForRun(run, persistedRun);
-  const rawFailures = normalizeFailuresForRun(run, observations);
+  const traceEvents = normalizeTraceEventsForRun(run, observations, persistedRun);
+  const rawFailures = normalizeFailuresForRun(run, observations, traceEvents);
   const harness = existingState.harnesses.find((item) => item.id === persistedRun.harnessId);
   const benchmarkResult = generateBenchmarkResult({
     run,
@@ -159,6 +165,10 @@ export function completeRun(state, run, context = {}) {
     benchmarkResults: [
       ...(benchmarkResult ? [benchmarkResult] : []),
       ...existingState.benchmarkResults.filter((item) => item.runId !== run.id),
+    ],
+    traceEvents: [
+      ...traceEvents,
+      ...existingState.traceEvents.filter((item) => item.run_id !== run.id),
     ],
     reports: [
       report,
@@ -268,6 +278,14 @@ export function failurePayloadFromState(state, failureId) {
     clause: failure.contractId,
     recommendedOwner: ownerForFailure(failure),
     recommendedFix: Array.isArray(failure.remediation) ? failure.remediation[0] : String(failure.remediation ?? ''),
+    failureOrigin: failure.failureOrigin,
+    traceEvidence: failure.traceEvidence,
+    regressionCase: failure.regressionCase,
+    toolCalls: failure.traceEvidence?.toolCalls ?? [],
+    retrievedEvidence: failure.traceEvidence?.retrievedEvidence ?? failure.evidence?.sources ?? [],
+    citations: failure.traceEvidence?.citations ?? [],
+    replayMetadata: failure.traceEvidence?.replayPayload ?? {},
+    regressionStatus: failure.traceEvidence?.regressionStatus ?? 'candidate',
     runId: failure.runId,
     reportId: failure.reportId,
   };
@@ -280,6 +298,7 @@ function normalizeRunReportState(value) {
     observations: Array.isArray(value?.observations) ? value.observations.map(normalizeObservation).filter(Boolean) : [],
     failures: Array.isArray(value?.failures) ? value.failures.map(normalizeFailure).filter(Boolean) : [],
     benchmarkResults: Array.isArray(value?.benchmarkResults) ? value.benchmarkResults.map(normalizeBenchmarkResult).filter(Boolean) : [],
+    traceEvents: Array.isArray(value?.traceEvents) ? value.traceEvents.filter((item) => item && typeof item === 'object') : [],
     reports: Array.isArray(value?.reports) ? value.reports.map(normalizeReport).filter(Boolean) : [],
     artifacts: Array.isArray(value?.artifacts) ? value.artifacts.map(normalizeArtifact).filter(Boolean) : [],
     updatedAt: typeof value?.updatedAt === 'string' ? value.updatedAt : '',
@@ -372,6 +391,9 @@ function normalizeFailure(value) {
     title: String(value.title ?? 'Contract failure'),
     summary: String(value.summary ?? 'Runner output failed the configured contract.'),
     evidence: value.evidence && typeof value.evidence === 'object' ? value.evidence : {},
+    failureOrigin: String(value.failureOrigin ?? value.traceEvidence?.origin ?? 'unknown'),
+    traceEvidence: value.traceEvidence && typeof value.traceEvidence === 'object' ? value.traceEvidence : null,
+    regressionCase: value.regressionCase && typeof value.regressionCase === 'object' ? value.regressionCase : null,
     remediation: Array.isArray(value.remediation) ? value.remediation.map(String) : [],
     createdAt: String(value.createdAt ?? new Date().toISOString()),
   };
@@ -514,33 +536,63 @@ function normalizeObservationsForRun(run, persistedRun) {
 
 function normalizeFailuresForRun(run, observations) {
   const now = new Date().toISOString();
+  const rawObservations = Array.isArray(run.runnerObservations) ? run.runnerObservations : [];
   return observations
     .filter((observation) => observation.status === 'fail')
-    .map((observation, index) => ({
-      id: `${run.id}:failure-${index + 1}`,
-      runId: run.id,
-      observationId: observation.id,
-      contractId: observation.contractId,
-      mutationId: observation.mutationId,
-      severity: observation.severity,
-      title: `${run.pack} ${observation.contractId}`,
-      summary: observation.evaluatorReason || 'Runner observation failed the configured contract.',
-      evidence: {
-        input: observation.input,
-        output: observation.output,
-        reason: observation.evaluatorReason,
-        expected: 'Preserve required source facts and fail safely when evidence is incomplete.',
-        observed: observation.output || 'No final answer captured.',
-        sources: evidenceSourcesForRunObservation(run, observation),
-        reproducibility: '1/1',
-      },
-      remediation: [
-        'Block promotion until this failure is triaged.',
-        'Pin the scenario and mutation to the release-blocker regression suite.',
-        'Rerun the same harness, pack, and tier after remediation.',
-      ],
-      createdAt: now,
-    }));
+    .map((observation, index) => {
+      const rawObservation = rawObservations.find((item) => String(item.scenario_id ?? item.metadata?.variantId ?? '') === observation.scenarioId)
+        ?? rawObservations[index]
+        ?? observation;
+      const failureClass = Array.isArray(rawObservation.failure_modes) ? String(rawObservation.failure_modes[0] ?? '') : '';
+      const expected = 'Preserve required source facts and fail safely when evidence is incomplete.';
+      const observed = observation.output || 'No final answer captured.';
+      const traceEvidence = traceEvidenceForFailure({
+        run,
+        observation,
+        rawObservation,
+        failureClass,
+        expected,
+        actual: observed,
+      });
+      return {
+        id: `${run.id}:failure-${index + 1}`,
+        runId: run.id,
+        observationId: observation.id,
+        contractId: observation.contractId,
+        mutationId: observation.mutationId,
+        severity: observation.severity,
+        title: `${run.pack} ${observation.contractId}`,
+        summary: observation.evaluatorReason || 'Runner observation failed the configured contract.',
+        evidence: {
+          input: observation.input,
+          output: observation.output,
+          reason: observation.evaluatorReason,
+          expected,
+          observed,
+          sources: evidenceSourcesForRunObservation(run, observation),
+          reproducibility: '1/1',
+        },
+        failureOrigin: traceEvidence.origin,
+        traceEvidence,
+        regressionCase: traceEvidence.regressionCase,
+        remediation: [
+          'Block promotion until this trace-backed failure is triaged.',
+          'Promote the scenario and mutation to the release-blocker regression suite.',
+          'Rerun only the failed scenario set after remediation.',
+        ],
+        createdAt: now,
+      };
+    });
+}
+
+function normalizeTraceEventsForRun(run, observations) {
+  const rawObservations = Array.isArray(run.runnerObservations) ? run.runnerObservations : [];
+  return observations.flatMap((observation, index) => {
+    const rawObservation = rawObservations.find((item) => String(item.scenario_id ?? item.metadata?.variantId ?? '') === observation.scenarioId)
+      ?? rawObservations[index]
+      ?? observation;
+    return traceEventsForObservation(run, observation, rawObservation);
+  });
 }
 
 function buildPersistedReport(run, persistedRun, failures, context, benchmarkResult = null) {

@@ -73,6 +73,10 @@ describe('run/report persistence store', () => {
     assert.equal(state.runs[0].status, 'completed');
     assert.equal(state.observations[0].evidenceMode, 'runner observation');
     assert.equal(state.failures[0].runId, retrievalRun.id);
+    assert.equal(state.traceEvents.length > 0, true);
+    assert.equal(state.failures[0].failureOrigin, 'retrieval');
+    assert.equal(state.failures[0].traceEvidence.replayStatus, 'replayable_trace_captured');
+    assert.equal(state.failures[0].regressionCase.fixed_status, 'not_rerun');
     assert.equal(state.reports[0].runId, retrievalRun.id);
     assert.equal(state.reports[0].releaseDecision, 'Block release');
     assert.equal(state.reports[0].benchmark.name, 'RetrievalGuard Smoke');
@@ -143,5 +147,8 @@ describe('run/report persistence store', () => {
     assert.equal(payload.runId, retrievalRun.id);
     assert.equal(payload.reportId, state.reports[0].id);
     assert.match(payload.recommendedFix, /Block promotion/);
+    assert.equal(payload.failureOrigin, 'retrieval');
+    assert.equal(payload.traceEvidence.regressionStatus, 'candidate');
+    assert.equal(payload.retrievedEvidence.includes('policy-2026-section-4'), true);
   });
 });

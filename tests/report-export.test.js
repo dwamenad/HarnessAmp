@@ -84,6 +84,10 @@ describe('report export payloads', () => {
     assert.equal(report.failureEvidence[0].failureClass, 'citation_answer_mismatch');
     assert.equal(report.failureIntelligence.classes.includes('citation_answer_mismatch'), true);
     assert.equal(report.failureEvidence[0].scenarioId, 'retrieval_contradictory_evidence_001');
+    assert.equal(report.failureEvidence[0].origin, 'retrieval');
+    assert.equal(report.failureEvidence[0].traceEvidence.replayStatus, 'replayable_trace_captured');
+    assert.equal(report.failureEvidence[0].traceEvidence.regressionCase.fixed_status, 'not_rerun');
+    assert.ok(report.regressionPlan.rerunModes.includes('Rerun failed scenarios from this report'));
     assert.equal(report.retrievalEvidence.metrics.citationPrecision, 0.64);
     assert.match(report.remediation.join('\n'), /qrel coverage/);
   });
@@ -106,6 +110,8 @@ describe('report export payloads', () => {
     assert.match(html, /Failure Triage/);
     assert.match(html, /Historical Comparison/);
     assert.match(html, /Domain failures found/);
+    assert.match(html, /Trace-backed evidence/);
+    assert.match(html, /replayable_trace_captured/);
     assert.match(html, /Can this agent be released\? No/);
     assert.match(html, /citation_answer_mismatch/);
     assert.match(html, /Evidence mode/);
@@ -118,6 +124,8 @@ describe('report export payloads', () => {
     assert.match(markdown, /Release gate status/);
     assert.match(markdown, /Can this agent ship/);
     assert.match(markdown, /Domain failures found/);
+    assert.match(markdown, /Trace-backed evidence/);
+    assert.match(markdown, /Rerun failed scenarios from this report/);
     assert.match(markdown, /Target reliability/);
     assert.match(markdown, /Failure triage/);
     assert.match(markdown, /Historical comparison/);
@@ -127,6 +135,9 @@ describe('report export payloads', () => {
     assert.match(csv, /release_gate_status/);
     assert.match(csv, /failure_classes/);
     assert.match(csv, /release_impact/);
+    assert.match(csv, /trace_id/);
+    assert.match(csv, /key_trace_events/);
+    assert.match(csv, /regression_status/);
     assert.match(csv, /target_readiness/);
     assert.match(csv, /triage_class/);
     assert.match(csv, /RetrievalGuard Smoke/);
