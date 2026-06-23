@@ -54,18 +54,26 @@ export function renderSaasNewRun(context) {
   const launchState = runLaunchState({ benchmark: selectedBenchmark, harness: selectedHarness, eligibility, draft });
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Configure Run</h2><p>Choose a benchmark, select an execution target, validate it, then launch a worker-backed run.</p></div>${renderDataSourceStrip(state.sessionStatus === 'authenticated' ? 'Live project data' : 'Local preview', state.sessionStatus === 'authenticated' ? 'Uses API-backed job queue.' : 'Persists run draft and preview runs in this browser.')}</div>
+      <div class="ha-section-head ha-section-head--launcher"><div><span class="ha-kicker">Behavioral release gate</span><h2>Run behavioral release gate</h2><p>Connect agent -> choose harness -> run benchmark -> inspect failures -> decide release.</p></div>${renderDataSourceStrip(state.sessionStatus === 'authenticated' ? 'Live project data' : 'Sample evidence only', state.sessionStatus === 'authenticated' ? 'Uses API-backed job queue.' : 'Sample evidence only - does not test your real agent.')}</div>
       ${renderRunLaunchWorkflow()}
       <div class="ha-grid ha-grid--split">
         <form class="ha-panel ha-form" id="run-config-form">
+          <section class="ha-run-step-section">
+            <div class="ha-panel__head"><h3>Agent under test</h3><span>${escapeHtml(draft.agentVersion || selectedHarness?.agentVersion || 'unknown-agent')}</span></div>
+            ${renderSelectFromObjects('Harness', harnesses.map((harness) => ({ value: harness.id, label: `${harness.name} / ${harness.environment}` })), selectedHarness?.id, 'run-harness-select')}
+            ${renderField('Agent version', draft.agentVersion || selectedHarness?.agentVersion || 'unknown', 'run-agent-version')}
+            ${renderRunExecutionTargetStep()}
+          </section>
+          <section class="ha-run-step-section">
+            <div class="ha-panel__head"><h3>Harness / benchmark</h3><span>${escapeHtml(selectedBenchmark?.slug ?? 'select benchmark')}</span></div>
           ${renderSelectFromObjects('Benchmark', benchmarkRunOptions(), selectedBenchmark?.id ?? '', 'run-benchmark-select')}
           ${renderRunModeControl(draft.runMode)}
           ${renderBenchmarkAuthority(selectedBenchmark, selectedPack, selectedTier)}
-          ${renderSelectFromObjects('Harness', harnesses.map((harness) => ({ value: harness.id, label: `${harness.name} / ${harness.environment}` })), selectedHarness?.id, 'run-harness-select')}
-          ${renderRunExecutionTargetStep()}
           ${renderField('Max observations', String(draft.maxObservations), 'run-max-observations', 'number')}
-          ${renderField('Agent version', draft.agentVersion || selectedHarness?.agentVersion || 'unknown', 'run-agent-version')}
           ${renderBenchmarkContents(selectedBenchmark)}
+          </section>
+          <section class="ha-run-step-section">
+            <div class="ha-panel__head"><h3>Release gate preview</h3><span>before launch</span></div>
           <details class="ha-advanced-run">
             <summary>Advanced overrides</summary>
             ${renderSelectFromObjects('Mutation Pack', packOptions.map((pack) => ({ value: pack.id, label: pack.name })), selectedPack?.id, 'run-pack-select')}
@@ -73,6 +81,12 @@ export function renderSaasNewRun(context) {
             ${renderSelect('Fail condition', ['block on critical failures', 'block on high severity', 'block on score below threshold', 'never block'], draft.failCondition, 'run-fail-condition')}
           </details>
           ${renderLaunchStateCallout(launchState)}
+          </section>
+          <section class="ha-run-step-section">
+            <div class="ha-panel__head"><h3>Targeted rerun</h3><span>trace-backed failures only</span></div>
+            ${renderSelect('Rerun scope', ['Rerun blocking failures', 'Rerun warnings', 'Rerun selected failure class', 'Rerun failed scenarios from this report'], 'Rerun blocking failures', 'run-rerun-scope')}
+            <p class="ha-muted">Use trace provenance to rerun only failed scenarios, then classify outcomes as Fixed, Still failing, Newly failing, Regressed, or Not rerun.</p>
+          </section>
           <div class="ha-form-actions">
             <button class="ha-primary" id="start-configured-run" type="button" ${launchState.canLaunch ? '' : 'disabled'}>${escapeHtml(launchState.actionLabel)}</button>
             <a class="ha-secondary" href="/targets">Manage targets</a>
@@ -81,7 +95,7 @@ export function renderSaasNewRun(context) {
           <p class="ha-form-feedback" id="run-config-feedback">${escapeHtml(consoleState.runFeedback)}</p>
         </form>
         <article class="ha-panel ha-estimate">
-          <h3>Run Readiness</h3>
+          <h3>Release-gate readiness</h3>
           ${renderSaasMetric('Benchmark', selectedBenchmark ? `${selectedBenchmark.name} v${selectedBenchmark.version}` : 'Mapped from pack/tier', selectedBenchmark ? selectedBenchmark.slug : `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
           ${renderSaasMetric('Release eligibility', eligibility.label, eligibility.detail, eligibility.tone)}
           ${renderSaasMetric('Estimated scenarios', estimated.scenarios, `${selectedPack.name} ${selectedTier.label}`, 'neutral')}
@@ -181,7 +195,7 @@ export function renderSaasRunSummary(runId = 'run-healthguard-2419', context) {
   const scoreTone = Number(run.critical) > 0 ? 'major' : 'passed';
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>${escapeHtml(run.name)} Summary</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(benchmark ? `${benchmark.name} v${benchmark.version}` : run.pack)} / ${escapeHtml(run.tierLabel)}</p></div><div class="ha-topbar__actions"><a class="ha-primary" href="/failures/fail-redflag-017">View Top Failure</a><a href="/reports">Open Report Center</a></div></div>
+      <div class="ha-section-head"><div><span class="ha-kicker">What happened during this run?</span><h2>${escapeHtml(run.name)} Summary</h2><p>${escapeHtml(run.harness)} / ${escapeHtml(benchmark ? `${benchmark.name} v${benchmark.version}` : run.pack)} / ${escapeHtml(run.tierLabel)}</p></div><div class="ha-topbar__actions"><a class="ha-primary" href="/failures/fail-redflag-017">View Top Failure</a><a href="/reports">Open Report Center</a></div></div>
       ${renderReleaseDecision(releaseGate?.answer ?? (Number(run.critical) > 0 || run.status === 'failed' ? 'Can this agent be released? No.' : 'Can this agent be released? Yes.'), releaseGate?.reasons?.join(' ') ?? (Number(run.critical) > 0 ? `${run.critical} critical failure(s) must be triaged and pinned before release.` : 'No critical release blockers in this run.'), releaseGate?.canRelease === false ? 'critical' : releaseGate?.warningCount ? 'major' : Number(run.critical) > 0 ? 'critical' : 'passed')}
       <div class="ha-metrics">
         ${renderSaasMetric('Benchmark Score', String(benchmarkScore), benchmark ? `${benchmark.slug} gate ${gateResult}` : 'mapped from run', scoreTone)}
@@ -208,6 +222,7 @@ export function renderSaasRunSummary(runId = 'run-healthguard-2419', context) {
       </article>
       <div class="ha-grid ha-grid--dashboard">
         ${renderTargetReadinessSnapshot(evidence, { compact: true })}
+        ${context.renderFailureIntelligencePanel ? context.renderFailureIntelligencePanel(report) : ''}
         ${renderFailureTriagePanel(report)}
         ${renderTargetReliabilityReportPanel(targetReliability)}
         ${renderHistoricalComparisonPanel(report)}

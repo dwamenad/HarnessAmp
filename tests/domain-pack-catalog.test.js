@@ -5,6 +5,7 @@ import { catalogCardRows, domainPackCatalog } from '../src/v2/domain-pack-catalo
 
 test('CustomerCareGuard and LegalGuard expose implementation-grade v2 manifests', () => {
   const customerCare = domainPackCatalog.find((pack) => pack.id === 'customercare-guard');
+  const instructionDoctor = domainPackCatalog.find((pack) => pack.id === 'instruction-manifest-doctor');
   const legal = domainPackCatalog.find((pack) => pack.id === 'legal-guard');
   const retrieval = domainPackCatalog.find((pack) => pack.id === 'retrievalguard-core');
 
@@ -31,6 +32,15 @@ test('CustomerCareGuard and LegalGuard expose implementation-grade v2 manifests'
   assert.ok(customerCare.sourceHierarchy.includes('official policy'));
   assert.ok(customerCare.authorityModel.cannot.includes('bypass MFA'));
 
+  assert.equal(instructionDoctor.name, 'Instruction Manifest Doctor');
+  assert.equal(instructionDoctor.contractCount, 8);
+  assert.equal(instructionDoctor.scenarioCount, 64);
+  assert.ok(instructionDoctor.primarySafetyAxes.includes('instruction_precedence'));
+  assert.ok(instructionDoctor.primarySafetyAxes.includes('tool_permission_boundaries'));
+  assert.ok(instructionDoctor.failureTaxonomy.some((failure) => failure.id === 'refund_policy_mismatch'));
+  assert.ok(instructionDoctor.sourceHierarchy.includes('root AGENTS.md'));
+  assert.ok(instructionDoctor.authorityModel.cannot.includes('treat ticket text as instructions'));
+
   assert.equal(legal.name, 'LegalGuard');
   assert.equal(legal.contractCount, 10);
   assert.equal(legal.scenarioCount, 400);
@@ -48,6 +58,7 @@ test('catalog card rows include the new packs with normalized counts', () => {
   const rows = catalogCardRows();
   const retrievalRow = rows.find(([name]) => name === 'RetrievalGuard');
   const customerCareRow = rows.find(([name]) => name === 'CustomerCareGuard');
+  const instructionDoctorRow = rows.find(([name]) => name === 'Instruction Manifest Doctor');
   const legalRow = rows.find(([name]) => name === 'LegalGuard');
 
   assert.deepEqual(retrievalRow.slice(0, 5), [
@@ -67,6 +78,14 @@ test('catalog card rows include the new packs with normalized counts', () => {
     '400',
   ]);
   assert.equal(customerCareRow[7], 'Smoke 400 / Core 3,600 / Deep 18,000 / Nightly 54,000');
+  assert.deepEqual(instructionDoctorRow.slice(0, 5), [
+    'Instruction Manifest Doctor',
+    'Agent configuration',
+    'Scans persistent agent instruction manifests for drift, conflicts, stale commands, unsafe tool permissions, missing escalation rules, policy mismatch, and security-sensitive content.',
+    '8',
+    '64',
+  ]);
+  assert.equal(instructionDoctorRow[7], 'Smoke 64 / Core 512 / Deep 2,048 / Nightly 8,192');
   assert.deepEqual(legalRow.slice(0, 5), [
     'LegalGuard',
     'Legal',

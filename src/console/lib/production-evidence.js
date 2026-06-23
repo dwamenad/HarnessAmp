@@ -4,6 +4,12 @@ import {
   readinessLabels,
   workspaceModeLabels,
 } from './labels.js';
+import {
+  classifyRunFailures,
+  getBlockingFailures,
+  getWarningFailures,
+  summarizeFailureEvidence,
+} from './failure-ontology.js';
 
 export const EXPECTED_RUNNER_CONTRACT_VERSION = 'harnessamp_http_runner_v1';
 
@@ -71,6 +77,16 @@ export function buildReleaseGate({
     ...(Array.isArray(report?.benchmark?.failedContracts) ? report.benchmark.failedContracts : []),
     ...(Array.isArray(normalizedRun.failedContracts) ? normalizedRun.failedContracts : []),
   ]);
+  const classifiedFailures = classifyRunFailures({
+    ...normalizedRun,
+    ...report,
+    failureEvidence,
+    targetReliability: normalizedTarget,
+    lifecycleSummary: lifecycle ?? { status: lifecycleStatus },
+  });
+  const failureSummary = summarizeFailureEvidence(classifiedFailures);
+  const blockingFailures = getBlockingFailures(classifiedFailures);
+  const warningFailures = getWarningFailures(classifiedFailures);
   const criticalFailures = numericValue(report?.criticalFailures ?? normalizedRun.criticalFailures);
   const score = numericValue(report?.score ?? normalizedRun.score);
   const reasonDetails = [];
@@ -78,6 +94,12 @@ export function buildReleaseGate({
   if (normalizedRun.usedSampleData || isSampleReport(report)) {
     reasonDetails.push(blockingReason('sample_data', 'Sample data cannot be used as production release evidence.'));
   }
+  blockingFailures.forEach((failure) => {
+    reasonDetails.push(blockingReason(reasonCategoryForFailure(failure), `${failure.failureClass}: ${failure.releaseImpact}`));
+  });
+  warningFailures.forEach((failure) => {
+    reasonDetails.push(warningReason(reasonCategoryForFailure(failure), `${failure.failureClass}: ${failure.releaseImpact}`));
+  });
   if (criticalFailures > 0) {
     reasonDetails.push(blockingReason('agent_behavior', `${criticalFailures} critical benchmark failure${criticalFailures === 1 ? '' : 's'} recorded.`));
   }
@@ -110,11 +132,16 @@ export function buildReleaseGate({
   if (normalizedTarget.readinessLabel === readinessLabels.needsValidation) {
     reasonDetails.push(warningReason('validation', 'Execution target needs validation before production release.'));
   }
-  if (normalizedTarget.isEphemeral) {
-    reasonDetails.push(warningReason('execution_target', 'Local preview targets are ephemeral and cannot be durable release evidence.'));
+  if (normalizedTarget.isEphemeral && normalizedRun.usedRealExecution) {
+    reasonDetails.push(blockingReason('execution_target', 'local_tunnel_ephemeral: Local preview targets are ephemeral and cannot be durable production release evidence.'));
+  } else if (normalizedTarget.isEphemeral) {
+    reasonDetails.push(warningReason('execution_target', 'local_tunnel_ephemeral: Local preview targets are ephemeral and cannot be durable release evidence.'));
   }
   if (!normalizedTarget.isProductionGrade && !normalizedRun.usedSampleData) {
     reasonDetails.push(warningReason('execution_target', 'Production release evidence should use a validated production-grade target.'));
+  }
+  if (report && !isSampleReport(report) && missingRequiredBenchmarkMetadata(report)) {
+    reasonDetails.push(blockingReason('agent_behavior', 'Required benchmark, scoring, or gate metadata is missing.'));
   }
   if (!reasonDetails.length) {
     reasonDetails.push(infoReason('release', 'Passed all required benchmark, worker, adapter, target, validation, and contract checks available for this evidence.'));
@@ -146,6 +173,8 @@ export function buildReleaseGate({
     blockingFailures: blocking.length,
     warningCount: warnings.length,
     failedContracts,
+    classifiedFailures,
+    failureSummary,
     reasons: uniqueStrings(reasonDetails.map((item) => item.message)),
     reasonDetails,
     target: normalizedTarget,
@@ -352,10 +381,28 @@ function classifiedTargetReason(failureClass) {
   return blockingReason('execution_target', message);
 }
 
+function reasonCategoryForFailure(failure) {
+  if (failure.domain !== 'Execution') return 'agent_behavior';
+  return normalizeReasonCategory(failure.failureClass);
+}
+
+function missingRequiredBenchmarkMetadata(report) {
+  const benchmark = report?.benchmark ?? {};
+  if (!benchmark || !Object.keys(benchmark).length) return true;
+  return !firstString(benchmark.name, benchmark.id, benchmark.slug)
+    || !firstString(benchmark.gateProfileVersion, benchmark.gateProfileId)
+    || !firstString(benchmark.scoringProfileVersion, benchmark.scoringProfileId)
+    || !firstString(benchmark.gateResult, report?.gate?.decision);
+}
+
 function normalizeReasonCategory(category) {
   if (category === 'adapter' || category === 'contract') return 'adapter_contract';
   if (category === 'target') return 'execution_target';
   if (category === 'lifecycle') return 'worker_lifecycle';
+  if (category === 'adapter_contract_failure' || category === 'contract_mismatch' || category === 'invalid_json') return 'adapter_contract';
+  if (category === 'execution_target_failure' || category === 'target_unavailable' || category === 'local_tunnel_ephemeral' || category === 'timeout') return 'execution_target';
+  if (category === 'validation_failure') return 'validation';
+  if (category === 'worker_lifecycle_failure') return 'worker_lifecycle';
   if (category === 'benchmark' || category === 'release') return 'agent_behavior';
   return category;
 }

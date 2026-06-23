@@ -3120,6 +3120,21 @@ section[id] {
   max-width: 900px;
 }
 
+.ha-intro--release {
+  max-width: none;
+}
+
+.ha-kicker {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--ha-blue);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .ha-intro h2,
 .ha-section-head h2 {
   margin-bottom: 8px;
@@ -3257,6 +3272,94 @@ section[id] {
 
 .ha-release-decision--passed {
   border-left: 4px solid var(--ha-green);
+}
+
+.ha-release-snapshot,
+.ha-fi-cards,
+.ha-evidence-grid,
+.ha-failure-split,
+.ha-evidence-card__grid {
+  display: grid;
+  gap: 12px;
+}
+
+.ha-release-snapshot {
+  grid-template-columns: 1.4fr repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface);
+  padding: 14px;
+}
+
+.ha-release-snapshot div,
+.ha-fi-card,
+.ha-evidence-card__grid div,
+.ha-failure-split div,
+.ha-filter-chip {
+  min-width: 0;
+}
+
+.ha-release-snapshot span,
+.ha-fi-card span,
+.ha-evidence-card__grid span,
+.ha-failure-split span,
+.ha-filter-chip {
+  color: var(--ha-muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ha-release-snapshot strong,
+.ha-fi-card strong,
+.ha-evidence-card__grid strong,
+.ha-failure-split strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ha-text);
+  font-size: 15px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ha-release-snapshot small,
+.ha-fi-card small,
+.ha-evidence-card__grid small,
+.ha-failure-split small {
+  display: block;
+  margin-top: 4px;
+  color: var(--ha-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ha-fi-cards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ha-fi-card {
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface);
+  padding: 13px;
+}
+
+.ha-fi-card--critical {
+  border-left: 4px solid var(--ha-red);
+}
+
+.ha-fi-card--major {
+  border-left: 4px solid var(--ha-orange);
+}
+
+.ha-fi-card--passed {
+  border-left: 4px solid var(--ha-green);
+}
+
+.ha-evidence-preview {
+  display: grid;
+  gap: 12px;
 }
 
 .ha-next-actions {
@@ -3585,17 +3688,22 @@ section[id] {
 
 .ha-report-table th:nth-child(7),
 .ha-report-table td:nth-child(7) {
-  width: 10%;
+  width: 9%;
 }
 
 .ha-report-table th:nth-child(8),
 .ha-report-table td:nth-child(8) {
-  width: 11%;
+  width: 12%;
 }
 
 .ha-report-table th:nth-child(9),
 .ha-report-table td:nth-child(9) {
-  width: 11%;
+  width: 10%;
+}
+
+.ha-report-table th:nth-child(10),
+.ha-report-table td:nth-child(10) {
+  width: 10%;
 }
 
 .ha-report-table td {
@@ -3618,6 +3726,129 @@ section[id] {
   display: grid;
   gap: 3px;
   min-width: 0;
+}
+
+.ha-evidence-library {
+  display: grid;
+  gap: 14px;
+}
+
+.ha-evidence-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ha-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ha-line);
+  border-radius: 999px;
+  background: var(--ha-surface);
+  padding: 6px 10px;
+}
+
+.ha-filter-chip strong {
+  color: var(--ha-text);
+}
+
+.ha-evidence-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ha-evidence-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface);
+  padding: 16px;
+}
+
+.ha-evidence-card__head {
+  display: grid;
+  gap: 6px;
+}
+
+.ha-evidence-card__head strong {
+  color: var(--ha-text);
+  font-size: 18px;
+}
+
+.ha-evidence-card__head small {
+  color: var(--ha-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ha-evidence-card__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ha-evidence-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--ha-line);
+  padding-top: 12px;
+}
+
+.ha-evidence-card__actions > a {
+  color: var(--ha-blue);
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.ha-evidence-table-fallback summary {
+  cursor: pointer;
+  color: var(--ha-text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ha-report-fi .ha-badge {
+  justify-self: start;
+}
+
+.ha-fi-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.ha-fi-summary small,
+.ha-fi-details small {
+  color: var(--ha-muted);
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 3px;
+}
+
+.ha-fi-details {
+  margin-top: 12px;
+}
+
+.ha-fi-details summary {
+  color: var(--ha-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ha-failure-split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.ha-failure-split div {
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface-2);
+  padding: 10px;
 }
 
 .ha-report-cellstack span,
@@ -3824,11 +4055,21 @@ section[id] {
 .ha-preflight,
 .ha-launch-state,
 .run-target-step,
+.ha-run-step-section,
 .ha-advanced-run {
   border: 1px solid var(--ha-line);
   border-radius: 8px;
   background: var(--ha-surface-2);
   padding: 13px;
+}
+
+.ha-section-head--launcher h2 {
+  max-width: 680px;
+}
+
+.ha-run-step-section {
+  display: grid;
+  gap: 12px;
 }
 
 .ha-launch-state {
@@ -4675,6 +4916,58 @@ section[id] {
   line-height: 1.55;
 }
 
+.ha-trace-provenance {
+  grid-column: span 2;
+}
+
+.ha-trace-origin {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 12px 0;
+}
+
+.ha-trace-origin div {
+  border: 1px solid var(--ha-line);
+  border-radius: 8px;
+  background: var(--ha-surface-2);
+  padding: 10px;
+}
+
+.ha-trace-origin span,
+.ha-trace-timeline span {
+  color: var(--ha-muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ha-trace-origin strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.ha-trace-timeline {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+}
+
+.ha-trace-timeline li {
+  border-left: 3px solid var(--ha-accent);
+  margin: 0 0 10px;
+  padding: 0 0 0 12px;
+}
+
+.ha-trace-timeline p {
+  margin: 3px 0;
+}
+
+.ha-trace-timeline small {
+  color: var(--ha-muted);
+}
+
 .ha-actions {
   align-content: start;
   display: grid;
@@ -4956,6 +5249,65 @@ section[id] {
   text-decoration: none;
 }
 
+.ha-support-loop {
+  border-color: rgba(37, 99, 235, 0.2);
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08), transparent 44%),
+    var(--ha-surface);
+}
+
+.ha-manifest-doctor {
+  border-color: rgba(124, 58, 237, 0.2);
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.08), transparent 44%),
+    var(--ha-surface);
+}
+
+.ha-support-loop > p,
+.ha-manifest-doctor > p {
+  max-width: 860px;
+  margin: 0 0 14px;
+  color: var(--ha-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ha-loop-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ha-loop-grid div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid var(--ha-line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 12px;
+}
+
+.ha-loop-grid span {
+  color: #475569;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ha-loop-grid strong {
+  color: var(--ha-text);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.ha-loop-grid small {
+  overflow-wrap: anywhere;
+  color: var(--ha-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .ha-delta {
   display: grid;
   grid-template-columns: 120px 1fr;
@@ -5140,6 +5492,7 @@ section[id] {
   .ha-grid--usage,
   .ha-grid--evidence,
   .ha-filter-bar,
+  .ha-loop-grid,
   .ha-suite-grid,
   .ha-env-grid,
   .ha-policy-form,
@@ -5545,6 +5898,12 @@ section[id] {
   .run-workflow,
   .target-choice-grid,
   .target-registry,
+  .ha-release-snapshot,
+  .ha-fi-cards,
+  .ha-evidence-grid,
+  .ha-evidence-card__grid,
+  .ha-failure-split,
+  .ha-trace-origin,
   .target-readiness-snapshot__grid,
   .target-readiness-snapshot--compact .target-readiness-snapshot__grid,
   .target-card__meta,
@@ -5553,6 +5912,10 @@ section[id] {
   }
 
   .benchmark-editor-wide {
+    grid-column: auto;
+  }
+
+  .ha-trace-provenance {
     grid-column: auto;
   }
 
