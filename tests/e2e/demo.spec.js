@@ -104,7 +104,7 @@ test('shows invalid JSON errors for pasted bundles', async ({ page }) => {
   await page.getByText('Advanced setup').click();
   await page.locator('#custom-toggle').check();
   await page.locator('#bundle-json').fill('{bad json');
-  await page.getByRole('button', { name: 'Run evaluation' }).click();
+  await page.getByRole('button', { name: 'Run benchmark' }).click();
   await expect(page.locator('#input-error')).toContainText('Source workflow');
 });
 
@@ -167,7 +167,7 @@ test('report pathname routes still render the shared report section', async ({ p
 
 test('renders mobile demo controls without hiding the primary action', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'mobile-only coverage');
-  await expect(page.getByRole('button', { name: 'Run evaluation' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run benchmark' })).toBeVisible();
   await page.getByText('Advanced setup').click();
   await expect(page.locator('#runner-endpoint')).toBeVisible();
 });

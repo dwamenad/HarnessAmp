@@ -113,6 +113,9 @@ test('web report exposes export and persistence actions', () => {
     'Remediation Checklist',
     'Regression Plan',
     'Release Gate',
+    'Domain failures found',
+    'failureIntelligence',
+    'classifiedFailures',
     'failureEvidenceForReport',
     'retrievalEvidenceForReport',
     'gateForReport',
@@ -152,8 +155,10 @@ test('web app splits the product landing page from the operator surface', () => 
     'View seeded demo',
     'Run sample demo',
     'Product preview',
-    'Validate real AI agents before release.',
-    'Run benchmark packs against the agent you actually operate',
+    'Test real agent behavior before release.',
+    'HarnessAmp connects to your AI workflow',
+    'Not another eval dashboard',
+    'Run behavioral release gate',
     'Connect the agent you operate.',
     'Sample data first. Real execution when connected.',
     'Adapter contract kit',
@@ -165,6 +170,9 @@ test('web app splits the product landing page from the operator surface', () => 
     'targetReliabilityForRegistryTarget',
     'readinessStatusForTarget',
     'target-card__readiness',
+    'Local tunnels are valid for development replay and debugging',
+    'targetReleaseCapability',
+    'targetRecommendedNextAction',
     'Registered runner',
     'Vercel AI SDK route',
     'Hosted BYOK unavailable',
@@ -217,6 +225,11 @@ test('web app splits the product landing page from the operator surface', () => 
     'Review critical failures',
     'renderDashboardNextAction',
     'Top blocker',
+    'Can this agent ship?',
+    'renderDashboardReleaseSnapshot',
+    'renderDashboardFailureSummary',
+    'Recent release evidence',
+    'ha-evidence-card',
     'runLifecycleLabel',
     'ha-run-table',
     'failed quality gate',
@@ -402,8 +415,13 @@ test('saas start run supports end-to-end queued run flow', () => {
     'run-launch-state',
     'renderLaunchStateCallout',
     'runLaunchState',
-    'Start worker run',
-    'Start sample preview',
+    'Run behavioral release gate',
+    'Create sample evidence',
+    'Agent under test',
+    'Harness / benchmark',
+    'Release gate preview',
+    'Behavioral release gate',
+    'Sample evidence only',
     'Validate the selected execution target before launch.',
     'Local tunnel targets must use the public HTTPS forwarding URL.',
     'canValidateExecutionTarget',
@@ -435,7 +453,12 @@ test('saas start run supports end-to-end queued run flow', () => {
 test('saas reports page exposes working export controls', () => {
   [
     'renderReportsTable',
+    'renderReportEvidenceLibrary',
+    'renderReportEvidenceCard',
+    'ha-evidence-library',
     'ha-report-table',
+    'Failure intelligence',
+    'renderFailureIntelligencePanel',
     'reportExportDetail',
     'Browser-ready review copy',
     'data-report-export',
@@ -455,7 +478,7 @@ test('saas reports page exposes working export controls', () => {
   [
     'renderSaasReports',
     'report-export-status',
-    'Run reports',
+    'Release evidence',
     'Seeded sample rows stay labeled',
     'Export executive report',
     'Create CI gate',
@@ -467,6 +490,7 @@ test('saas pack catalog exposes RetrievalGuard, CustomerCareGuard, and LegalGuar
   [
     'RetrievalGuard',
     'CustomerCareGuard',
+    'Instruction Manifest Doctor',
     'LegalGuard',
     'citation_fidelity',
     'tool_failure_transparency',
@@ -474,6 +498,8 @@ test('saas pack catalog exposes RetrievalGuard, CustomerCareGuard, and LegalGuar
     'jurisdiction_discipline',
     'deadline_safety',
     'policy_source_fidelity',
+    'instruction_precedence',
+    'refund_policy_mismatch',
     'unauthorized_legal_advice',
     'sourceHierarchy',
     'authorityModel',
@@ -489,6 +515,11 @@ test('saas pack catalog exposes RetrievalGuard, CustomerCareGuard, and LegalGuar
   assert.match(source, /Fixture-backed/);
   assert.match(source, /Catalog only/);
   assert.match(source, /Roadmap only/);
+  assert.match(source, /renderInstructionDoctorSummaryPanel/);
+  assert.match(source, /renderInstructionDoctorDetailPanel/);
+  assert.match(source, /instructionDoctorRows/);
+  assert.match(source, /Agent release packs/);
+  assert.match(source, /Release gates for instruction stacks, tools, policies, and live behavior/);
 });
 
 test('saas console exposes strengthened operator controls', () => {

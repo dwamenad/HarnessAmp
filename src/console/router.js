@@ -1,8 +1,8 @@
 export const saasRouteLabels = {
-  '/dashboard': 'Dashboard',
+  '/dashboard': 'Overview',
   '/harnesses': 'Harnesses',
   '/harnesses/new': 'New Harness',
-  '/packs': 'Mutation Packs',
+  '/packs': 'Benchmarks',
   '/contracts': 'Contracts',
   '/targets': 'Execution Targets',
   '/runs/new': 'New Run',
@@ -11,8 +11,8 @@ export const saasRouteLabels = {
   '/failures': 'Failures',
   '/failures/fail-redflag-017': 'Failure Evidence',
   '/compare': 'Compare Runs',
-  '/reports': 'Reports',
-  '/ci': 'CI / Runners',
+  '/reports': 'Release Evidence',
+  '/ci': 'CI / Release Gates',
   '/org': 'Organization',
   '/org/members': 'Members',
   '/org/usage': 'Usage',
@@ -23,16 +23,16 @@ export const saasRouteLabels = {
 };
 
 export const saasNav = [
-  ['/dashboard', 'Dashboard', 'DA'],
+  ['/dashboard', 'Overview', 'OV'],
   ['/harnesses', 'Harnesses', 'HA'],
-  ['/packs', 'Mutation Packs', 'MP'],
+  ['/packs', 'Benchmarks', 'BM'],
   ['/contracts', 'Contracts', 'BC'],
   ['/targets', 'Execution Targets', 'ET'],
   ['/runs/new', 'New Run', 'NR'],
   ['/failures', 'Failures', 'FE'],
   ['/compare', 'Compare', 'CR'],
-  ['/reports', 'Reports', 'RP'],
-  ['/ci', 'CI / Runners', 'CI'],
+  ['/reports', 'Release Evidence', 'RE'],
+  ['/ci', 'CI / Release Gates', 'CI'],
 ];
 
 export const organizationNav = [

@@ -1,12 +1,16 @@
 # HarnessAmp
 
+HarnessAmp is not a generic eval platform. HarnessAmp finds domain-specific agent failures generic eval suites miss.
+
 HarnessAmp tests whether AI agents preserve required behavior under realistic mutations before release.
 
 It connects to the agent runtime you already operate, runs benchmark scenarios through the same execution path, and returns a release verdict with reproducible diagnostics.
 
 ```text
-Connect target -> Run mutations -> Diagnose failures -> Gate release
+Connect agent -> choose harness -> run benchmark -> inspect failures -> decide release
 ```
+
+In HarnessAmp, an agent is any versioned AI system that can be invoked through an execution target and evaluated against behavioral contracts. HarnessAmp does not define how the agent is built; it defines whether the agent is ready to ship.
 
 ## Problem
 
@@ -20,6 +24,21 @@ Agent demos can pass while production wrappers fail: prompts drift, tools change
 | Keep provider keys out of HarnessAmp | Registered runners and deployed adapter routes call models from your own infrastructure |
 | Understand why a run failed | Failed contracts, mutation failures, failure classes, evidence, and recommended fixes |
 | Block risky releases | Pass/warn/block gates, JSON/Markdown/CSV/HTML reports, and CI artifacts |
+
+## Core Concepts
+
+| Term | Meaning |
+| --- | --- |
+| Agent | A versioned AI system invoked through an execution target and evaluated against behavioral contracts. |
+| Execution target | The runner, deployed adapter route, local tunnel, or gated hosted path HarnessAmp uses to invoke the agent. |
+| Harness | The binding of an agent, execution target, benchmark, contracts, and gate profile. |
+| Benchmark | Versioned scenarios, mutations, expected behavior, evaluators, and failure classes. |
+| Mutation family | A related set of scenario changes around known failure modes. |
+| Failure class | A canonical domain or execution failure such as `refund_overreach`, `urgent_care_miss`, or `unsupported_citation`. |
+| Report | Exportable release evidence with scenarios, replay metadata, failure classes, target readiness, and recommended fixes. |
+| Release gate | The eligible, blocked, warning, or not-applicable decision derived from behavioral failures, target readiness, lifecycle state, contracts, and score. |
+
+Failure Intelligence means domain-specific failure classification, replayable scenario evidence, release-gate impact, recommended fixes tied to concrete failures, and a clean separation between behavioral failures and execution/infrastructure failures.
 
 ## Screenshots
 

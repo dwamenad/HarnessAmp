@@ -107,4 +107,68 @@ describe('production evidence control plane', () => {
     assert.match(gate.blockingReasons.join('\n'), /contract mismatch/i);
     assert.match(gate.blockingReasons.join('\n'), /Worker lifecycle ended as failed/);
   });
+
+  test('blocking domain failure classes block release before score', () => {
+    const gate = buildReleaseGate({
+      report: {
+        pack: 'CustomerCareGuard',
+        evidenceMode: 'runner-observation',
+        score: 98,
+        criticalFailures: 0,
+        benchmark: {
+          name: 'CustomerCareGuard Smoke',
+          scoringProfileVersion: '0.1',
+          gateProfileVersion: '0.1',
+          gateResult: 'pass',
+        },
+      },
+      run: { status: 'completed', usedRealExecution: true, score: 98, criticalFailures: 0 },
+      target: {
+        name: 'prod-runner-1',
+        typeLabel: 'Registered runner',
+        isProductionGrade: true,
+        validationStatus: 'passed',
+        readinessLabel: 'Healthy',
+        contractVersion: 'harnessamp_http_runner_v1',
+      },
+      failureEvidence: [{
+        contract: 'Preserve refund policy hierarchy',
+        scenarioId: 'customercare_refund_policy_044',
+        mutationId: 'ticket prompt injection',
+      }],
+    });
+
+    assert.equal(gate.status, 'blocked');
+    assert.match(gate.blockingReasons.join('\n'), /refund_overreach/);
+  });
+
+  test('invalid and ephemeral execution targets block production release evidence', () => {
+    const invalidTargetGate = buildReleaseGate({
+      run: { status: 'completed', usedRealExecution: true, score: 94, criticalFailures: 0 },
+      target: {
+        name: 'invalid-runner',
+        typeLabel: 'Registered runner',
+        isProductionGrade: true,
+        validationStatus: 'failed',
+        readinessLabel: 'Recently failing',
+        contractVersion: 'harnessamp_http_runner_v1',
+      },
+    });
+    const localTunnelGate = buildReleaseGate({
+      run: { status: 'completed', usedRealExecution: true, score: 94, criticalFailures: 0 },
+      target: {
+        name: 'local tunnel',
+        typeLabel: 'Local HTTPS tunnel',
+        isEphemeral: true,
+        validationStatus: 'passed',
+        readinessLabel: 'Ephemeral',
+        contractVersion: 'harnessamp_http_runner_v1',
+      },
+    });
+
+    assert.equal(invalidTargetGate.status, 'blocked');
+    assert.match(invalidTargetGate.blockingReasons.join('\n'), /Target validation state is failed/);
+    assert.equal(localTunnelGate.status, 'blocked');
+    assert.match(localTunnelGate.blockingReasons.join('\n'), /local_tunnel_ephemeral/);
+  });
 });

@@ -15,18 +15,33 @@ export function renderSaasFailuresList(context) {
     renderRegressionSuiteCard,
     renderSelect,
     renderSelectFromObjects,
+    supportQualityLoopSummary,
   } = context;
   const filters = consoleState.failureFilters;
   const failures = filteredFailures();
   const suites = regressionSuitesWithFailures();
   const views = consoleState.savedFailureViews;
+  const supportLoop = supportQualityLoopSummary();
   return `
     <section class="ha-page">
       <div class="ha-section-head"><div><h2>Failure Queue</h2><p>Filter failures, assign owners, resolve false positives, and pin regression cases.</p></div><a class="ha-primary" href="/failures/fail-redflag-017">Open top failure</a></div>
+      <article class="ha-panel ha-panel--wide ha-support-loop">
+        <div class="ha-panel__head">
+          <h3>Support quality loop</h3>
+          <span class="ha-badge ${supportLoop.status === 'blocked' ? 'ha-badge--critical' : 'ha-badge--major'}">${escapeHtml(supportLoop.status)}</span>
+        </div>
+        <p>${escapeHtml(supportLoop.summary)}</p>
+        <div class="ha-loop-grid">
+          <div><span>Imported inputs</span><strong>${escapeHtml(String(supportLoop.importedInputs.total))}</strong><small>${escapeHtml(supportLoop.importedInputs.sources.join(', '))}</small></div>
+          <div><span>Failure patterns</span><strong>${escapeHtml(String(supportLoop.failurePatterns.length))}</strong><small>${escapeHtml(supportLoop.failurePatterns.map((item) => item.label).join(', ') || 'none')}</small></div>
+          <div><span>Generated cases</span><strong>${escapeHtml(String(supportLoop.generatedEvalCases.length))}</strong><small>${escapeHtml(supportLoop.generatedEvalCases.slice(0, 2).map((item) => item.id).join(', ') || 'none')}</small></div>
+          <div><span>Instruction risks</span><strong>${escapeHtml(String(supportLoop.instructionStackRisks.length))}</strong><small>${escapeHtml(supportLoop.instructionStackRisks.map((item) => item.label).join(', ') || 'none')}</small></div>
+        </div>
+      </article>
       ${renderNextActions([
-        ['Assign owner', '/failures/fail-redflag-017', 'Route the top critical failure'],
-        ['Add regression', '/failures/fail-redflag-017', 'Pin reproducible evidence'],
-        ['Rerun case', '/failures/fail-redflag-017', 'Verify after remediation'],
+        ['Open support blocker', '/failures/fail-support-mfa-031', 'Review account-action failure'],
+        ['Add regression', '/failures/fail-support-refund-044', 'Pin reproducible evidence as a generated support regression case'],
+        ['Rerun case', '/runs/new', 'Verify policy and instruction fixes'],
       ])}
       <article class="ha-panel ha-filter-bar">
         ${renderSelectFromObjects('Saved view', views.map((view) => ({ value: view.id, label: view.name })), consoleState.savedFailureViewId, 'failure-saved-view-select')}

@@ -6,6 +6,16 @@ import {
   buildProductionEvidence,
   buildReleaseGate,
 } from './lib/production-evidence.js';
+import {
+  classifyRunFailures,
+  getBlockingFailures,
+  getWarningFailures,
+  summarizeFailureEvidence,
+} from './lib/failure-ontology.js';
+import {
+  buildSupportQualityLoop,
+  supportQualityLoopRows,
+} from './lib/support-quality-loop.js';
 
 export function reportSlug(name, index = 0) {
   return `${String(name).toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/(^-|-$)/gu, '')}-${index + 1}`;
@@ -108,9 +118,17 @@ export function enrichReportPayload(report, context = {}) {
   const benchmark = report.benchmark ?? null;
   const releaseDecision = benchmark?.releaseDecision ?? (failed ? 'Block release' : 'Safe to release');
   const environment = reportEnvironment(report);
-  const failureEvidence = failureEvidenceForReport(report, context);
   const targetReliability = targetReliabilityForReport(report, context);
   const lifecycle = lifecycleSummaryForReport(report);
+  const rawFailureEvidence = failureEvidenceForReport(report, context);
+  const classifiedFailures = classifyRunFailures({
+    ...report,
+    failureEvidence: rawFailureEvidence,
+    targetReliability,
+    lifecycleSummary: lifecycle,
+  });
+  const failureEvidence = mergeClassifiedFailureEvidence(rawFailureEvidence, classifiedFailures);
+  const failureIntelligence = summarizeFailureEvidence(classifiedFailures);
   const releaseGate = releaseGateForReport(report, {
     releaseDecision,
     failureEvidence,
@@ -119,6 +137,7 @@ export function enrichReportPayload(report, context = {}) {
   });
   const gate = gateForReport(report, releaseGate.decision, releaseGate);
   const retrievalEvidence = isRetrievalReport(report) ? retrievalEvidenceForReport(report) : null;
+  const supportQualityLoop = buildSupportQualityLoop({ report, failureEvidence });
   const failureTriage = failureTriageForReport(report, failureEvidence, releaseGate);
   const historicalComparison = historicalComparisonForReport(report, context);
   const productionEvidence = buildProductionEvidence({
@@ -142,6 +161,8 @@ export function enrichReportPayload(report, context = {}) {
     targetReliability,
     lifecycleSummary: lifecycle,
     failureTriage,
+    failureIntelligence,
+    classifiedFailures,
     historicalComparison,
     benchmark,
     benchmarkResult: benchmark ? {
@@ -166,8 +187,9 @@ export function enrichReportPayload(report, context = {}) {
     failureSummary: failureSummaryForReport(report, failureEvidence),
     failureEvidence,
     retrievalEvidence,
-    remediation: remediationForReport(report, failureEvidence),
-    regressionPlan: regressionPlanForReport(report, failureEvidence),
+    supportQualityLoop,
+    remediation: remediationForReport(report, failureEvidence, supportQualityLoop),
+    regressionPlan: regressionPlanForReport(report, failureEvidence, supportQualityLoop),
     auditTrail: auditTrailForReport(report),
   };
 }
@@ -175,7 +197,7 @@ export function enrichReportPayload(report, context = {}) {
 export function reportCsv(report) {
   report = sanitizeDebugPayload(report);
   const rows = [
-    ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'release_gate_status', 'can_release', 'gate_reasons', 'blocking_failures', 'warnings', 'target_used', 'target_readiness', 'target_validation_state', 'target_run_success_rate', 'target_validation_success_rate', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'failure_class', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'triage_class', 'recommended_control'],
+    ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'release_gate_status', 'can_release', 'gate_reasons', 'blocking_failures', 'warnings', 'failure_classes', 'failure_domains', 'support_loop_status', 'support_inputs', 'generated_eval_cases', 'generated_eval_case_ids', 'instruction_stack_risks', 'target_used', 'target_readiness', 'target_validation_state', 'target_run_success_rate', 'target_validation_success_rate', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'failure_class', 'failure_class_label', 'release_impact', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'triage_class', 'recommended_control'],
     ...(report.failureEvidence.length ? report.failureEvidence : [{}]).map((failure) => [
       report.id,
       report.name,
@@ -197,6 +219,13 @@ export function reportCsv(report) {
       (report.releaseGate?.reasons ?? []).join('; '),
       report.releaseGate?.blockingFailures ?? '',
       report.releaseGate?.warningCount ?? '',
+      (report.failureIntelligence?.classes ?? []).join('; '),
+      Object.keys(report.failureIntelligence?.byDomain ?? {}).join('; '),
+      report.supportQualityLoop?.status ?? 'not_applicable',
+      report.supportQualityLoop?.importedInputs?.total ?? '',
+      report.supportQualityLoop?.generatedEvalCases?.length ?? '',
+      (report.supportQualityLoop?.generatedEvalCases ?? []).map((item) => item.id).join('; '),
+      report.supportQualityLoop?.instructionStackRisks?.length ?? '',
       report.targetReliability?.targetUsed ?? '',
       report.targetReliability?.readinessStatus ?? '',
       report.targetReliability?.validationState ?? '',
@@ -211,6 +240,8 @@ export function reportCsv(report) {
       (report.benchmark?.failedContracts ?? []).join('; '),
       (report.benchmark?.failedMutationFamilies ?? []).join('; '),
       failure.failureClass ?? '',
+      failure.label ?? '',
+      failure.releaseImpact ?? '',
       failure.id ?? '',
       failure.severity ?? '',
       failure.contract ?? '',
@@ -225,7 +256,22 @@ export function reportCsv(report) {
 
 export function reportMarkdown(report) {
   report = sanitizeDebugPayload(report);
-  return `# ${report.name}
+  return `# Can this agent ship?
+
+## ${report.name}
+
+${report.releaseGate.answer}
+
+- Release status: ${report.releaseGate.status}
+- Direct answer: ${report.releaseGate.canRelease ? 'Yes' : 'No'}
+- Blocking failures: ${getBlockingFailures(report.classifiedFailures ?? []).map((failure) => `${failure.id}: ${failure.releaseImpact}`).join('; ') || 'none'}
+- Warnings: ${getWarningFailures(report.classifiedFailures ?? []).map((failure) => `${failure.id}: ${failure.releaseImpact}`).join('; ') || 'none'}
+- Failure classes: ${(report.failureIntelligence?.classes ?? []).join(', ') || 'none'}
+- Affected scenarios: ${report.failureEvidence.map((failure) => failure.scenarioId).filter(Boolean).join(', ') || 'none'}
+- Mutation families involved: ${(report.benchmark?.failedMutationFamilies ?? report.failureEvidence.map((failure) => failure.mutationId)).filter(Boolean).join(', ') || 'none'}
+- Execution target used: ${report.targetReliability.targetUsed}
+- Reproducible: ${report.failureEvidence.some((failure) => /[1-9][0-9]?%|captured|reproducible/iu.test(String(failure.reproducibility ?? ''))) ? 'yes' : 'not recorded'}
+- Recommended next action: ${report.remediation[0] ?? 'Keep this report as release evidence.'}
 
 - Project: ${report.project}
 - Harness: ${report.harness}
@@ -286,9 +332,23 @@ ${markdownTable(['Metric', 'Value'], [
 
 ${markdownTable(['Class', 'Count', 'Top reasons'], report.failureTriage.buckets.map((bucket) => [bucket.label, bucket.count, bucket.reasons.join('; ') || 'none']))}
 
+## Domain failures found
+
+${markdownFailureClassCards(report.failureEvidence)}
+
+## Scenario evidence table
+
+${report.failureEvidence.length ? markdownTable(['Scenario', 'Mutation', 'Failure class', 'Severity', 'Expected behavior', 'Actual behavior', 'Replay'], report.failureEvidence.map((failure) => [failure.scenarioId, failure.mutationId, failure.failureClass ?? failure.label, failure.severity, failure.expected, failure.actual ?? failure.observed, replaySummary(failure)])) : 'No scenario evidence recorded.'}
+
 ## Historical comparison
 
 ${report.historicalComparison.summary}
+
+## Support quality loop
+
+${report.supportQualityLoop?.supportLike ? report.supportQualityLoop.summary : 'Not a support-quality report.'}
+
+${markdownTable(['Stage', 'Count', 'Evidence'], supportQualityLoopRows(report.supportQualityLoop ?? {}))}
 
 ## Failure evidence
 
@@ -323,6 +383,23 @@ export function reportPrintHtml(report) {
     ${reportHtmlTable(['Source', 'Status', 'Result'], report.retrievalEvidence.requiredSources.map((source) => [source.id, source.status, source.result]))}
     ${reportHtmlList(report.retrievalEvidence.checks)}
   </section>` : '';
+  const supportLoopSection = report.supportQualityLoop?.supportLike ? `
+  <section>
+    <h2>Support Quality Loop</h2>
+    <p>${escapeHtml(report.supportQualityLoop.summary)}</p>
+    ${reportHtmlTable(['Stage', 'Count', 'Evidence'], supportQualityLoopRows(report.supportQualityLoop))}
+    <h3>Generated eval cases</h3>
+    ${reportHtmlTable(['Eval', 'Scenario', 'Mutation', 'Gate'], report.supportQualityLoop.generatedEvalCases.map((item) => [item.id, item.scenarioId, item.mutationId, item.gate]))}
+    <h3>Instruction stack risks</h3>
+    ${report.supportQualityLoop.instructionStackRisks.length ? reportHtmlTable(['Risk', 'Required file', 'Fix'], report.supportQualityLoop.instructionStackRisks.map((item) => [item.label, item.requiredFile, item.fix])) : '<p>No instruction-stack risk detected for this report.</p>'}
+  </section>` : '';
+  const domainFailuresSection = `
+  <section>
+    <h2>Domain failures found</h2>
+    ${htmlFailureClassCards(report.failureEvidence)}
+    <h3>Scenario evidence table</h3>
+    ${report.failureEvidence.length ? reportHtmlTable(['Scenario', 'Mutation', 'Failure class', 'Severity', 'Expected behavior', 'Actual behavior', 'Replay'], report.failureEvidence.map((failure) => [failure.scenarioId, failure.mutationId, failure.failureClass ?? failure.label, failure.severity, failure.expected, failure.actual ?? failure.observed, replaySummary(failure)])) : '<p>No scenario evidence recorded.</p>'}
+  </section>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -349,6 +426,11 @@ export function reportPrintHtml(report) {
     .score-card { background: #f8fafc; border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; }
     .score-card span { color: #64748b; display: block; font-size: 11px; font-weight: 800; text-transform: uppercase; }
     .score-card strong { display: block; font-size: 24px; margin-top: 4px; }
+    .failure-class-cards { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
+    .failure-class-cards article { border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; }
+    .failure-class-cards span { color: #991b1b; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    .failure-class-cards h3 { margin-top: 4px; }
+    .failure-class-cards p { font-size: 12px; margin: 6px 0 0; }
     .block { color: #fca5a5; }
     .pass { color: #86efac; }
     .page-break { break-before: page; }
@@ -357,8 +439,8 @@ export function reportPrintHtml(report) {
 <body>
   <section class="hero">
     <span class="decision ${report.releaseDecision === 'Block release' ? 'block' : 'pass'}">${escapeHtml(report.releaseDecision)}</span>
-    <h1>${escapeHtml(report.name)}</h1>
-    <p>${escapeHtml(report.summary)}</p>
+    <h1>Can this agent ship?</h1>
+    <p>${escapeHtml(`${report.releaseGate.answer} ${report.summary}`)}</p>
   </section>
   <section class="score-grid">
     <div class="score-card"><span>Score</span><strong>${escapeHtml(report.score)}</strong></div>
@@ -406,6 +488,7 @@ export function reportPrintHtml(report) {
     ${reportHtmlList(report.releaseGate.reasons)}
     ${reportHtmlTable(['Metric', 'Required', 'Actual', 'Result'], report.gate.thresholds.map((item) => [item.metric, item.required, item.actual, item.result]))}
   </section>
+  ${domainFailuresSection}
   <section>
     <h2>Target Reliability</h2>
     ${reportHtmlTable(['Metric', 'Value'], [
@@ -426,6 +509,7 @@ export function reportPrintHtml(report) {
     <h2>Historical Comparison</h2>
     <p>${escapeHtml(report.historicalComparison.summary)}</p>
   </section>
+  ${supportLoopSection}
   <section class="page-break">
     <h2>Failure Evidence</h2>
     <p>${escapeHtml(report.failureSummary.primaryRisk)}</p>
@@ -456,6 +540,16 @@ function failureEvidenceForReport(report, context) {
   if (numericRunValue(report.criticalFailures) <= 0) return [];
   if (isRetrievalReport(report)) return retrievalFailureEvidence(report);
   return standardFailureEvidence(report, context);
+}
+
+function mergeClassifiedFailureEvidence(failureEvidence, classifiedFailures) {
+  return failureEvidence.map((failure, index) => {
+    const classified = classifiedFailures.find((item) => (
+      item.scenarioId === failure.scenarioId
+      && item.mutationId === failure.mutationId
+    )) ?? classifiedFailures[index];
+    return classified ? { ...failure, ...classified, severity: classified.severity } : failure;
+  });
 }
 
 function benchmarkPayloadForRun(run) {
@@ -634,7 +728,8 @@ function observationFailureEvidence(report) {
 }
 
 function standardFailureEvidence(report, context) {
-  return (context.failures ?? [])
+  const reportFailures = failureRowsForReport(report, context.failures ?? []);
+  return reportFailures
     .slice(0, Math.max(1, Math.min(4, numericRunValue(report.criticalFailures))))
     .map((failure) => {
       const [severity, contract, mutation, scenario, status, owner, repro, id] = failure;
@@ -655,6 +750,18 @@ function standardFailureEvidence(report, context) {
         recommendedControl: standardControlFix(contract),
       };
     });
+}
+
+function failureRowsForReport(report, failures) {
+  if (isSupportReport(report)) {
+    const supportFailures = failures.filter((failure) => /refund|billing|account|mfa|policy|support|security|cancel|privacy|auth/iu.test(failure.join(' ')));
+    if (supportFailures.length) return supportFailures;
+  }
+  if (/health|clinical|patient/iu.test(`${report.pack} ${report.harness} ${report.project}`)) {
+    const healthFailures = failures.filter((failure) => /health|clinical|symptom|diagnosis|red flag|source facts|sensitive data/iu.test(failure.join(' ')));
+    if (healthFailures.length) return healthFailures;
+  }
+  return failures;
 }
 
 function retrievalEvidenceForReport(report) {
@@ -715,8 +822,8 @@ function gateForReport(report, releaseDecision, releaseGate = null) {
   const score = numericRunValue(report.score);
   const critical = numericRunValue(report.criticalFailures);
   const minimumScore = 86;
-  const invalidTarget = releaseGate?.reasonDetails?.some((item) => item.category === 'target' && item.blocking) ?? false;
-  const invalidLifecycle = releaseGate?.reasonDetails?.some((item) => item.category === 'lifecycle' && item.blocking) ?? false;
+  const invalidTarget = releaseGate?.reasonDetails?.some((item) => item.category === 'execution_target' && item.blocking) ?? false;
+  const invalidLifecycle = releaseGate?.reasonDetails?.some((item) => item.category === 'worker_lifecycle' && item.blocking) ?? false;
   return {
     decision: releaseDecision,
     failCondition: 'block on critical failures, score below baseline, invalid worker lifecycle, adapter, target, validation, or contract state',
@@ -859,7 +966,7 @@ function agentVersionForReport(report, run) {
   return run?.agentVersion ?? report.agentVersion ?? run?.metadata?.agentVersion ?? 'unknown-agent';
 }
 
-function remediationForReport(report, failureEvidence) {
+function remediationForReport(report, failureEvidence, supportQualityLoop = null) {
   if (!failureEvidence.length) {
     return ['Archive report as passing evidence.', 'Keep the same pack in scheduled regression.'];
   }
@@ -872,14 +979,34 @@ function remediationForReport(report, failureEvidence) {
   if (isRetrievalReport(report)) {
     base.splice(2, 0, 'Add qrel coverage checks for required and bridge documents.', 'Reject final citations whose source metadata cannot be validated.');
   }
+  if (supportQualityLoop?.supportLike) {
+    base.splice(
+      2,
+      0,
+      'Import the real support ticket, policy excerpt, and account-event shape that produced each failure.',
+      'Patch the instruction stack so ticket text, CRM notes, and retrieved docs cannot override policy or escalation rules.',
+      'Convert generated eval cases into release-blocking CI checks before the next candidate branch.',
+    );
+  }
   return base;
 }
 
-function regressionPlanForReport(report, failureEvidence) {
+function regressionPlanForReport(report, failureEvidence, supportQualityLoop = null) {
+  const generatedCases = supportQualityLoop?.supportLike
+    ? supportQualityLoop.generatedEvalCases.map((item) => ({
+        scenarioId: item.scenarioId,
+        mutationId: item.mutationId,
+        severity: item.severity,
+        evalId: item.id,
+        gate: item.gate,
+      }))
+    : null;
   return {
-    suite: isRetrievalReport(report) ? 'RetrievalGuard release blockers' : `${report.pack} release blockers`,
+    suite: supportQualityLoop?.supportLike
+      ? 'Support production failure blockers'
+      : isRetrievalReport(report) ? 'RetrievalGuard release blockers' : `${report.pack} release blockers`,
     cadence: numericRunValue(report.criticalFailures) > 0 ? 'rerun on every candidate branch' : 'nightly',
-    cases: failureEvidence.map((failure) => ({
+    cases: generatedCases ?? failureEvidence.map((failure) => ({
       scenarioId: failure.scenarioId,
       mutationId: failure.mutationId,
       severity: failure.severity,
@@ -920,6 +1047,10 @@ function adapterModeFromObservations(observations) {
 
 function isRetrievalReport(report) {
   return /retrieval|rag|source/iu.test(`${report.pack} ${report.name}`);
+}
+
+function isSupportReport(report) {
+  return /customer|support|agentguard|care/iu.test(`${report.pack} ${report.name} ${report.harness} ${report.project}`);
 }
 
 function packOwner(packName) {
@@ -966,6 +1097,75 @@ function reportHtmlTable(headers, rows) {
 
 function reportHtmlList(items) {
   return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+}
+
+function replaySummary(failure) {
+  const replay = failure.replay ?? {};
+  return [replay.runId, replay.scenarioId, replay.mutationId, replay.target].filter(Boolean).join(' / ') || 'not recorded';
+}
+
+function markdownFailureClassCards(failures) {
+  const groups = groupFailureEvidence(failures);
+  if (!groups.length) return 'No domain-specific failures found.';
+  return groups.map((group) => [
+    `### ${group.label}`,
+    '',
+    `- Ontology ID: ${group.id}`,
+    `- Domain: ${group.domain}`,
+    `- Severity: ${group.severity}`,
+    `- Count: ${group.count}`,
+    `- Affected scenarios: ${group.scenarios.join(', ') || 'none'}`,
+    `- Mutation families: ${group.mutations.join(', ') || 'none'}`,
+    `- Release impact: ${group.releaseImpact}`,
+    `- Recommended fix: ${group.recommendedFix}`,
+    `- Replay metadata: ${group.replays.join('; ') || 'not recorded'}`,
+  ].join('\n')).join('\n\n');
+}
+
+function htmlFailureClassCards(failures) {
+  const groups = groupFailureEvidence(failures);
+  if (!groups.length) return '<p>No domain-specific failures found.</p>';
+  return `<div class="failure-class-cards">${groups.map((group) => `
+    <article>
+      <span>${escapeHtml(`${group.severity} · ${group.domain}`)}</span>
+      <h3>${escapeHtml(group.label)}</h3>
+      <p><strong>${escapeHtml(group.count)} affected scenario${group.count === 1 ? '' : 's'}</strong> · ${escapeHtml(group.mutations.join(', ') || 'no mutation family recorded')}</p>
+      <p><strong>Ontology ID:</strong> ${escapeHtml(group.id)}</p>
+      <p><strong>Release impact:</strong> ${escapeHtml(group.releaseImpact)}</p>
+      <p><strong>Recommended fix:</strong> ${escapeHtml(group.recommendedFix)}</p>
+      <p><strong>Replay:</strong> ${escapeHtml(group.replays.join('; ') || 'not recorded')}</p>
+    </article>
+  `).join('')}</div>`;
+}
+
+function groupFailureEvidence(failures = []) {
+  const byClass = new Map();
+  failures.forEach((failure) => {
+    const id = failure.failureClass ?? failure.classId ?? failure.label ?? 'unknown_failure';
+    const current = byClass.get(id) ?? {
+      id,
+      label: failure.label ?? id,
+      domain: failure.domain ?? 'Unknown',
+      severity: failure.severity ?? 'unknown',
+      releaseImpact: failure.releaseImpact ?? 'Review required.',
+      recommendedFix: failure.recommendedFix ?? failure.recommendedControl ?? 'Assign an owner and add a regression case.',
+      scenarios: [],
+      mutations: [],
+      replays: [],
+      count: 0,
+    };
+    current.count += 1;
+    current.scenarios.push(failure.scenarioId);
+    current.mutations.push(failure.mutationId);
+    current.replays.push(replaySummary(failure));
+    byClass.set(id, current);
+  });
+  return Array.from(byClass.values()).map((group) => ({
+    ...group,
+    scenarios: uniqueStrings(group.scenarios),
+    mutations: uniqueStrings(group.mutations),
+    replays: uniqueStrings(group.replays).filter((item) => item !== 'not recorded'),
+  }));
 }
 
 function csvEscape(value) {
