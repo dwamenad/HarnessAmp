@@ -1,13 +1,13 @@
-# Benchmarks
+# Benchmark-Backed Release Gates
 
-Benchmark packs define the release gate surface for a target agent class.
+Benchmark packs are the compatibility format behind release gates. Product surfaces should lead with the release gate, verdict, blockers, warnings, readiness, and replayable evidence.
 
 Current first-class packs:
 
 - `support-mvp`
 - `browser-mvp`
 
-Each benchmark should include:
+Each benchmark-backed release gate should include:
 
 - intent
 - contract
@@ -20,7 +20,7 @@ Case reporting should show pass rate, forbidden-action violations, evidence used
 
 ## Lifecycle MVP
 
-HarnessAmp now has an API-backed benchmark truth-layer MVP with console controls in the `/app` workspace area. It persists the entities needed to move a benchmark from draft material into reviewed release-gate evidence:
+HarnessAmp now has an API-backed release-gate truth-layer MVP with console controls in the `/app` workspace area. It persists the entities needed to move benchmark-backed source material into reviewed release-gate evidence:
 
 - `benchmark_packs`
 - `benchmark_versions`
@@ -28,7 +28,7 @@ HarnessAmp now has an API-backed benchmark truth-layer MVP with console controls
 - `promotion_candidates`
 - `golden_cases`
 
-The lifecycle states for benchmark versions are:
+The lifecycle states for release-gate versions are:
 
 - `draft`
 - `reviewed`
@@ -46,10 +46,10 @@ An approved version is the source of truth that mutation runs should target for 
 
 In the app console, signed-in project owners and maintainers can:
 
-- create a draft version from the active benchmark pack or generated report export
+- create a draft version from the active release gate or generated report export
 - edit project metadata, mission, required behavior, forbidden behavior, success signals, thresholds, tags, cases, tools, and evidence as a new immutable draft version
-- inspect a field/case/tool/evidence diff between adjacent benchmark versions
-- assign a reviewer to a benchmark version
+- inspect a field/case/tool/evidence diff between adjacent release-gate versions
+- assign a reviewer to a release-gate version
 - record review decisions and comments, including reviewed, request changes, approve, reject, and archive
 - propose a holdout golden case from the active report
 - promote a proposed case into the project's golden-case set
@@ -57,7 +57,7 @@ In the app console, signed-in project owners and maintainers can:
 
 ## API Flow
 
-Create a draft benchmark version:
+Create a draft release-gate version:
 
 ```http
 POST /api/benchmarks?projectId=<project-id>
@@ -153,13 +153,13 @@ Promote the candidate:
 POST /api/benchmarks?action=promote&candidateId=<candidate-id>
 ```
 
-List benchmark packs for a project:
+List release gates for a project:
 
 ```http
 GET /api/benchmarks?projectId=<project-id>
 ```
 
-Fetch a benchmark detail, including versions, reviews, promotion candidates, and golden cases:
+Fetch release-gate detail, including versions, reviews, promotion candidates, and golden cases:
 
 ```http
 GET /api/benchmarks?id=<benchmark-id>

@@ -1,6 +1,6 @@
-# Benchmark changelog and governance
+# Release gate changelog and governance
 
-## Current benchmark versions
+## Current release-gate versions
 
 - RetrievalGuard Smoke v0.1
 - RetrievalGuard Standard v0.1
