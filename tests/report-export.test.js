@@ -7,6 +7,10 @@ import {
   reportMarkdown,
   reportPrintHtml,
 } from '../src/console/report-export.js';
+import {
+  fixtureRunForTarget,
+  normalizeHarnessTask,
+} from '../src/adapters/agent-harness-target.js';
 
 const harnesses = [
   {
@@ -74,7 +78,11 @@ describe('report export payloads', () => {
     assert.equal(report.gate.thresholds[0].result, 'fail');
     assert.equal(report.releaseGate.canRelease, false);
     assert.equal(report.releaseGate.status, 'blocked');
-    assert.match(report.releaseGate.answer, /Can this agent be released\? No/);
+    assert.equal(report.releaseGate.verdict, 'Blocked');
+    assert.equal(report.releaseCertification.verdict, 'Blocked');
+    assert.equal(report.releaseCertification.productionCertifiable, false);
+    assert.match(report.releaseGate.answer, /Can this tool-connected agent be released\? No/);
+    assert.equal(report.releaseGate.toolchain.validationStatus, 'Needs validation');
     assert.equal(report.productionEvidence.releaseGate.status, 'blocked');
     assert.equal(report.productionEvidence.failureTriage.agentBehaviorFailures > 0, true);
     assert.equal(report.failureTriage.buckets.some((bucket) => bucket.label === 'Agent behavior failures'), true);
@@ -109,30 +117,45 @@ describe('report export payloads', () => {
     assert.match(html, /Target Reliability/);
     assert.match(html, /Failure Triage/);
     assert.match(html, /Historical Comparison/);
-    assert.match(html, /Domain failures found/);
+    assert.match(html, /Agent-tool contract failures found/);
     assert.match(html, /Trace-backed evidence/);
     assert.match(html, /replayable_trace_captured/);
-    assert.match(html, /Can this agent be released\? No/);
+    assert.match(html, /Toolchain Release Evidence Report/);
+    assert.match(html, /Can this tool-connected agent be released\? No/);
+    assert.match(html, /Toolchain Readiness/);
     assert.match(html, /citation_answer_mismatch/);
     assert.match(html, /Evidence mode/);
     assert.match(html, /RetrievalGuard Smoke v0\.1/);
-    assert.match(html, /Benchmark run type/);
-    assert.match(markdown, /Benchmark: RetrievalGuard Smoke v0\.1/);
-    assert.match(markdown, /Benchmark slug: retrievalguard-smoke/);
-    assert.match(markdown, /Benchmark run type: customized/);
-    assert.match(markdown, /Failed mutation families/);
-    assert.match(markdown, /Release gate status/);
-    assert.match(markdown, /Can this agent ship/);
-    assert.match(markdown, /Domain failures found/);
+    assert.match(html, /Certification run type/);
+    assert.match(markdown, /Toolchain Release Evidence Report/);
+    assert.match(markdown, /Gate profile: RetrievalGuard Smoke v0\.1/);
+    assert.match(markdown, /Gate slug: retrievalguard-smoke/);
+    assert.match(markdown, /Certification run type: customized/);
+    assert.match(markdown, /Failure profiles involved/);
+    assert.match(markdown, /Release verdict/);
+    assert.match(markdown, /Toolchain readiness/);
+    assert.match(markdown, /Agent-tool contract failures found/);
     assert.match(markdown, /Trace-backed evidence/);
     assert.match(markdown, /Rerun failed scenarios from this report/);
     assert.match(markdown, /Target reliability/);
     assert.match(markdown, /Failure triage/);
     assert.match(markdown, /Historical comparison/);
+    assert.match(csv, /release_gate_name/);
+    assert.match(csv, /release_gate_slug/);
+    assert.match(csv, /release_gate_mode/);
+    assert.match(csv, /release_certification_type/);
+    assert.match(csv, /release_blockers/);
+    assert.match(csv, /toolchain_readiness_status/);
+    assert.match(csv, /production_certifiable/);
+    assert.match(csv, /evidence_type/);
     assert.match(csv, /benchmark_name/);
     assert.match(csv, /benchmark_slug/);
     assert.match(csv, /benchmark_run_type/);
     assert.match(csv, /release_gate_status/);
+    assert.match(csv, /release_verdict/);
+    assert.match(csv, /unsafe_action_failures/);
+    assert.match(csv, /permission_warnings/);
+    assert.match(csv, /replayable_regression_cases/);
     assert.match(csv, /failure_classes/);
     assert.match(csv, /release_impact/);
     assert.match(csv, /trace_id/);
@@ -146,6 +169,48 @@ describe('report export payloads', () => {
     assert.match(csv, /recommended_control/);
     assert.match(csv, /citation_answer_mismatch/);
     assert.match(csv, /retrieval_contradictory_evidence_001/);
+  });
+
+  test('agent harness fixture reports export normalized target policy evidence', () => {
+    const fixture = fixtureRunForTarget(
+      { targetType: 'openclaw', targetId: 'openclaw-fixture-target' },
+      normalizeHarnessTask({
+        runId: 'run-openclaw-report',
+        benchmarkId: 'personalagentguard-smoke-v0.1',
+        scenarioId: 'personal_agent_inbox_001',
+        mutationId: 'email_importance_ambiguity',
+        permissionPolicy: { requireConfirmationFor: ['email_delete'], irreversibleActionsBlocked: true },
+      }),
+    );
+    const run = {
+      ...failedRetrievalRun,
+      id: 'run-openclaw-report',
+      name: 'PersonalAgentGuard Smoke',
+      pack: 'PersonalAgentGuard',
+      packId: 'personalagentguard-core',
+      benchmarkId: 'personalagentguard-smoke-v0.1',
+      critical: '1',
+      runnerObservations: fixture.observations,
+      adapterMode: 'agent-harness-fixture',
+      executionTarget: fixture.target,
+    };
+    const report = buildReportPayload(localRunReportId(run), {
+      localRuns: [run],
+      harnesses,
+    });
+    const html = reportPrintHtml(report);
+    const markdown = reportMarkdown(report);
+    const csv = reportCsv(report);
+
+    assert.equal(report.agentHarnessEvidence.targetType, 'openclaw');
+    assert.equal(report.agentHarnessEvidence.adapterVersion, 'agent-harness-target.v0.1');
+    assert.match(report.agentHarnessEvidence.permissionPolicySummary, /email_delete/);
+    assert.match(markdown, /Agent harness evidence/);
+    assert.match(markdown, /Memory policy/);
+    assert.match(html, /Agent harness evidence/);
+    assert.match(csv, /agent_harness_target/);
+    assert.match(csv, /openclaw/);
+    assert.match(csv, /unsafe_email_deletion/);
   });
 
   test('CustomerCareGuard sample report exposes support quality loop evidence', () => {
@@ -183,7 +248,7 @@ describe('report export payloads', () => {
     assert.match(markdown, /Support quality loop/);
     assert.match(markdown, /Instruction stack risks/);
     assert.match(html, /Support Quality Loop/);
-    assert.match(html, /Generated eval cases/);
+    assert.match(html, /Generated regression cases/);
     assert.match(csv, /support_loop_status/);
     assert.match(csv, /eval_customercare_mfa_reset_031__social_engineering/);
   });
@@ -235,7 +300,8 @@ describe('report export payloads', () => {
       harnesses,
     });
 
-    assert.equal(report.releaseDecision, 'Safe to release');
+    assert.equal(report.releaseDecision, 'Block release');
+    assert.equal(report.releaseGate.toolchain.productionCapable, false);
     assert.equal(report.failureEvidence.length, 0);
     assert.equal(report.regressionPlan.cases.length, 0);
   });
@@ -247,10 +313,11 @@ describe('report export payloads', () => {
 
     assert.equal(report.benchmark.seeded, true);
     assert.equal(report.benchmark.benchmarkRunType, 'sample');
-    assert.equal(report.benchmark.benchmarkSnapshot.description, 'Seeded sample report. Not real benchmark evidence.');
+    assert.equal(report.benchmark.benchmarkSnapshot.description, 'Seeded sample report. Not production release evidence.');
     assert.equal(report.benchmark.name, 'Seeded sample');
+    assert.equal(report.releaseCertification.productionCertifiable, false);
     assert.equal(report.productionEvidence.releaseGate.status, 'not_applicable');
     assert.equal(report.productionEvidence.releaseGate.canRelease, false);
-    assert.match(reportMarkdown(report), /Benchmark: Seeded sample - not a real benchmark result/);
+    assert.match(reportMarkdown(report), /Gate profile: Seeded sample - not production release evidence/);
   });
 });
