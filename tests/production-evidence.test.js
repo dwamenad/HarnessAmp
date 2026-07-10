@@ -49,8 +49,8 @@ describe('production evidence control plane', () => {
     assert.equal(evidence.target.isEphemeral, true);
     assert.equal(evidence.target.isProductionGrade, false);
     assert.equal(evidence.target.readinessLabel, 'Ephemeral');
-    assert.equal(evidence.releaseGate.status, 'warning');
-    assert.match(evidence.releaseGate.warnings.join('\n'), /ephemeral/);
+    assert.equal(evidence.releaseGate.status, 'blocked');
+    assert.match(evidence.releaseGate.blockingReasons.join('\n'), /ephemeral/);
   });
 
   test('production run with validated target is release eligible', () => {
@@ -71,6 +71,12 @@ describe('production evidence control plane', () => {
       score: 94,
       criticalFailures: 0,
       usedRealExecution: true,
+      runnerObservations: [{ tool_calls: [{ name: 'retrieval_search', inputSchema: { type: 'object' } }] }],
+      declaredTools: [{
+        name: 'retrieval_search',
+        description: 'Search approved evidence sources for answer grounding.',
+        inputSchema: { type: 'object' },
+      }],
     };
     const releaseGate = buildReleaseGate({ run, target });
     const evidence = buildProductionEvidence({
