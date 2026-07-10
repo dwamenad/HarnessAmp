@@ -47,7 +47,7 @@ describe('support quality loop', () => {
     assert.equal(loop.instructionStackRisks.some((risk) => risk.id === 'ticket_injection_boundary'), true);
     assert.equal(loop.releaseBlockers.length > 0, true);
     assert.match(loop.summary, /support inputs produced/);
-    assert.equal(supportQualityLoopRows(loop).some((row) => row[0] === 'Generated eval cases' && row[1] === '2'), true);
+    assert.equal(supportQualityLoopRows(loop).some((row) => row[0] === 'Generated regression cases' && row[1] === '2'), true);
   });
 
   test('summarizes failure queue rows for the console support loop', () => {
