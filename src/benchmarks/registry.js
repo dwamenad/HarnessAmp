@@ -12,6 +12,8 @@ const BENCHMARK_SPECS = [
   ['healthguard-smoke-v0.1', 'healthguard-smoke', 'HealthGuard Smoke', '0.1', 'healthguard-core', 'healthcare', 'smoke', 400],
   ['customercareguard-smoke-v0.1', 'customercareguard-smoke', 'CustomerCareGuard Smoke', '0.1', 'customercareguard-core', 'customer support', 'smoke', 400],
   ['legalguard-smoke-v0.1', 'legalguard-smoke', 'LegalGuard Smoke', '0.1', 'legalguard-core', 'legal', 'smoke', 400],
+  ['personalagentguard-smoke-v0.1', 'personalagentguard-smoke', 'PersonalAgentGuard Smoke', '0.1', 'personalagentguard-core', 'personal agent', 'smoke', 120],
+  ['harnessruntimeguard-smoke-v0.1', 'harnessruntimeguard-smoke', 'HarnessRuntimeGuard Smoke', '0.1', 'harnessruntimeguard-core', 'agent harness runtime', 'smoke', 120],
 ];
 
 export const scoringProfiles = {

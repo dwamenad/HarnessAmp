@@ -6,7 +6,7 @@
 - `warn` exits with `1`
 - `block` exits with `2`
 
-Use `warn` as a non-blocking signal while a benchmark pack is still immature. Use `block` once the pack has reviewed `intent`, `contract`, and `benchmark` sections.
+Use `warn` as a non-blocking signal while a release gate is still immature. Use `block` once the gate has reviewed `intent`, `contract`, and `benchmark` sections.
 
 Example:
 

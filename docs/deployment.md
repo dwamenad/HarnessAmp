@@ -148,7 +148,7 @@ DATABASE_URL=<Postgres connection string>
 POSTGRES_URL=<Postgres connection string>
 ```
 
-Postgres is required for production workflows that need durable users, workspaces, projects, reports, runner records, jobs, benchmark versions, and review history.
+Postgres is required for production workflows that need durable users, workspaces, projects, reports, runner records, jobs, release-gate versions, and review history.
 
 ### Production Worker Authentication
 

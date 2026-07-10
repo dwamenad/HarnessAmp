@@ -19,7 +19,7 @@
 
 ## The release gate fails in CI
 
-- Check whether the holdout pass threshold is too high for the current maturity of the benchmark pack.
+- Check whether the holdout pass threshold is too high for the current maturity of the release gate.
 - Inspect the markdown artifact from `npm run release:gate`.
 - If the pack still uses inferred layers, improve the pack before tightening the threshold.
 

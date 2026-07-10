@@ -35,7 +35,7 @@ Recommended checks:
 
 Action inputs:
 
-- `bundle` - required path to the benchmark or harness bundle JSON
+- `bundle` - required path to the release-gate, benchmark, or harness bundle JSON
 - `observations` - optional observed-runs path reserved for analysis-based gates
 - `max-mutations` - default `24`
 - `min-overall-score` - default `65`
@@ -69,9 +69,9 @@ Exit policy:
 - `1` = warn when strict mode treats warnings as failure
 - `2` = block
 - `3` = infrastructure or runtime failure
-- `4` = invalid config or invalid benchmark slug
+- `4` = invalid config or invalid release gate slug
 
-Benchmark CI output uses the machine-readable schema `harnessamp.ci.v0.1`. The output includes benchmark id, slug, version, run type, run id, harness id, agent version, score, gate result, release decision, failure counts, failed contracts, failed mutation families, baseline deltas when available, and artifact availability. CI consumers should parse this contract instead of scraping Markdown or Print HTML.
+Release-gate automation output uses the machine-readable schema `harnessamp.ci.v0.1`. The output leads with the release verdict, gate result, failure counts, failed contracts, failed failure profiles, baseline deltas when available, and artifact availability. Benchmark id, slug, version, and run type remain supporting compatibility metadata because release gates are backed by versioned benchmark definitions. CI consumers should parse this contract instead of scraping Markdown or Print HTML.
 
 The Robustness Gap is defined as:
 

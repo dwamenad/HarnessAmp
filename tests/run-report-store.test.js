@@ -120,6 +120,7 @@ describe('run/report persistence store', () => {
     assert.equal(rows[1].seeded, true);
     assert.match(rows[1].cells[4], /Seeded sample/);
     assert.equal(rows[1].cells.at(-1), 'seeded sample');
+    assert.equal(rows[1].cells[4], 'Seeded sample - not production release evidence');
     assert.equal(latestCompletedRealRun(state).id, retrievalRun.id);
   });
 

@@ -1,4 +1,5 @@
 import { validateVercelAiSdkAdapterConfig } from './vercel-ai-sdk.js';
+import { normalizeAgentHarnessTarget } from './agent-harness-target.js';
 
 const HOSTED_PROVIDER_TYPES = new Set(['openai', 'anthropic', 'gemini', 'custom']);
 const HOSTED_PROVIDER_ENVIRONMENTS = new Set(['development', 'staging', 'production']);
@@ -112,6 +113,31 @@ export function normalizeExecutionTarget(input = {}, legacy = {}) {
     };
   }
 
+  if (type === 'generic_agent_harness' || type === 'hermes' || type === 'openclaw' || type === 'coding_agent' || type === 'langgraph' || type === 'custom') {
+    const target = normalizeAgentHarnessTarget({
+      ...source,
+      targetType: type,
+      targetId: source.targetId ?? source.target_id ?? source.id,
+    });
+    return {
+      type: 'generic_agent_harness',
+      targetType: target.targetType,
+      targetId: target.targetId,
+      adapterVersion: target.adapterVersion,
+      fixture: target.fixture,
+      safeDiagnostics: target.safeDiagnostics,
+      safeMetadata: {
+        type: 'generic_agent_harness',
+        targetType: target.targetType,
+        targetId: target.targetId,
+        adapterVersion: target.adapterVersion,
+        fixture: target.fixture,
+        label: target.label,
+        productionPath: !target.fixture && target.targetType !== 'generic_agent_harness',
+      },
+    };
+  }
+
   throw new Error(`Unsupported execution target type: ${type || 'missing'}`);
 }
 
@@ -161,6 +187,10 @@ function normalizeTargetType(value) {
   if (text === 'vercel_ai_sdk_route') return 'vercel_ai_sdk';
   if (text === 'hosted_provider') return 'hosted_provider';
   if (text === 'local_http_tunnel' || text === 'local_tunnel' || text === 'http_tunnel') return 'local_http_tunnel';
+  if (text === 'agent_harness' || text === 'generic_agent_harness' || text === 'generic_agent_harness_fixture') return 'generic_agent_harness';
+  if (text === 'hermes' || text === 'hermes_fixture') return 'hermes';
+  if (text === 'openclaw' || text === 'openclaw_fixture') return 'openclaw';
+  if (text === 'coding_agent' || text === 'langgraph' || text === 'custom') return text;
   return text;
 }
 

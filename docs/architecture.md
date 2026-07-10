@@ -6,12 +6,12 @@ HarnessAmp is organized as a reliability layer around external agent systems.
 flowchart LR
   A["Creator harness"] --> B["HarnessAmp wrapper"]
   B --> C["Parser and normalizer"]
-  C --> D["Mutation packs"]
+  C --> D["Failure-profile coverage"]
   D --> E["Runner adapter"]
   E --> F["Behavioral delta layer"]
   F --> G["Failure classifier"]
   G --> H["Robustness report"]
-  H --> I["CI pass / warn / block"]
+  H --> I["Release gate pass / warn / block"]
 ```
 
 ## Source Boundaries
@@ -19,7 +19,7 @@ flowchart LR
 The source tree is split by ownership:
 
 - `src/core/` - normalization, trace compilation, diagnosis, failure taxonomy, sample bundles, and sample traces
-- `src/mutations/` - deterministic mutation registry, mutation pack selection, and mutation suite generation
+- `src/mutations/` - deterministic mutation registry, internal pack selection, and mutation suite generation
 - `src/adapters/` - runner abstraction and infrastructure adapter classes
 - `src/reports/` - failure corpus and report-oriented artifacts
 - `src/cli/` - CLI command manifest and future command coordination helpers
@@ -42,19 +42,19 @@ Only the wrapper should drift under test.
 
 1. Load a creator harness.
 2. Normalize it into the HarnessAmp bundle format.
-3. Select mutation packs from the risk profile.
-4. Generate deterministic mutated harnesses.
+3. Select failure-profile coverage from the risk profile.
+4. Generate deterministic mutated harnesses from the internal registry.
 5. Run baseline and mutated harnesses through a runner adapter.
 6. Compute behavioral deltas.
 7. Classify failures.
-8. Generate a diagnostic report.
-9. Return a CI recommendation: `PASS`, `WARN`, or `BLOCK`.
+8. Generate release evidence.
+9. Return a release-gate verdict: `PASS`, `WARN`, or `BLOCK`.
 
 ## Operational Artifacts
 
 The repo supports four distinct artifacts:
 
-- `benchmark pack` - what should be preserved
+- `release gate` - what should be preserved and proven before release
 - `analysis export` - what changed under mutation
 - `failure corpus` - what actually broke across runs
 - `mutation registry` - the structured stressors used to find reliability boundaries

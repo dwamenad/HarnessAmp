@@ -43,9 +43,11 @@ Required fields include:
 
 The registry schema lives at `docs/schemas/mutation_registry.schema.json`.
 
-## Mutation Packs
+## Failure Profiles and Mutation Packs
 
-The current registry exposes these packs:
+Mutation packs are the internal mechanics behind release-gate failure profiles. New UI and report surfaces should lead with blockers, warnings, and failure evidence; the pack ids below are retained for deterministic generation and compatibility.
+
+The current registry exposes these internal packs:
 
 - `prompt_integrity_pack`
 - `tool_payload_pack`

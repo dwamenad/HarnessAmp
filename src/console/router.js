@@ -2,17 +2,18 @@ export const saasRouteLabels = {
   '/dashboard': 'Overview',
   '/harnesses': 'Harnesses',
   '/harnesses/new': 'New Harness',
-  '/packs': 'Benchmarks',
-  '/contracts': 'Contracts',
+  '/changes': 'Change Impact',
+  '/packs': 'Test Profiles',
+  '/contracts': 'Tool Contracts',
   '/targets': 'Execution Targets',
-  '/runs/new': 'New Run',
+  '/runs/new': 'Test Runs',
   '/runs/run-healthguard-2419': 'Run Progress',
-  '/runs/run-healthguard-2419/summary': 'Run Summary',
+  '/runs/run-healthguard-2419/summary': 'Certification Summary',
   '/failures': 'Failures',
   '/failures/fail-redflag-017': 'Failure Evidence',
-  '/compare': 'Compare Runs',
-  '/reports': 'Release Evidence',
-  '/ci': 'CI / Release Gates',
+  '/compare': 'Compare',
+  '/reports': 'Evidence',
+  '/ci': 'Automation',
   '/org': 'Organization',
   '/org/members': 'Members',
   '/org/usage': 'Usage',
@@ -24,15 +25,13 @@ export const saasRouteLabels = {
 
 export const saasNav = [
   ['/dashboard', 'Overview', 'OV'],
-  ['/harnesses', 'Harnesses', 'HA'],
-  ['/packs', 'Benchmarks', 'BM'],
-  ['/contracts', 'Contracts', 'BC'],
-  ['/targets', 'Execution Targets', 'ET'],
-  ['/runs/new', 'New Run', 'NR'],
+  ['/changes', 'Change Impact', 'CI'],
+  ['/harnesses', 'Agents', 'AG'],
+  ['/contracts', 'Tool Contracts', 'TC'],
+  ['/runs/new', 'Test Runs', 'TR'],
   ['/failures', 'Failures', 'FE'],
-  ['/compare', 'Compare', 'CR'],
-  ['/reports', 'Release Evidence', 'RE'],
-  ['/ci', 'CI / Release Gates', 'CI'],
+  ['/reports', 'Evidence', 'EV'],
+  ['/ci', 'Automation', 'AU'],
 ];
 
 export const organizationNav = [
@@ -51,7 +50,7 @@ export function resolveRoute(pathname = '/', { packLabelForSlug = null } = {}) {
       routeType: 'pack-detail',
       packSlug,
       pathname: normalizedPath,
-      label: packLabelForSlug?.(packSlug) ?? 'Pack Detail',
+      label: packLabelForSlug?.(packSlug) ?? 'Release Gate Detail',
     };
   }
 
@@ -62,7 +61,7 @@ export function resolveRoute(pathname = '/', { packLabelForSlug = null } = {}) {
       routeType: 'run-summary',
       runId: decodeURIComponent(runSummaryMatch[1]),
       pathname: normalizedPath,
-      label: 'Run Summary',
+      label: 'Certification Summary',
     };
   }
 

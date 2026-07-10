@@ -23,9 +23,13 @@ describe('benchmark registry and scoring', () => {
       'healthguard-smoke',
       'customercareguard-smoke',
       'legalguard-smoke',
+      'personalagentguard-smoke',
+      'harnessruntimeguard-smoke',
     ]);
     assert.equal(getBenchmarkBySlug('retrievalguard-smoke').version, '0.1');
     assert.equal(getBenchmarkBySlug('retrievalguard-standard').scenarioCount, 4200);
+    assert.equal(getBenchmarkBySlug('personalagentguard-smoke').scenarioCount, 120);
+    assert.equal(getBenchmarkBySlug('harnessruntimeguard-smoke').scenarioCount, 120);
   });
 
   test('scoring profile calculates expected weighted scores', () => {

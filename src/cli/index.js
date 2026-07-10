@@ -5,7 +5,7 @@ export const CLI_COMMANDS = [
   },
   {
     name: 'mutate',
-    description: 'Generate deterministic mutated harnesses from selected mutation packs.',
+    description: 'Generate deterministic failure-profile coverage from selected internal mutation packs.',
   },
   {
     name: 'run',
@@ -29,7 +29,7 @@ export const CLI_COMMANDS = [
   },
   {
     name: 'benchmark',
-    description: 'Validate, import, edit, review, diff, and export benchmark lifecycle files.',
+    description: 'Validate, import, edit, review, diff, and export benchmark-backed release-gate lifecycle files.',
   },
 ];
 

@@ -56,7 +56,7 @@ Use these when the goal is reproducible release gates and wrapper drift checks.
 Why these fit:
 
 - They have deterministic or highly structured evaluators.
-- They are good seeds for public benchmark packs because the expected state is well-defined.
+- They are good seeds for public release-gate packs because the expected state is well-defined.
 - WebArena-Verified explicitly emphasizes deterministic scoring and offline replay.
 - SWE-bench is valuable for coding-agent packs and real-world issue-resolution workflows.
 
@@ -120,10 +120,10 @@ The table below is the repo policy that should drive what we commit openly.
 | Source | Primary use in HarnessAmp | Open repo | Internal only | Notes |
 | --- | --- | --- | --- | --- |
 | [ToolSandbox](https://github.com/apple/ToolSandbox) | Trace-to-contract examples, tool-use cases, mutation ideas | Yes, via derived packs and sample traces | No | Good first public seed because it exposes trajectory structure and tool perturbation ideas. |
-| [tau2-bench](https://github.com/sierra-research/tau2-bench) | Customer-service and policy-heavy benchmark packs | Yes, via derived packs and import instructions | No | Use repo code plus the MIT-licensed [tau2-bench-data](https://huggingface.co/datasets/HuggingFaceH4/tau2-bench-data) dataset as the safest redistribution basis. |
+| [tau2-bench](https://github.com/sierra-research/tau2-bench) | Customer-service and policy-heavy release-gate packs | Yes, via derived packs and import instructions | No | Use repo code plus the MIT-licensed [tau2-bench-data](https://huggingface.co/datasets/HuggingFaceH4/tau2-bench-data) dataset as the safest redistribution basis. |
 | [tau2-bench-data](https://huggingface.co/datasets/HuggingFaceH4/tau2-bench-data) | Domain data for support-style packs | Yes, with attribution and version pinning | No | Hugging Face dataset card shows `mit`. |
-| [WebArena-Verified](https://github.com/ServiceNow/webarena-verified) | Browser-agent benchmark packs and deterministic release gates | Yes, via manifests, docs, and derived pack examples | No | Do not vendor environment images or large site data into the repo. |
-| [SWE-bench](https://github.com/SWE-bench/SWE-bench) | Coding-agent benchmark packs and deterministic issue-resolution cases | Yes, via manifests and derived pack metadata | No | Do not mirror the whole dataset or evaluation images into the repo. |
+| [WebArena-Verified](https://github.com/ServiceNow/webarena-verified) | Browser-agent release-gate packs and deterministic release gates | Yes, via manifests, docs, and derived pack examples | No | Do not vendor environment images or large site data into the repo. |
+| [SWE-bench](https://github.com/SWE-bench/SWE-bench) | Coding-agent release-gate packs and deterministic issue-resolution cases | Yes, via manifests and derived pack metadata | No | Do not mirror the whole dataset or evaluation images into the repo. |
 | [AgentBench](https://github.com/THUDM/AgentBench) | Coverage expansion and environment taxonomy | Yes, selectively | No | Useful, but not a first ingestion target. |
 | [APIs.guru OpenAPI Directory](https://github.com/APIs-guru/openapi-directory) | Tool-schema seeds and mutation templates | Use with care | Yes for broad internal mining | The repo states contributed definitions are CC0, while some externally acquired definitions are included under fair-use reasoning. Prefer selected internal mining plus shipped derived templates. |
 | [GAIA](https://huggingface.co/datasets/gaia-benchmark/GAIA) | Internal evaluation only | No | Yes | Dataset terms say not to reshare outside a gated or private repository. |
@@ -172,7 +172,7 @@ Why third:
 First repo artifacts:
 
 - a documented import path for the hard subset
-- one or two derived browser benchmark packs
+- one or two derived browser release-gate packs
 - release-gate examples tied to deterministic web tasks
 
 ### 4. SWE-bench Lite or Verified metadata
@@ -226,6 +226,6 @@ Use public data in the repo under these rules:
 ## Immediate Next Steps
 
 1. Add one ToolSandbox-derived trace fixture and one ToolSandbox-derived benchmark-pack example.
-2. Add one tau2-bench-derived support benchmark pack.
+2. Add one tau2-bench-derived support release-gate pack.
 3. Add an import note for WebArena-Verified hard subset instead of vendoring the raw benchmark.
 4. Keep GAIA and WorkArena out of the open repo and reserve them for internal validation.

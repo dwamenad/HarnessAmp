@@ -23,7 +23,7 @@ Most agent evaluations are run against one fixed wrapper:
 
 That setup can produce false confidence. The agent appears correct because it learned one exact wrapper, not because it reliably preserves the intended goal.
 
-HarnessAmp already covers mutation and drift scoring. It does not yet establish the goal contract or build the benchmark pack that makes the score defensible. Without that layer, it is a mutation lab rather than a full harness.
+HarnessAmp already covers mutation and drift scoring. It does not yet establish the goal contract or build the release-gate pack that makes the score defensible. Without that layer, it is a mutation lab rather than a full harness.
 
 ## Users
 
@@ -41,7 +41,7 @@ HarnessAmp already covers mutation and drift scoring. It does not yet establish 
 ## Core user jobs
 
 1. Define what the agent system is supposed to preserve.
-2. Turn that definition into an executable benchmark pack.
+2. Turn that definition into an executable release-gate pack.
 3. Stress the wrapper without changing the underlying mission.
 4. Detect where the system becomes brittle.
 5. Block releases when hidden variants expose drift.
@@ -127,7 +127,7 @@ HarnessAmp must support three benchmark-authoring paths:
 - source-derived drafts from docs, SOPs, APIs, or folders
 - trace-derived drafts from approved human or agent runs
 
-Generated benchmark drafts must require explicit approval before becoming release-grade goldens.
+Generated release-gate drafts must require explicit approval before becoming release-grade goldens.
 
 ### 3. Multi-agent benchmark structure
 
@@ -194,7 +194,7 @@ The MVP should deliver:
 
 ## Post-MVP
 
-- source-derived benchmark drafts from folders and docs
+- source-derived release-gate drafts from folders and docs
 - benchmark approval workflow
 - continuous benchmark refresh from production traces
 - multi-run experiment comparison
@@ -214,7 +214,7 @@ HarnessAmp should let the team define the mission, compile benchmark cases, muta
 
 ## Success metrics
 
-- time to create first benchmark pack
+- time to create first release-gate pack
 - percent of cases with explicit assertions
 - hidden holdout failure rate caught before release
 - reduction in production regressions caused by wrapper changes
