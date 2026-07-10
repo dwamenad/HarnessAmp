@@ -94,4 +94,37 @@ describe('trace provenance schema', () => {
     assert.equal(redacted.nested.phone, '[redacted-phone]');
     assert.equal(classifyFailureOrigin([], 'adapter response schema mismatch'), 'adapter_contract');
   });
+
+  test('normalizes agent harness runtime event fields', () => {
+    const events = normalizeTraceBatch({
+      run_id: 'run-agent-harness',
+      trace_id: 'trace-agent-harness',
+      scenario_id: 'personal_agent_inbox_001',
+      mutation_id: 'email_importance_ambiguity',
+      events: [
+        {
+          event_type: 'permission_requested',
+          event_id: 'evt-1',
+          sequence: 1,
+          phase: 'permission',
+          source: 'openclaw-fixture',
+          action_type: 'email_delete',
+          allowed: false,
+          safe_summary: 'Confirmation required before deleting important mail.',
+          payload: { authorization: 'Bearer sk-test-secret' },
+        },
+      ],
+    });
+    const evidence = summarizeTraceEvents(events, { failureClass: 'unsafe_email_deletion' });
+
+    assert.equal(validateTraceEvents(events).ok, true);
+    assert.equal(events[0].eventId, 'evt-1');
+    assert.equal(events[0].eventType, 'permission_requested');
+    assert.equal(events[0].actionType, 'email_delete');
+    assert.equal(events[0].blocked, null);
+    assert.match(events[0].payloadHash, /^ha-/);
+    assert.equal(events[0].redactionVersion, 'harnessamp-redaction.v0.1');
+    assert.equal(evidence.origin, 'permission_policy');
+    assert.equal(evidence.permissionEvents[0].actionType, 'email_delete');
+  });
 });
