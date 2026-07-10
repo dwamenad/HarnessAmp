@@ -1,6 +1,8 @@
-# Mutation Packs
+# Failure Profiles and Mutation Packs
 
-HarnessAmp currently focuses on deterministic wrapper mutations across:
+Mutation packs are release-gate internals. Product surfaces should present their results as failure profiles, blockers, warnings, and replayable release evidence unless the reader is debugging the generation engine.
+
+HarnessAmp currently maps failure profiles to deterministic wrapper mutations across:
 
 - prompt integrity
 - tool payloads
@@ -10,7 +12,7 @@ HarnessAmp currently focuses on deterministic wrapper mutations across:
 - sandbox boundaries
 - multimodal inputs
 
-Each pack should preserve task intent while changing the wrapper conditions around execution.
+Each internal pack should preserve task intent while changing the wrapper conditions around execution.
 
 ## v2 Domain Packs
 
