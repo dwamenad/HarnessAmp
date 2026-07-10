@@ -1,6 +1,6 @@
 # Vercel AI SDK Adapter
 
-The Vercel AI SDK adapter lets HarnessAmp execute benchmark packs against Next.js or Vercel AI SDK-style route handlers without asking teams to build a separate HarnessAmp HTTP runner first.
+The Vercel AI SDK adapter lets HarnessAmp execute release-gate scenarios against Next.js or Vercel AI SDK-style route handlers without asking teams to build a separate HarnessAmp HTTP runner first.
 
 This adapter is one execution-target option. It lets users bring their own app route to HarnessAmp while keeping provider API keys inside the user's app or worker environment.
 
@@ -192,7 +192,7 @@ Debug failed worker-backed adapter jobs from:
 
 Use the generic HTTP runner when you already have a deployed HarnessAmp-compatible endpoint that returns observations.
 
-Use the Vercel AI SDK adapter when you have an AI SDK route/handler and want HarnessAmp to call it directly, normalize the response, and generate observations for benchmark reports.
+Use the Vercel AI SDK adapter when you have an AI SDK route/handler and want HarnessAmp to call it directly, normalize the response, and generate observations for release evidence reports.
 
 ## Supported And Unsupported Cases
 

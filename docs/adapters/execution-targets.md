@@ -1,11 +1,11 @@
-# Execution Target Control Plane
+# Toolchain Readiness Control Plane
 
-The Execution Targets console area is the operator-facing workflow for connecting real agents to HarnessAmp. It turns supported backend paths into a guided product flow:
+The `/targets` console area is the Toolchain Readiness workflow for connecting real agents to HarnessAmp. It turns supported execution target paths into a guided product flow:
 
-1. Select a benchmark.
+1. Select a release gate.
 2. Select an execution target.
 3. Validate the target.
-4. Start a worker-backed run.
+4. Start a worker-backed release certification.
 5. Watch lifecycle and diagnostics.
 
 `/targets` is the canonical readiness surface. Dashboard cards, run summaries, report exports, and organization/admin status should consume the same production evidence snapshot instead of inferring their own labels.
@@ -19,7 +19,7 @@ It includes:
 - project mode: `Sample workspace`, `Connected project`, or `Production run`
 - evidence source: `Sample data` or `Real execution`
 - target readiness, validation status, latest pass/fail, failure class, and contract version
-- run lifecycle, benchmark id/version, scoring profile, and gate profile
+- run lifecycle, release gate id/version, scoring profile, and gate profile
 - release gate status, blocking reasons, warnings, and informational diagnostics
 - failure triage across agent behavior, adapter contract, execution target, validation, and worker lifecycle failures
 - organization plan, usage, entitlement, secret, and RBAC status where relevant
