@@ -111,7 +111,7 @@ export function supportQualityLoopRows(loop = {}) {
   return [
     ['Imported support inputs', String(loop.importedInputs?.total ?? 0), loop.importedInputs?.sources?.join(', ') || 'none'],
     ['Failure patterns', String(loop.failurePatterns?.length ?? 0), (loop.failurePatterns ?? []).map((item) => item.label).join(', ') || 'none'],
-    ['Generated eval cases', String(loop.generatedEvalCases?.length ?? 0), (loop.generatedEvalCases ?? []).map((item) => item.id).join(', ') || 'none'],
+    ['Generated regression cases', String(loop.generatedEvalCases?.length ?? 0), (loop.generatedEvalCases ?? []).map((item) => item.id).join(', ') || 'none'],
     ['Instruction stack risks', String(loop.instructionStackRisks?.length ?? 0), (loop.instructionStackRisks ?? []).map((item) => item.label).join(', ') || 'none'],
     ['Release blockers', String(loop.releaseBlockers?.length ?? 0), (loop.releaseBlockers ?? []).join(', ') || 'none'],
   ];
