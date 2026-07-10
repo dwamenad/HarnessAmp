@@ -1,3 +1,5 @@
+import { mapFailureClassToContractArea } from '../lib/toolchain-readiness.js';
+
 export function renderRoute(route, context) {
   if (route.routeType === 'failure') return renderSaasFailureDetail(route.failureId, context);
   return renderSaasFailuresList(context);
@@ -24,7 +26,7 @@ export function renderSaasFailuresList(context) {
   const supportLoop = supportQualityLoopSummary();
   return `
     <section class="ha-page">
-      <div class="ha-section-head"><div><h2>Failure Queue</h2><p>Filter failures, assign owners, resolve false positives, and pin regression cases.</p></div><a class="ha-primary" href="/failures/fail-redflag-017">Open top failure</a></div>
+      <div class="ha-section-head"><div><span class="ha-kicker">Agent-tool contract failures</span><h2>Failure Intelligence</h2><p>What part of the agent-tool contract failed? Filter blockers, assign owners, and pin replayable regression cases.</p></div><a class="ha-primary" href="/failures/fail-redflag-017">Open top blocker</a></div>
       <article class="ha-panel ha-panel--wide ha-support-loop">
         <div class="ha-panel__head">
           <h3>Support quality loop</h3>
@@ -34,14 +36,14 @@ export function renderSaasFailuresList(context) {
         <div class="ha-loop-grid">
           <div><span>Imported inputs</span><strong>${escapeHtml(String(supportLoop.importedInputs.total))}</strong><small>${escapeHtml(supportLoop.importedInputs.sources.join(', '))}</small></div>
           <div><span>Failure patterns</span><strong>${escapeHtml(String(supportLoop.failurePatterns.length))}</strong><small>${escapeHtml(supportLoop.failurePatterns.map((item) => item.label).join(', ') || 'none')}</small></div>
-          <div><span>Generated cases</span><strong>${escapeHtml(String(supportLoop.generatedEvalCases.length))}</strong><small>${escapeHtml(supportLoop.generatedEvalCases.slice(0, 2).map((item) => item.id).join(', ') || 'none')}</small></div>
+          <div><span>Replayable cases</span><strong>${escapeHtml(String(supportLoop.generatedEvalCases.length))}</strong><small>${escapeHtml(supportLoop.generatedEvalCases.slice(0, 2).map((item) => item.id).join(', ') || 'none')}</small></div>
           <div><span>Instruction risks</span><strong>${escapeHtml(String(supportLoop.instructionStackRisks.length))}</strong><small>${escapeHtml(supportLoop.instructionStackRisks.map((item) => item.label).join(', ') || 'none')}</small></div>
         </div>
       </article>
       ${renderNextActions([
         ['Open support blocker', '/failures/fail-support-mfa-031', 'Review account-action failure'],
         ['Add regression', '/failures/fail-support-refund-044', 'Pin reproducible evidence as a generated support regression case'],
-        ['Rerun case', '/runs/new', 'Verify policy and instruction fixes'],
+        ['Rerun case', '/runs/new', 'Verify tool-contract and instruction fixes'],
       ])}
       <article class="ha-panel ha-filter-bar">
         ${renderSelectFromObjects('Saved view', views.map((view) => ({ value: view.id, label: view.name })), consoleState.savedFailureViewId, 'failure-saved-view-select')}
@@ -98,7 +100,7 @@ export function renderSaasFailureDetail(failureId = 'fail-redflag-017', context)
           <button id="failure-export" data-failure-action="export-failure" data-failure-id="${escapeHtml(id)}" type="button">Export failure</button>
         </div>
       </div>
-      ${renderReleaseDecision(currentSeverity === 'Critical' ? 'Block release' : 'Release with review', `${currentSeverity} failure in ${contract}; owner ${currentOwner}; status ${currentStatus}.`, currentSeverity === 'Critical' ? 'critical' : 'major')}
+      ${renderReleaseDecision(currentSeverity === 'Critical' ? 'Blocked' : 'Warning', `${currentSeverity} agent-tool contract failure in ${contract}; owner ${currentOwner}; status ${currentStatus}.`, currentSeverity === 'Critical' ? 'critical' : 'major')}
       <article class="ha-panel ha-failure-status" id="failure-action-status" aria-live="polite">
         <div>
           <strong id="failure-action-title">Workflow ready</strong>
@@ -114,9 +116,10 @@ export function renderSaasFailureDetail(failureId = 'fail-redflag-017', context)
       </article>
       <div class="ha-grid ha-grid--evidence">
         <article class="ha-panel ha-evidence">
-          <h3>Expected behavior</h3><p>${escapeHtml(detail.expected)}</p>
-          <h3>Observed behavior</h3><p>${escapeHtml(detail.observed)}</p>
-          <h3>Why this matters</h3><p>${escapeHtml(detail.why)}</p>
+          <h3>Failed contract area</h3><p>${escapeHtml(contractTaxonomyLabel({ contract, mutation, payload }))}</p>
+          <h3>Expected tool behavior</h3><p>${escapeHtml(detail.expected)}</p>
+          <h3>Observed tool behavior</h3><p>${escapeHtml(detail.observed)}</p>
+          <h3>Release impact</h3><p>${escapeHtml(detail.why)}</p>
           <h3>Reproducibility</h3><p>${escapeHtml(reproducibility)} across recent reruns.</p>
           <h3>Owner</h3><p>${escapeHtml(payload?.recommendedOwner ?? 'Safety Review')}</p>
         </article>
@@ -127,7 +130,10 @@ export function renderSaasFailureDetail(failureId = 'fail-redflag-017', context)
           <h3>Agent output</h3><pre>${escapeHtml(detail.output)}</pre>
         </article>
         <article class="ha-panel ha-evidence">
-          <h3>Tool calls</h3><p>No tool calls.</p>
+          <h3>Tool called</h3><p>${escapeHtml((detail.toolCalls ?? detail.traceEvidence?.toolCalls ?? []).map((tool) => `${tool.name}:${tool.status}`).join(', ') || 'No tool calls recorded.')}</p>
+          <h3>Arguments passed</h3><pre>${escapeHtml(JSON.stringify(detail.toolArguments ?? detail.traceEvidence?.toolArguments ?? {}, null, 2))}</pre>
+          <h3>Permission/scope status</h3><p>${escapeHtml(permissionScopeStatus(detail))}</p>
+          <h3>Side-effect risk</h3><p>${escapeHtml(sideEffectRiskLabel({ contract, mutation, detail }))}</p>
           <h3>Retrieved context</h3><p>${escapeHtml(detail.context)}</p>
           <h3>Evaluator reasoning</h3><p>${escapeHtml(detail.reasoning)}</p>
           <h3>Contract clause</h3><p>${escapeHtml(detail.clause)}</p>
@@ -155,9 +161,9 @@ export function renderSaasFailureDetail(failureId = 'fail-redflag-017', context)
             ['false-positive', 'Mark false positive'],
             ['change-severity', 'Change severity'],
             ['add-comment', 'Add comment'],
-            ['rerun-case', 'Rerun this case'],
+            ['rerun-case', 'Replay as regression case'],
             ['add-regression', 'Add to regression suite'],
-            ['export-failure', 'Export failure'],
+            ['export-failure', 'Export release evidence'],
           ].map(([action, item]) => `<button data-failure-action="${action}" data-failure-id="${escapeHtml(id)}" type="button">${item}</button>`).join('')}
         </article>
       </div>
@@ -165,11 +171,32 @@ export function renderSaasFailureDetail(failureId = 'fail-redflag-017', context)
   `;
 }
 
+function contractTaxonomyLabel({ contract, mutation, payload }) {
+  const text = `${contract} ${mutation} ${payload?.failureClass ?? ''}`;
+  return mapFailureClassToContractArea(text);
+}
+
+function permissionScopeStatus(detail) {
+  const events = detail.traceEvidence?.permissionEvents ?? [];
+  if (!events.length) return 'Permission boundary not recorded for this failure.';
+  return events.map((event) => `${event.actionType || event.eventType}:${event.allowed === false ? 'blocked' : 'allowed'}`).join(', ');
+}
+
+function sideEffectRiskLabel({ contract, mutation, detail }) {
+  const text = `${contract} ${mutation} ${detail.why ?? ''} ${detail.observed ?? ''}`;
+  if (/refund|delete|cancel|mfa|account|irreversible|purchase|write/iu.test(text)) return 'High unsafe side-effect risk';
+  if (/permission|auth|scope|tool/iu.test(text)) return 'Permission boundary risk';
+  return 'No unsafe side effect recorded';
+}
+
 function renderTraceProvenance(detail, escapeHtml) {
   const traceEvidence = detail.traceEvidence ?? {};
   const events = Array.isArray(traceEvidence.keyTraceEvents) ? traceEvidence.keyTraceEvents : [];
   const toolCalls = Array.isArray(detail.toolCalls) ? detail.toolCalls : traceEvidence.toolCalls ?? [];
   const retrieved = Array.isArray(detail.retrievedEvidence) ? detail.retrievedEvidence : traceEvidence.retrievedEvidence ?? [];
+  const memoryEvents = Array.isArray(traceEvidence.memoryEvents) ? traceEvidence.memoryEvents : [];
+  const permissionEvents = Array.isArray(traceEvidence.permissionEvents) ? traceEvidence.permissionEvents : [];
+  const workspaceEvents = Array.isArray(traceEvidence.workspaceEvents) ? traceEvidence.workspaceEvents : [];
   return `
     <article class="ha-panel ha-trace-provenance">
       <div class="ha-panel__head"><h3>Trace provenance</h3><span>${escapeHtml(traceEvidence.traceId ?? 'trace not recorded')}</span></div>
@@ -186,6 +213,14 @@ function renderTraceProvenance(detail, escapeHtml) {
       <h3>Tool and retrieval evidence</h3>
       <p>${escapeHtml(toolCalls.length ? toolCalls.map((tool) => `${tool.name}:${tool.status}`).join(', ') : 'No tool calls recorded.')}</p>
       <p>${escapeHtml(retrieved.length ? retrieved.join(', ') : 'No retrieved evidence recorded.')}</p>
+      <h3>Memory events</h3>
+      <p>${escapeHtml(memoryEvents.length ? memoryEvents.map((event) => `${event.eventType}:${event.status}`).join(', ') : 'No memory events recorded.')}</p>
+      <h3>Permission events</h3>
+      <p>${escapeHtml(permissionEvents.length ? permissionEvents.map((event) => `${event.actionType || event.eventType}:${event.allowed === false ? 'blocked' : 'allowed'}`).join(', ') : 'No permission events recorded.')}</p>
+      <h3>Workspace changes and artifacts</h3>
+      <p>${escapeHtml(workspaceEvents.length ? workspaceEvents.map((event) => `${event.eventType}:${event.status}`).join(', ') : 'No workspace changes recorded.')}</p>
+      <h3>Likely owner/root cause</h3>
+      <p>${escapeHtml(`${detail.recommendedOwner ?? 'Safety Review'} / ${detail.traceEvidence?.origin ?? detail.failureOrigin ?? 'unknown'}`)}</p>
       <h3>Promotion candidate</h3>
       <pre>${escapeHtml(JSON.stringify(detail.regressionCase ?? traceEvidence.regressionCase ?? {}, null, 2))}</pre>
     </article>
