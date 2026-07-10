@@ -18,7 +18,7 @@ Important outputs:
 - `pack` - visible and holdout variants
 - `recommendations` - hardening guidance
 - `reportText` - markdown CLI output
-- `exportPack` - first-class benchmark pack with `intent`, `contract`, `benchmark`, `wrapper`, mutation policy, and analysis payload
+- `exportPack` - benchmark-backed release-gate pack with `intent`, `contract`, `benchmark`, `wrapper`, mutation policy, and analysis payload
 
 ## `createDemoTraceCorpus()`
 
@@ -26,7 +26,7 @@ Returns a deep-cloned starter trace corpus for the trace-to-contract compiler.
 
 ## `compileTraceContract(input, options)`
 
-Normalizes approved traces and returns a draft intent, contract, benchmark pack, and terminal report.
+Normalizes approved traces and returns a draft intent, contract, benchmark-backed release-gate pack, and terminal report.
 
 Important outputs:
 
@@ -61,11 +61,11 @@ Merges multiple failure corpora while deduplicating entries by id.
 
 ## `generateMutationSuite(bundleInput, options)`
 
-Builds deterministic mutation records and mutated harnesses from a creator harness or benchmark pack.
+Builds deterministic mutation records and mutated harnesses from a creator harness or benchmark-backed release gate.
 
 Important outputs:
 
-- `selectedPacks` - mutation packs selected from the risk profile
+- `selectedPacks` - compatibility field for the internal mutation packs selected from the risk profile; product reports present these as failure profiles
 - `mutations` - structured mutation objects with trust boundaries, severity, expected failure, and mutated harnesses
 
 Useful generated-suite options:
@@ -129,9 +129,9 @@ Roles:
 
 Plans:
 
-- `free` - local/runner evaluation basics with low monthly limits; no Hosted BYOK, CI gates, or full benchmarks
+- `free` - local/runner evaluation basics with low monthly limits; no Hosted BYOK, CI gates, or full release certifications
 - `starter` - Hosted BYOK and report exports for small projects
-- `team` - CI gates, full benchmark runs, advanced targets, and higher team limits
+- `team` - CI gates, full release certifications, advanced targets, and higher team limits
 - `business` - larger limits and priority queue allowance
 - `enterprise` - highest limits and audit-log entitlement
 
@@ -221,7 +221,7 @@ Returns an entitlement object with `allowed`, blocking `reasons`, estimated run 
 
 Runner jobs are durable queue records for workspace-backed external runner work. Creating a job persists `queued` state and returns immediately; a worker action claims and executes the job separately.
 
-### Execution Targets
+### Toolchain Readiness Targets
 
 HarnessAmp job creation accepts a normalized execution target. This is the preferred API shape for bringing your own model without giving HarnessAmp direct provider keys.
 
@@ -346,7 +346,7 @@ Body:
 
 `executionTarget`, `runnerId`, or `adapter.type` is required. Adapter-backed jobs use the same queue, claim, retry, cancellation, and report-linking lifecycle as registered HTTP runners.
 
-Execution targets are validated before enqueueing when possible. Local tunnel job creation rejects invalid URLs, non-HTTPS URLs, localhost, private IP ranges, link-local ranges, cloud metadata endpoints, DNS resolutions to private/internal IPs, unsafe redirects, unreachable tunnel endpoints, preflight timeouts, oversized responses, non-2xx preflight responses, non-JSON preflight responses, missing production token secrets, unsupported contract versions, and preflight responses that do not confirm readiness with `{ "ok": true, "contractVersion": "harnessamp_http_runner_v1" }` or `{ "ready": true, "contractVersion": "harnessamp_http_runner_v1" }`. The same URL and redirect safety checks run during worker dispatch. Hosted provider job creation rejects disabled BYOK, missing `secretRef`, missing model, unsupported provider, provider/environment mismatch, disabled/deleted secrets, cross-project secrets, raw provider API keys in job payloads, and organization plans that do not include Hosted BYOK. Full benchmark and CI gate runs are blocked before enqueue unless the organization plan includes those features and has enough monthly capacity.
+Execution targets are validated before enqueueing when possible. Local tunnel job creation rejects invalid URLs, non-HTTPS URLs, localhost, private IP ranges, link-local ranges, cloud metadata endpoints, DNS resolutions to private/internal IPs, unsafe redirects, unreachable tunnel endpoints, preflight timeouts, oversized responses, non-2xx preflight responses, non-JSON preflight responses, missing production token secrets, unsupported contract versions, and preflight responses that do not confirm readiness with `{ "ok": true, "contractVersion": "harnessamp_http_runner_v1" }` or `{ "ready": true, "contractVersion": "harnessamp_http_runner_v1" }`. The same URL and redirect safety checks run during worker dispatch. Hosted provider job creation rejects disabled BYOK, missing `secretRef`, missing model, unsupported provider, provider/environment mismatch, disabled/deleted secrets, cross-project secrets, raw provider API keys in job payloads, and organization plans that do not include Hosted BYOK. Full release certifications and CI gate runs are blocked before enqueue unless the organization plan includes those features and has enough monthly capacity.
 
 ### `POST /api/projects/<project-id>/validate-target`
 
@@ -412,13 +412,13 @@ Moves a non-completed, non-canceled job back to `retrying` so a worker can claim
 
 Cancels a non-terminal job. Workers check cancellation before external dispatch, report creation, and completion.
 
-## Benchmark Lifecycle API
+## Release Gate Lifecycle API
 
-`/api/benchmarks` is the API-backed benchmark truth layer. It requires an authenticated session and project membership.
+`/api/benchmarks` is the compatibility endpoint for the API-backed release-gate truth layer. It requires an authenticated session and project membership.
 
 ### `GET /api/benchmarks?projectId=<project-id>`
 
-Lists benchmark packs for a project.
+Lists release gates for a project.
 
 Returns:
 
@@ -433,19 +433,19 @@ Returns:
 - `benchmark` - pack summary
 - `versions` - draft, reviewed, approved, rejected, or archived versions
 - `reviews` - review decisions and comments
-- `reviewAssignments` - reviewer assignments for benchmark versions
+- `reviewAssignments` - reviewer assignments for release-gate versions
 - `promotionCandidates` - proposed or promoted golden-case candidates
 - `goldenCases` - promoted visible or holdout cases
 
 ### `POST /api/benchmarks?projectId=<project-id>`
 
-Creates a draft benchmark version. Pass an optional `benchmarkId` to add a new version to an existing pack.
+Creates a draft release-gate version. Pass an optional `benchmarkId` to add a new version to an existing benchmark-backed gate.
 
 Body:
 
 - `pack` - benchmark-pack payload
 - `source` - optional source label, such as `manual`, `trace-compiler`, or `report-promotion`
-- `benchmarkId` - optional existing benchmark pack id
+- `benchmarkId` - optional existing benchmark-backed release gate id
 
 ### `POST /api/benchmarks?action=review&versionId=<version-id>`
 

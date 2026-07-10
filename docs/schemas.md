@@ -3,7 +3,7 @@
 HarnessAmp ships JSON Schemas for:
 
 - harness bundles
-- benchmark packs
+- benchmark-backed release-gate packs
 - risk profiles
 - diagnostic reports
 
