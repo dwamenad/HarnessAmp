@@ -14,6 +14,27 @@ export const TRACE_EVENT_TYPES = [
   'failure_classification',
   'release_gate_decision',
   'worker_lifecycle',
+  'message_received',
+  'plan_created',
+  'skill_created',
+  'skill_updated',
+  'subagent_spawned',
+  'subagent_completed',
+  'tool_call_requested',
+  'tool_call_completed',
+  'permission_requested',
+  'permission_granted',
+  'permission_denied',
+  'action_executed',
+  'browser_step',
+  'file_read',
+  'file_written',
+  'shell_command',
+  'workspace_changed',
+  'artifact_created',
+  'final_response',
+  'cancellation_requested',
+  'runtime_error',
 ];
 
 export const FAILURE_ORIGINS = [
@@ -25,6 +46,9 @@ export const FAILURE_ORIGINS = [
   'execution_target',
   'worker_lifecycle',
   'evaluator',
+  'memory_policy',
+  'permission_policy',
+  'workspace_policy',
   'unknown',
 ];
 
@@ -71,9 +95,18 @@ export function normalizeTraceEvent(value, defaults = {}) {
   const timestamp = normalizeTimestamp(value.timestamp ?? value.createdAt ?? defaults.timestamp);
   const safePayload = redactTracePayload(value.safe_payload ?? value.safePayload ?? value.metadata ?? {});
   const redactedPayload = redactTracePayload(value.redacted_payload ?? value.redactedPayload ?? value.payload ?? value.input ?? value.output ?? {});
+  const safeSummary = redactString(value.safe_summary ?? value.safeSummary ?? value.summary ?? value.output_summary ?? value.outputSummary ?? value.input_summary ?? value.inputSummary ?? '');
+  const eventId = stringField(value.event_id ?? value.eventId ?? value.span_id ?? value.spanId ?? `${eventType}-${defaults.batchIndex ?? 0}`);
+  const resultStatus = stringField(value.result_status ?? value.resultStatus ?? value.status ?? 'ok');
 
   return {
     schema_version: TRACE_SCHEMA_VERSION,
+    schemaVersion: TRACE_SCHEMA_VERSION,
+    event_id: eventId,
+    eventId,
+    parent_event_id: stringField(value.parent_event_id ?? value.parentEventId ?? value.parent_span_id ?? value.parentSpanId),
+    parentEventId: stringField(value.parent_event_id ?? value.parentEventId ?? value.parent_span_id ?? value.parentSpanId),
+    sequence: numberOrNull(value.sequence ?? defaults.sequence),
     run_id: runId,
     scenario_id: scenarioId,
     mutation_id: mutationId,
@@ -82,20 +115,37 @@ export function normalizeTraceEvent(value, defaults = {}) {
     agent_version: stringField(value.agent_version ?? value.agentVersion ?? defaults.agentVersion),
     execution_target_id: stringField(value.execution_target_id ?? value.executionTargetId ?? value.target_id ?? value.targetId ?? defaults.executionTargetId),
     trace_id: traceId,
-    span_id: stringField(value.span_id ?? value.spanId ?? `${eventType}-${defaults.batchIndex ?? 0}`),
+    span_id: stringField(value.span_id ?? value.spanId ?? eventId),
     parent_span_id: stringField(value.parent_span_id ?? value.parentSpanId),
     event_type: eventType,
+    eventType,
+    phase: stringField(value.phase),
+    source: stringField(value.source),
     timestamp,
     latency_ms: numberOrNull(value.latency_ms ?? value.latencyMs),
-    status: stringField(value.status ?? 'ok'),
+    latencyMs: numberOrNull(value.latency_ms ?? value.latencyMs),
+    status: resultStatus,
+    result_status: resultStatus,
+    resultStatus,
     input_summary: redactString(value.input_summary ?? value.inputSummary ?? summarizePayload(value.input ?? value.prompt ?? safePayload.input)),
     output_summary: redactString(value.output_summary ?? value.outputSummary ?? summarizePayload(value.output ?? value.response ?? redactedPayload.output)),
+    safe_summary: safeSummary,
+    safeSummary,
     safe_payload: safePayload,
     redacted_payload: redactedPayload,
+    payload_hash: stringField(value.payload_hash ?? value.payloadHash ?? hashPayload(redactedPayload)),
+    payloadHash: stringField(value.payload_hash ?? value.payloadHash ?? hashPayload(redactedPayload)),
+    redaction_version: 'harnessamp-redaction.v0.1',
+    redactionVersion: 'harnessamp-redaction.v0.1',
     error_class: stringField(value.error_class ?? value.errorClass),
     failure_class: stringField(value.failure_class ?? value.failureClass),
     evidence_refs: stringArray(value.evidence_refs ?? value.evidenceRefs),
     tool_name: stringField(value.tool_name ?? value.toolName ?? value.name),
+    toolName: stringField(value.tool_name ?? value.toolName ?? value.name),
+    action_type: stringField(value.action_type ?? value.actionType),
+    actionType: stringField(value.action_type ?? value.actionType),
+    allowed: typeof value.allowed === 'boolean' ? value.allowed : null,
+    blocked: typeof value.blocked === 'boolean' ? value.blocked : null,
     retrieved_document_ids: stringArray(value.retrieved_document_ids ?? value.retrievedDocumentIds ?? value.document_ids ?? value.documentIds),
     citation_ids: stringArray(value.citation_ids ?? value.citationIds),
     cost_estimate: numberOrNull(value.cost_estimate ?? value.costEstimate),
@@ -224,8 +274,17 @@ export function summarizeTraceEvents(events = [], context = {}) {
     origin: originForEvent(event),
   }));
   const toolCalls = ordered
-    .filter((event) => event.event_type === 'tool_call')
+    .filter((event) => ['tool_call', 'tool_call_requested', 'tool_call_completed', 'shell_command', 'browser_step'].includes(event.event_type))
     .map((event) => ({ name: event.tool_name || 'tool', status: event.status, summary: event.output_summary || event.input_summary }));
+  const memoryEvents = ordered
+    .filter((event) => ['memory_read', 'memory_write'].includes(event.event_type))
+    .map((event) => ({ eventType: event.event_type, status: event.status, summary: event.safe_summary || event.output_summary || event.input_summary }));
+  const permissionEvents = ordered
+    .filter((event) => ['permission_requested', 'permission_granted', 'permission_denied'].includes(event.event_type))
+    .map((event) => ({ eventType: event.event_type, actionType: event.action_type, allowed: event.allowed, blocked: event.blocked, summary: event.safe_summary || event.output_summary }));
+  const workspaceEvents = ordered
+    .filter((event) => ['file_read', 'file_written', 'workspace_changed', 'artifact_created', 'shell_command'].includes(event.event_type))
+    .map((event) => ({ eventType: event.event_type, status: event.status, summary: event.safe_summary || event.output_summary }));
   const retrievedEvidence = uniqueStrings(ordered.flatMap((event) => event.retrieved_document_ids));
   const citations = uniqueStrings(ordered.flatMap((event) => event.citation_ids));
   const replayPayload = {
@@ -241,6 +300,9 @@ export function summarizeTraceEvents(events = [], context = {}) {
     originLabel: humanizeOrigin(origin),
     keyTraceEvents,
     toolCalls,
+    memoryEvents,
+    permissionEvents,
+    workspaceEvents,
     retrievedEvidence,
     citations,
     replayStatus: traceId ? 'replayable_trace_captured' : 'trace_not_recorded',
@@ -264,6 +326,9 @@ export function summarizeTraceEvents(events = [], context = {}) {
 
 export function classifyFailureOrigin(events = [], failureClass = '') {
   const text = `${failureClass} ${events.map((event) => `${event.event_type} ${event.error_class} ${event.failure_class} ${event.tool_name} ${event.input_summary} ${event.output_summary}`).join(' ')}`.toLowerCase();
+  if (/memory|persistent|stale memory|memory_write|memory_read/u.test(text)) return 'memory_policy';
+  if (/permission|confirmation|irreversible|allowed|blocked/u.test(text)) return 'permission_policy';
+  if (/workspace|file_written|file_read|shell|artifact|sandbox/u.test(text)) return 'workspace_policy';
   if (/retrieval|citation|source|document|qrel/u.test(text)) return 'retrieval';
   if (/tool|function/u.test(text)) return 'tool_use';
   if (/policy|refund|mfa|privacy|authority|boundary|unauthorized/u.test(text)) return 'policy_boundary';
@@ -331,6 +396,11 @@ function summarizePayload(value) {
 
 function traceEventLabel(event) {
   if (event.event_type === 'tool_call') return `${event.tool_name || 'tool'} ${event.status}`;
+  if (event.event_type === 'tool_call_requested' || event.event_type === 'tool_call_completed') return `${event.tool_name || 'tool'} ${event.status}`;
+  if (event.event_type === 'permission_requested') return `${event.action_type || 'action'} permission requested`;
+  if (event.event_type === 'permission_denied') return `${event.action_type || 'action'} permission denied`;
+  if (event.event_type === 'memory_read' || event.event_type === 'memory_write') return event.safe_summary || `${event.event_type} ${event.status}`;
+  if (event.event_type === 'workspace_changed' || event.event_type === 'file_written' || event.event_type === 'artifact_created') return event.safe_summary || `${event.event_type} ${event.status}`;
   if (event.event_type === 'retrieval_call') return `${event.retrieved_document_ids.length} retrieved document(s)`;
   if (event.event_type === 'citation_selection') return `${event.citation_ids.length} citation(s) selected`;
   return event.output_summary || event.input_summary || event.event_type;
@@ -346,4 +416,19 @@ function humanizeOrigin(origin) {
 
 function uniqueStrings(values) {
   return Array.from(new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean)));
+}
+
+function hashPayload(value) {
+  const text = (() => {
+    try {
+      return JSON.stringify(value ?? null);
+    } catch {
+      return String(value ?? '');
+    }
+  })();
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+  }
+  return `ha-${Math.abs(hash).toString(16)}`;
 }
