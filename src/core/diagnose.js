@@ -336,7 +336,9 @@ export function formatDiagnosticReport(bundle, summary, findings, deltas, suite,
     lines.push(`- Generated prioritization: ${suite.generated.optimization?.prioritization ?? 'risk'}`);
   }
   lines.push('');
-  lines.push('## Mutation Packs');
+  lines.push('## Failure Profile Coverage');
+  lines.push('');
+  lines.push('Internal mutation packs selected for this release-gate diagnosis:');
   lines.push('');
   suite.selectedPacks.forEach((pack) => lines.push(`- ${pack}`));
   lines.push('');
