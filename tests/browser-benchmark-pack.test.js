@@ -27,5 +27,5 @@ test('browser MVP benchmark pack is analyzable by the core engine', () => {
 test('web app source references the browser benchmark preset', async () => {
   const source = await readFile(new URL('../src/console/app-shell.js', import.meta.url), 'utf8');
   assert.match(source, /browser-mvp-benchmark/);
-  assert.match(source, /Browser MVP benchmark pack/);
+  assert.match(source, /Browser MVP release-gate fixture/);
 });
