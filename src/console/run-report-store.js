@@ -234,7 +234,7 @@ export function seededReportRowFromFixture(row, index, reportSlug) {
     runId: '',
     name: row[0],
     seeded: true,
-    cells: [row[0], row[1], row[2], row[3], 'Seeded sample - not a real benchmark result', 'sample', row[4], row[5], row[6], 'seeded sample'],
+    cells: [row[0], row[1], row[2], row[3], 'Seeded sample - not production release evidence', 'sample', row[4], row[5], row[6], 'seeded sample'],
     decision,
     tone: critical > 0 ? 'critical' : 'passed',
   };
