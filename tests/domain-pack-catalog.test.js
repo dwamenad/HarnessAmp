@@ -8,6 +8,8 @@ test('CustomerCareGuard and LegalGuard expose implementation-grade v2 manifests'
   const instructionDoctor = domainPackCatalog.find((pack) => pack.id === 'instruction-manifest-doctor');
   const legal = domainPackCatalog.find((pack) => pack.id === 'legal-guard');
   const retrieval = domainPackCatalog.find((pack) => pack.id === 'retrievalguard-core');
+  const personalAgent = domainPackCatalog.find((pack) => pack.id === 'personalagentguard-core');
+  const runtimeGuard = domainPackCatalog.find((pack) => pack.id === 'harnessruntimeguard-core');
 
   assert.equal(retrieval.name, 'RetrievalGuard');
   assert.equal(retrieval.contractCount, 10);
@@ -52,6 +54,22 @@ test('CustomerCareGuard and LegalGuard expose implementation-grade v2 manifests'
   assert.ok(legal.failureTaxonomy.some((failure) => failure.id === 'unauthorized_legal_advice'));
   assert.ok(legal.sourceHierarchy.includes('uploaded contract/policy text'));
   assert.ok(legal.authorityModel.cannot.includes('give individualized legal advice'));
+
+  assert.equal(personalAgent.name, 'PersonalAgentGuard');
+  assert.equal(personalAgent.maturity, 'scaffold');
+  assert.equal(personalAgent.contractCount, 7);
+  assert.equal(personalAgent.scenarioCount, 120);
+  assert.equal(personalAgent.generatedMatrix.core.scenarioCount, 960);
+  assert.ok(personalAgent.failureTaxonomy.some((failure) => failure.id === 'unsafe_email_deletion'));
+  assert.ok(personalAgent.forbiddenToolUse.includes('mail.delete_without_confirmation'));
+
+  assert.equal(runtimeGuard.name, 'HarnessRuntimeGuard');
+  assert.equal(runtimeGuard.maturity, 'scaffold');
+  assert.equal(runtimeGuard.contractCount, 7);
+  assert.equal(runtimeGuard.scenarioCount, 120);
+  assert.equal(runtimeGuard.generatedMatrix.nightly.scenarioCount, 11520);
+  assert.ok(runtimeGuard.failureTaxonomy.some((failure) => failure.id === 'memory_scope_violation'));
+  assert.ok(runtimeGuard.forbiddenToolUse.includes('automation.create_without_confirmation'));
 });
 
 test('catalog card rows include the new packs with normalized counts', () => {
@@ -60,6 +78,8 @@ test('catalog card rows include the new packs with normalized counts', () => {
   const customerCareRow = rows.find(([name]) => name === 'CustomerCareGuard');
   const instructionDoctorRow = rows.find(([name]) => name === 'Instruction Manifest Doctor');
   const legalRow = rows.find(([name]) => name === 'LegalGuard');
+  const personalAgentRow = rows.find(([name]) => name === 'PersonalAgentGuard');
+  const runtimeGuardRow = rows.find(([name]) => name === 'HarnessRuntimeGuard');
 
   assert.deepEqual(retrievalRow.slice(0, 5), [
     'RetrievalGuard',
@@ -94,4 +114,20 @@ test('catalog card rows include the new packs with normalized counts', () => {
     '400',
   ]);
   assert.equal(legalRow[7], 'Smoke 400 / Core 4,200 / Deep 21,000 / Nightly 63,000');
+  assert.deepEqual(personalAgentRow.slice(0, 5), [
+    'PersonalAgentGuard',
+    'Personal agent',
+    'Tests personal assistant agents that act over email, calendar, browser, chat, files, and memory for permission safety, memory boundaries, contact disambiguation, and replayable completion evidence.',
+    '7',
+    '120',
+  ]);
+  assert.equal(personalAgentRow[7], 'Smoke 120 / Core 960 / Deep 3,840 / Nightly 11,520');
+  assert.deepEqual(runtimeGuardRow.slice(0, 5), [
+    'HarnessRuntimeGuard',
+    'Agent harness runtime',
+    'Tests agent harness runtimes with skills, memory, subagents, tools, workspaces, scheduled behavior, and replayable artifacts without turning HarnessAmp into the runtime.',
+    '7',
+    '120',
+  ]);
+  assert.equal(runtimeGuardRow[7], 'Smoke 120 / Core 960 / Deep 3,840 / Nightly 11,520');
 });
