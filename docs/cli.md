@@ -52,7 +52,7 @@ For `--adapter vercel-ai-sdk` or `--target-type vercel-ai-sdk`, the CLI writes e
 
 ## Bring Your Own Model
 
-Use an execution target to run HealthGuard, FinanceGuard, RetrievalGuard, CustomerCareGuard, LegalGuard, or a custom mutation pack against your own model or agent. HarnessAmp sends scenarios to the target. The target calls your model with provider credentials stored in your infrastructure, then returns behavior for scoring.
+Use an execution target to run HealthGuard, FinanceGuard, RetrievalGuard, CustomerCareGuard, LegalGuard, or a custom release gate against your own model or agent. HarnessAmp sends scenarios to the target. The target calls your model with provider credentials stored in your infrastructure, then returns behavior for scoring.
 
 Local Vercel route example:
 
@@ -117,7 +117,7 @@ Typical terminal-first flow:
 
 1. Save a harness bundle as JSON.
 2. Run `npm run analyze -- <bundle.json>`.
-3. Inspect whether `intent`, `contract`, and `benchmark` are explicit in the source pack.
+3. Inspect whether `intent`, `contract`, and release-gate evidence are explicit in the source pack.
 4. Inspect visible vs holdout gaps directly in the terminal.
 5. Export the pack if you want to share it with another teammate or CI job.
 
@@ -125,20 +125,20 @@ Typical trace compiler flow:
 
 1. Save approved traces as JSON.
 2. Run `npm run compile:traces -- <trace-corpus.json>`.
-3. Review the generated `intent`, `contract`, and `benchmark` draft.
-4. Promote the approved draft into your benchmark source of truth before running wrapper mutations.
+3. Review the generated `intent`, `contract`, and release-gate draft.
+4. Promote the approved draft into your release-gate source of truth before running wrapper mutations.
 
-Typical benchmark lifecycle flow:
+Typical release-gate lifecycle flow:
 
-1. Run `node scripts/harnessamp.mjs benchmark validate <benchmark-pack.json>` before importing a pack.
-2. Run `node scripts/harnessamp.mjs benchmark import <benchmark-pack.json> --out benchmark.lifecycle.json` to create a local lifecycle file.
+1. Run `node scripts/harnessamp.mjs benchmark validate <benchmark-pack.json>` before importing a benchmark-backed release gate.
+2. Run `node scripts/harnessamp.mjs benchmark import <benchmark-pack.json> --out benchmark.lifecycle.json` to create a local release-gate lifecycle file.
 3. Run `node scripts/harnessamp.mjs benchmark edit benchmark.lifecycle.json --edits edits.json --out benchmark.lifecycle.json` to create an immutable draft version from the same edit payload used by the API.
 4. Run `node scripts/harnessamp.mjs benchmark review benchmark.lifecycle.json --decision approve --comments "..." --out benchmark.lifecycle.json`.
 5. Run `node scripts/harnessamp.mjs benchmark export benchmark.lifecycle.json --version approved --out benchmark-pack.json` for CI or teammate handoff.
 
 Typical failure corpus flow:
 
-1. Run wrapper mutations against a benchmark pack.
+1. Run wrapper mutations against a benchmark-backed release gate.
 2. Collect failing variants with `npm run collect:failures -- <bundle.json> <observations.json>`.
 3. Merge the resulting corpus into your running private failure set.
 4. Use repeated failures to justify new mutation families or release thresholds.

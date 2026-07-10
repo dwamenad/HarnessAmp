@@ -33,7 +33,7 @@ The first three should stay fixed. The wrapper is the only layer that should dri
 
 - Run `npm run compile:traces` for the built-in approved trace demo.
 - Pass a trace corpus file to compile your own approved traces into a draft `intent`, `contract`, and `benchmark`.
-- Use this before mutation testing when you have traces and SOPs but no clean benchmark pack yet.
+- Use this before mutation testing when you have traces and SOPs but no clean release-gate pack yet.
 
 ## Failure corpus
 
@@ -45,12 +45,12 @@ The first three should stay fixed. The wrapper is the only layer that should dri
 
 - Run `npm run release:gate -- <bundle.json> <observations.json>` to enforce thresholds on overall score, holdout pass rate, and visible-vs-holdout gap.
 - Write markdown/json artifacts from the same command for CI and PR review.
-- Use lenient thresholds first, then tighten them as the benchmark pack matures.
+- Use lenient thresholds first, then tighten them as the release gate matures.
 
 ## Mutation diagnosis
 
-- Run `npm run diagnose -- <bundle.json>` to generate selected mutation packs, run baseline and mutated tasks through the mock runner, classify failures, and print a diagnostic report.
-- Use `node scripts/harnessamp.mjs registry` to inspect the available mutation packs.
+- Run `npm run diagnose -- <bundle.json>` to generate failure-profile coverage, run baseline and mutated tasks through the mock runner, classify failures, and print a diagnostic report.
+- Use `node scripts/harnessamp.mjs registry` to inspect the internal mutation packs behind those failure profiles.
 - Use `node scripts/harnessamp.mjs mutate <bundle.json> --max-mutations 20` to inspect deterministic mutation records before running them.
 - Treat sandbox-boundary mutations as defensive checks only; they describe expected boundary enforcement without procedural exploit steps.
 
