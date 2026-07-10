@@ -78,6 +78,7 @@ export function localRunReportPayload(run, context = {}) {
   const observations = Array.isArray(run.runnerObservations) ? run.runnerObservations : [];
   const evidenceMode = observations.length ? 'runner-observation' : 'contract-smoke-preview';
   const benchmark = benchmarkPayloadForRun(run);
+  const agentHarnessEvidence = agentHarnessEvidenceForObservations(observations, run);
   return enrichReportPayload({
     id: localRunReportId(run),
     runId: run.id,
@@ -98,6 +99,7 @@ export function localRunReportPayload(run, context = {}) {
     attempts: run.attempts ?? 1,
     completedAt: run.completedAt ?? '',
     agentVersion: run.agentVersion ?? run.metadata?.agentVersion ?? '',
+    agentHarnessEvidence,
     summary: critical > 0
       ? `${critical} critical failure${critical === 1 ? '' : 's'} require owner review before release.`
       : run.status === 'failed'
@@ -158,11 +160,23 @@ export function enrichReportPayload(report, context = {}) {
     owner: packOwner(report.pack),
     gate,
     releaseGate,
+    releaseCertification: {
+      verdict: releaseGate.verdict ?? releaseGate.label ?? releaseGate.status,
+      canRelease: releaseGate.canRelease,
+      evidenceType: report.evidenceMode ?? 'seeded-sample',
+      productionCertifiable: releaseGate.toolchain?.productionCapable ?? false,
+      blockers: releaseGate.toolchain?.releaseBlockers ?? [],
+      warnings: releaseGate.toolchain?.warnings ?? [],
+      replayableRegressionCases: releaseGate.toolchain?.replayableRegressionCases ?? 0,
+      traceCapture: releaseGate.toolchain?.traceCapture ?? false,
+    },
+    toolchainReadiness: releaseGate.toolchain,
     productionEvidence,
     targetReliability,
     lifecycleSummary: lifecycle,
     failureTriage,
     failureIntelligence,
+    agentHarnessEvidence: report.agentHarnessEvidence ?? agentHarnessEvidenceForObservations(report.runnerObservations, report),
     classifiedFailures,
     historicalComparison,
     benchmark,
@@ -197,9 +211,15 @@ export function enrichReportPayload(report, context = {}) {
 
 export function reportCsv(report) {
   report = sanitizeDebugPayload(report);
+  const toolchain = report.toolchainReadiness ?? report.releaseGate?.toolchain ?? {};
+  const failureRows = (report.failureEvidence.length ? report.failureEvidence : [{}]).map((failure) => ({ failure, toolFinding: null }));
+  const toolFindingRows = (toolchain.tools ?? []).flatMap((tool) => [
+    ...(tool.blockers ?? []).map((finding) => ({ failure: {}, toolFinding: { ...finding, type: 'blocker', tool } })),
+    ...(tool.warnings ?? []).map((finding) => ({ failure: {}, toolFinding: { ...finding, type: 'warning', tool } })),
+  ]);
   const rows = [
-    ['id', 'name', 'project', 'harness', 'pack', 'benchmark_name', 'benchmark_slug', 'benchmark_version', 'benchmark_run_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'benchmark_tier', 'benchmark_score', 'gate_result', 'release_gate_status', 'can_release', 'gate_reasons', 'blocking_failures', 'warnings', 'failure_classes', 'failure_domains', 'support_loop_status', 'support_inputs', 'generated_eval_cases', 'generated_eval_case_ids', 'instruction_stack_risks', 'target_used', 'target_readiness', 'target_validation_state', 'target_run_success_rate', 'target_validation_success_rate', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_mutation_families', 'failure_class', 'failure_class_label', 'release_impact', 'case_id', 'severity', 'contract', 'scenario_id', 'mutation_id', 'origin', 'trace_id', 'key_trace_events', 'retrieved_evidence', 'tool_calls', 'replay_status', 'regression_status', 'triage_class', 'recommended_control'],
-    ...(report.failureEvidence.length ? report.failureEvidence : [{}]).map((failure) => [
+    ['id', 'name', 'project', 'harness', 'pack', 'release_gate_name', 'release_gate_slug', 'release_gate_version', 'release_gate_mode', 'release_certification_type', 'scoring_profile_version', 'gate_profile_version', 'scenario_set_version', 'gate_tier', 'certification_score', 'gate_result', 'release_gate_status', 'release_verdict', 'can_release', 'gate_reasons', 'release_blockers', 'blocking_failures', 'warnings', 'production_certifiable', 'evidence_type', 'toolchain_readiness_status', 'toolchain_status', 'readiness_score', 'tools_checked', 'recommended_gate_profiles', 'unsafe_action_failures', 'permission_warnings', 'replayable_regression_cases', 'tool_validation_status', 'human_approval_tools', 'failure_classes', 'failure_domains', 'support_loop_status', 'support_inputs', 'generated_regression_cases', 'generated_regression_case_ids', 'instruction_stack_risks', 'target_used', 'target_readiness', 'target_validation_state', 'target_run_success_rate', 'target_validation_success_rate', 'run_date', 'score', 'critical_failures', 'decision', 'evidence_mode', 'adapter_mode', 'failed_contracts', 'failed_failure_profiles', 'failure_class', 'failure_class_label', 'release_impact', 'case_id', 'severity', 'contract', 'scenario_id', 'failure_profile_id', 'origin', 'trace_id', 'key_trace_events', 'retrieved_evidence', 'tool_calls', 'replay_status', 'regression_status', 'triage_class', 'recommended_control', 'tool_name', 'tool_category', 'tool_risk_level', 'tool_permission_boundary', 'tool_schema_status', 'tool_description_quality', 'tool_auth_status', 'tool_idempotency_status', 'tool_pii_exposure', 'tool_side_effect_risk', 'tool_finding_type', 'tool_finding_message', 'benchmark_name', 'benchmark_slug', 'benchmark_run_type', 'agent_harness_target', 'memory_policy', 'permission_policy', 'workspace_policy', 'action_summary', 'memory_summary', 'workspace_summary'],
+    ...[...failureRows, ...toolFindingRows].map(({ failure, toolFinding }) => [
       report.id,
       report.name,
       report.project,
@@ -209,6 +229,7 @@ export function reportCsv(report) {
       report.benchmark?.slug ?? '',
       report.benchmark?.version ?? '',
       report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? '',
+      report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? '',
       report.benchmark?.scoringProfileVersion ?? '',
       report.benchmark?.gateProfileVersion ?? '',
       report.benchmark?.scenarioSetVersion ?? '',
@@ -216,10 +237,24 @@ export function reportCsv(report) {
       report.benchmark?.score ?? '',
       report.benchmark?.gateResult ?? '',
       report.releaseGate?.status ?? '',
+      report.releaseGate?.verdict ?? report.releaseGate?.label ?? '',
       report.releaseGate?.canRelease ? 'yes' : 'no',
       (report.releaseGate?.reasons ?? []).join('; '),
+      (report.releaseGate?.blockingReasons ?? report.releaseCertification?.blockers?.map((item) => item.message) ?? []).join('; '),
       report.releaseGate?.blockingFailures ?? '',
       report.releaseGate?.warningCount ?? '',
+      toolchain.productionCapable ? 'yes' : 'no',
+      report.releaseCertification?.evidenceType ?? report.evidenceMode ?? '',
+      toolchain.status ?? '',
+      toolchain.status ?? '',
+      toolchain.readinessScore ?? '',
+      toolchain.tools?.length ?? '',
+      (toolchain.recommendedGateProfiles ?? []).join('; '),
+      report.releaseGate?.toolchain?.unsafeActionFailures ?? '',
+      report.releaseGate?.toolchain?.permissionWarnings ?? '',
+      report.releaseGate?.toolchain?.replayableRegressionCases ?? '',
+      report.releaseGate?.toolchain?.validationStatus ?? '',
+      report.releaseGate?.toolchain?.humanApprovalTools ?? '',
       (report.failureIntelligence?.classes ?? []).join('; '),
       Object.keys(report.failureIntelligence?.byDomain ?? {}).join('; '),
       report.supportQualityLoop?.status ?? 'not_applicable',
@@ -257,6 +292,28 @@ export function reportCsv(report) {
       failure.traceEvidence?.regressionStatus ?? failure.regressionStatus ?? '',
       failure.triageClass ?? '',
       failure.recommendedControl ?? '',
+      toolFinding?.tool?.name ?? '',
+      toolFinding?.tool?.category ?? '',
+      toolFinding?.tool?.riskLevel ?? '',
+      toolFinding?.tool?.permissionBoundary ?? '',
+      toolFinding?.tool?.schemaStatus ?? '',
+      toolFinding?.tool?.descriptionQuality ?? '',
+      toolFinding?.tool?.authStatus ?? '',
+      toolFinding?.tool?.idempotencyStatus ?? '',
+      toolFinding?.tool?.piiExposure ?? '',
+      toolFinding?.tool?.sideEffectRisk ?? '',
+      toolFinding?.type ?? '',
+      toolFinding?.message ?? '',
+      report.benchmark?.name ?? '',
+      report.benchmark?.slug ?? '',
+      report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? '',
+      report.agentHarnessEvidence?.targetType ?? '',
+      report.agentHarnessEvidence?.memoryPolicySummary ?? '',
+      report.agentHarnessEvidence?.permissionPolicySummary ?? '',
+      report.agentHarnessEvidence?.workspacePolicySummary ?? '',
+      report.agentHarnessEvidence?.actionSummary ?? '',
+      report.agentHarnessEvidence?.memorySummary ?? '',
+      report.agentHarnessEvidence?.workspaceSummary ?? '',
     ]),
   ];
   return rows.map((row) => row.map(csvEscape).join(',')).join('\n');
@@ -264,19 +321,23 @@ export function reportCsv(report) {
 
 export function reportMarkdown(report) {
   report = sanitizeDebugPayload(report);
-  return `# Can this agent ship?
+  return `# Toolchain Release Evidence Report
 
 ## ${report.name}
 
 ${report.releaseGate.answer}
 
-- Release status: ${report.releaseGate.status}
+- Release verdict: ${report.releaseGate.verdict ?? report.releaseGate.label ?? report.releaseGate.status}
 - Direct answer: ${report.releaseGate.canRelease ? 'Yes' : 'No'}
 - Blocking failures: ${getBlockingFailures(report.classifiedFailures ?? []).map((failure) => `${failure.id}: ${failure.releaseImpact}`).join('; ') || 'none'}
 - Warnings: ${getWarningFailures(report.classifiedFailures ?? []).map((failure) => `${failure.id}: ${failure.releaseImpact}`).join('; ') || 'none'}
+- Unsafe action failures: ${report.releaseGate.toolchain?.unsafeActionFailures ?? 0}
+- Permission warnings: ${report.releaseGate.toolchain?.permissionWarnings ?? 0}
+- Replayable regression cases: ${report.releaseGate.toolchain?.replayableRegressionCases ?? 0}
+- Trace evidence coverage: ${report.failureEvidence.length ? 'trace-backed failure evidence attached' : 'not recorded'}
 - Failure classes: ${(report.failureIntelligence?.classes ?? []).join(', ') || 'none'}
 - Affected scenarios: ${report.failureEvidence.map((failure) => failure.scenarioId).filter(Boolean).join(', ') || 'none'}
-- Mutation families involved: ${(report.benchmark?.failedMutationFamilies ?? report.failureEvidence.map((failure) => failure.mutationId)).filter(Boolean).join(', ') || 'none'}
+- Failure profiles involved: ${(report.benchmark?.failedMutationFamilies ?? report.failureEvidence.map((failure) => failure.mutationId)).filter(Boolean).join(', ') || 'none'}
 - Execution target used: ${report.targetReliability.targetUsed}
 - Reproducible: ${report.failureEvidence.some((failure) => /[1-9][0-9]?%|captured|reproducible/iu.test(String(failure.reproducibility ?? ''))) ? 'yes' : 'not recorded'}
 - Recommended next action: ${report.remediation[0] ?? 'Keep this report as release evidence.'}
@@ -284,17 +345,18 @@ ${report.releaseGate.answer}
 - Project: ${report.project}
 - Harness: ${report.harness}
 - Pack: ${report.pack}
-- Benchmark: ${benchmarkLabel(report)}
-- Benchmark slug: ${report.benchmark?.slug ?? 'not recorded'}
-- Benchmark run type: ${report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? 'not recorded'}
-- Benchmark tier: ${report.benchmark?.tier ?? 'not recorded'}
+- Toolchain profile: ${report.pack}
+- Gate profile: ${benchmarkLabel(report)}
+- Gate slug: ${report.benchmark?.slug ?? 'not recorded'}
+- Certification run type: ${report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? 'not recorded'}
+- Gate tier: ${report.benchmark?.tier ?? 'not recorded'}
 - Scenario set version: ${report.benchmark?.scenarioSetVersion ?? 'not recorded'}
 - Scoring profile version: ${report.benchmark?.scoringProfileVersion ?? 'not recorded'}
 - Gate profile version: ${report.benchmark?.gateProfileVersion ?? 'not recorded'}
-- Benchmark score: ${report.benchmark?.score ?? report.score}
+- Certification score: ${report.benchmark?.score ?? report.score}
 - Gate result: ${report.benchmark?.gateResult ?? report.gate?.decision ?? 'not recorded'}
 - Failed contracts: ${(report.benchmark?.failedContracts ?? []).join(', ') || 'none'}
-- Failed mutation families: ${(report.benchmark?.failedMutationFamilies ?? []).join(', ') || 'none'}
+- Failed failure profiles: ${(report.benchmark?.failedMutationFamilies ?? []).join(', ') || 'none'}
 - Run date: ${report.runDate}
 - Score: ${report.score}
 - Critical failures: ${report.criticalFailures}
@@ -324,6 +386,30 @@ ${markdownTable(['Reason type', 'Reason'], report.releaseGate.reasonDetails.map(
 
 ${markdownTable(['Metric', 'Required', 'Actual', 'Result'], report.gate.thresholds.map((item) => [item.metric, item.required, item.actual, item.result]))}
 
+## Toolchain readiness
+
+${markdownTable(['Signal', 'Value'], [
+  ['Connected execution targets', report.releaseGate.toolchain?.connectedTargets ?? 0],
+  ['Toolchain status', report.toolchainReadiness?.status ?? report.releaseGate.toolchain?.status ?? report.releaseGate.status],
+  ['Readiness score', report.toolchainReadiness?.readinessScore ?? 'not recorded'],
+  ['Production capable', report.toolchainReadiness?.productionCapable ? 'yes' : 'no'],
+  ['Trace capture', report.toolchainReadiness?.traceCapture ? 'yes' : 'no'],
+  ['Replay available', report.toolchainReadiness?.replayAvailable ? 'yes' : 'no'],
+  ['Tools checked', report.toolchainReadiness?.tools?.length ?? 0],
+  ['Recommended gate profiles', (report.toolchainReadiness?.recommendedGateProfiles ?? []).join(', ') || 'none'],
+  ['Tool validation status', report.releaseGate.toolchain?.validationStatus ?? report.targetReliability.readinessStatus],
+  ['Action-taking tools', report.releaseGate.toolchain?.actionTakingTools ?? 0],
+  ['Read-only tools', report.releaseGate.toolchain?.readOnlyTools ?? 0],
+  ['Human approval tools', report.releaseGate.toolchain?.humanApprovalTools ?? 0],
+  ['Ambiguous schemas', report.releaseGate.toolchain?.ambiguousSchemas ?? 0],
+  ['Recent contract failures', report.releaseGate.toolchain?.recentContractFailures ?? 0],
+  ['Release status', report.releaseGate.toolchain?.releaseStatus ?? report.releaseGate.status],
+])}
+
+## Tool Contract Doctor Findings
+
+${markdownToolContractFindings(report.toolchainReadiness ?? report.releaseGate.toolchain)}
+
 ## Target reliability
 
 ${markdownTable(['Metric', 'Value'], [
@@ -340,17 +426,21 @@ ${markdownTable(['Metric', 'Value'], [
 
 ${markdownTable(['Class', 'Count', 'Top reasons'], report.failureTriage.buckets.map((bucket) => [bucket.label, bucket.count, bucket.reasons.join('; ') || 'none']))}
 
-## Domain failures found
+## Agent-tool contract failures found
 
 ${markdownFailureClassCards(report.failureEvidence)}
 
 ## Scenario evidence table
 
-${report.failureEvidence.length ? markdownTable(['Scenario', 'Mutation', 'Failure class', 'Severity', 'Expected behavior', 'Actual behavior', 'Replay'], report.failureEvidence.map((failure) => [failure.scenarioId, failure.mutationId, failure.failureClass ?? failure.label, failure.severity, failure.expected, failure.actual ?? failure.observed, replaySummary(failure)])) : 'No scenario evidence recorded.'}
+${report.failureEvidence.length ? markdownTable(['Scenario', 'Failure profile', 'Failure class', 'Severity', 'Expected behavior', 'Actual behavior', 'Replay'], report.failureEvidence.map((failure) => [failure.scenarioId, failure.mutationId, failure.failureClass ?? failure.label, failure.severity, failure.expected, failure.actual ?? failure.observed, replaySummary(failure)])) : 'No scenario evidence recorded.'}
 
 ## Trace-backed evidence
 
 ${report.failureEvidence.length ? markdownTable(['Failure class', 'Origin', 'Trace id', 'Key trace events', 'Retrieved evidence', 'Tool calls', 'Replay status', 'Regression status'], report.failureEvidence.map((failure) => [failure.failureClass ?? failure.label, failure.origin ?? failure.traceEvidence?.origin ?? 'unknown', failure.traceId ?? failure.traceEvidence?.traceId ?? 'not recorded', traceEventSummary(failure.traceEvidence).join('; ') || 'not recorded', (failure.traceEvidence?.retrievedEvidence ?? failure.evidence ?? []).join(', ') || 'none', (failure.traceEvidence?.toolCalls ?? []).map((tool) => `${tool.name}:${tool.status}`).join(', ') || 'none', failure.traceEvidence?.replayStatus ?? failure.replayStatus ?? 'not recorded', failure.traceEvidence?.regressionStatus ?? failure.regressionStatus ?? 'not recorded'])) : 'No trace-backed failure evidence recorded.'}
+
+## Agent harness evidence
+
+${markdownAgentHarnessEvidence(report.agentHarnessEvidence)}
 
 ## Historical comparison
 
@@ -364,7 +454,7 @@ ${markdownTable(['Stage', 'Count', 'Evidence'], supportQualityLoopRows(report.su
 
 ## Failure evidence
 
-${report.failureEvidence.length ? markdownTable(['Severity', 'Contract', 'Scenario', 'Mutation', 'Why it matters'], report.failureEvidence.map((failure) => [failure.severity, failure.contract, failure.scenarioId, failure.mutationId, failure.why])) : 'No release-blocking failures.'}
+${report.failureEvidence.length ? markdownTable(['Severity', 'Contract', 'Scenario', 'Failure profile', 'Why it matters'], report.failureEvidence.map((failure) => [failure.severity, failure.contract, failure.scenarioId, failure.mutationId, failure.why])) : 'No release-blocking failures.'}
 
 ${report.retrievalEvidence ? `## RetrievalGuard source fidelity
 
@@ -404,19 +494,21 @@ export function reportPrintHtml(report) {
     <h2>Support Quality Loop</h2>
     <p>${escapeHtml(report.supportQualityLoop.summary)}</p>
     ${reportHtmlTable(['Stage', 'Count', 'Evidence'], supportQualityLoopRows(report.supportQualityLoop))}
-    <h3>Generated eval cases</h3>
-    ${reportHtmlTable(['Eval', 'Scenario', 'Mutation', 'Gate'], report.supportQualityLoop.generatedEvalCases.map((item) => [item.id, item.scenarioId, item.mutationId, item.gate]))}
+    <h3>Generated regression cases</h3>
+    ${reportHtmlTable(['Regression case', 'Scenario', 'Failure profile', 'Gate'], report.supportQualityLoop.generatedEvalCases.map((item) => [item.id, item.scenarioId, item.mutationId, item.gate]))}
     <h3>Instruction stack risks</h3>
     ${report.supportQualityLoop.instructionStackRisks.length ? reportHtmlTable(['Risk', 'Required file', 'Fix'], report.supportQualityLoop.instructionStackRisks.map((item) => [item.label, item.requiredFile, item.fix])) : '<p>No instruction-stack risk detected for this report.</p>'}
   </section>` : '';
   const domainFailuresSection = `
   <section>
-    <h2>Domain failures found</h2>
+    <h2>Agent-tool contract failures found</h2>
     ${htmlFailureClassCards(report.failureEvidence)}
     <h3>Scenario evidence table</h3>
-    ${report.failureEvidence.length ? reportHtmlTable(['Scenario', 'Mutation', 'Failure class', 'Severity', 'Expected behavior', 'Actual behavior', 'Replay'], report.failureEvidence.map((failure) => [failure.scenarioId, failure.mutationId, failure.failureClass ?? failure.label, failure.severity, failure.expected, failure.actual ?? failure.observed, replaySummary(failure)])) : '<p>No scenario evidence recorded.</p>'}
+    ${report.failureEvidence.length ? reportHtmlTable(['Scenario', 'Failure profile', 'Failure class', 'Severity', 'Expected behavior', 'Actual behavior', 'Replay'], report.failureEvidence.map((failure) => [failure.scenarioId, failure.mutationId, failure.failureClass ?? failure.label, failure.severity, failure.expected, failure.actual ?? failure.observed, replaySummary(failure)])) : '<p>No scenario evidence recorded.</p>'}
     <h3>Trace-backed evidence</h3>
     ${report.failureEvidence.length ? reportHtmlTable(['Failure class', 'Origin', 'Trace id', 'Key trace events', 'Retrieved evidence', 'Tool calls', 'Replay status', 'Regression status'], report.failureEvidence.map((failure) => [failure.failureClass ?? failure.label, failure.origin ?? failure.traceEvidence?.origin ?? 'unknown', failure.traceId ?? failure.traceEvidence?.traceId ?? 'not recorded', traceEventSummary(failure.traceEvidence).join('; ') || 'not recorded', (failure.traceEvidence?.retrievedEvidence ?? failure.evidence ?? []).join(', ') || 'none', (failure.traceEvidence?.toolCalls ?? []).map((tool) => `${tool.name}:${tool.status}`).join(', ') || 'none', failure.traceEvidence?.replayStatus ?? failure.replayStatus ?? 'not recorded', failure.traceEvidence?.regressionStatus ?? failure.regressionStatus ?? 'not recorded'])) : '<p>No trace-backed failure evidence recorded.</p>'}
+    <h3>Agent harness evidence</h3>
+    ${htmlAgentHarnessEvidence(report.agentHarnessEvidence)}
   </section>`;
   return `<!doctype html>
 <html lang="en">
@@ -456,13 +548,13 @@ export function reportPrintHtml(report) {
 </head>
 <body>
   <section class="hero">
-    <span class="decision ${report.releaseDecision === 'Block release' ? 'block' : 'pass'}">${escapeHtml(report.releaseDecision)}</span>
-    <h1>Can this agent ship?</h1>
+    <span class="decision ${report.releaseDecision === 'Block release' ? 'block' : 'pass'}">${escapeHtml(report.releaseGate.verdict ?? report.releaseDecision)}</span>
+    <h1>Toolchain Release Evidence Report</h1>
     <p>${escapeHtml(`${report.releaseGate.answer} ${report.summary}`)}</p>
   </section>
   <section class="score-grid">
     <div class="score-card"><span>Score</span><strong>${escapeHtml(report.score)}</strong></div>
-    <div class="score-card"><span>Benchmark</span><strong>${escapeHtml(report.benchmark?.score ?? report.score)}</strong></div>
+    <div class="score-card"><span>Certification score</span><strong>${escapeHtml(report.benchmark?.score ?? report.score)}</strong></div>
     <div class="score-card"><span>Critical</span><strong>${escapeHtml(report.criticalFailures)}</strong></div>
     <div class="score-card"><span>Gate</span><strong>${escapeHtml(report.releaseGate.status)}</strong></div>
     <div class="score-card"><span>Environment</span><strong>${escapeHtml(report.environment)}</strong></div>
@@ -474,20 +566,24 @@ export function reportPrintHtml(report) {
       <dt>Project</dt><dd>${escapeHtml(report.project)}</dd>
       <dt>Harness</dt><dd>${escapeHtml(report.harness)}</dd>
       <dt>Pack</dt><dd>${escapeHtml(report.pack)}</dd>
-      <dt>Benchmark</dt><dd>${escapeHtml(benchmarkLabel(report))}</dd>
-      <dt>Benchmark slug</dt><dd>${escapeHtml(report.benchmark?.slug ?? 'not recorded')}</dd>
-      <dt>Benchmark run type</dt><dd>${escapeHtml(report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? 'not recorded')}</dd>
-      <dt>Benchmark tier</dt><dd>${escapeHtml(report.benchmark?.tier ?? 'not recorded')}</dd>
+      <dt>Toolchain profile</dt><dd>${escapeHtml(report.pack)}</dd>
+      <dt>Gate profile</dt><dd>${escapeHtml(benchmarkLabel(report))}</dd>
+      <dt>Gate slug</dt><dd>${escapeHtml(report.benchmark?.slug ?? 'not recorded')}</dd>
+      <dt>Certification run type</dt><dd>${escapeHtml(report.benchmark?.benchmarkRunType ?? report.benchmark?.runType ?? 'not recorded')}</dd>
+      <dt>Gate tier</dt><dd>${escapeHtml(report.benchmark?.tier ?? 'not recorded')}</dd>
       <dt>Scenario set version</dt><dd>${escapeHtml(report.benchmark?.scenarioSetVersion ?? 'not recorded')}</dd>
       <dt>Scoring profile version</dt><dd>${escapeHtml(report.benchmark?.scoringProfileVersion ?? 'not recorded')}</dd>
       <dt>Gate profile version</dt><dd>${escapeHtml(report.benchmark?.gateProfileVersion ?? 'not recorded')}</dd>
-      <dt>Benchmark gate</dt><dd>${escapeHtml(report.benchmark?.gateResult ?? 'not recorded')}</dd>
-      <dt>Release gate status</dt><dd>${escapeHtml(report.releaseGate.status)}</dd>
+      <dt>Release gate result</dt><dd>${escapeHtml(report.benchmark?.gateResult ?? 'not recorded')}</dd>
+      <dt>Release verdict</dt><dd>${escapeHtml(report.releaseGate.verdict ?? report.releaseGate.status)}</dd>
+      <dt>Unsafe action failures</dt><dd>${escapeHtml(report.releaseGate.toolchain?.unsafeActionFailures ?? 0)}</dd>
+      <dt>Permission warnings</dt><dd>${escapeHtml(report.releaseGate.toolchain?.permissionWarnings ?? 0)}</dd>
+      <dt>Replayable regression cases</dt><dd>${escapeHtml(report.releaseGate.toolchain?.replayableRegressionCases ?? 0)}</dd>
       <dt>Can release</dt><dd>${escapeHtml(report.releaseGate.canRelease ? 'yes' : 'no')}</dd>
       <dt>Blocking failures</dt><dd>${escapeHtml(report.releaseGate.blockingFailures)}</dd>
       <dt>Warnings</dt><dd>${escapeHtml(report.releaseGate.warningCount)}</dd>
       <dt>Failed contracts</dt><dd>${escapeHtml((report.benchmark?.failedContracts ?? []).join(', ') || 'none')}</dd>
-      <dt>Failed mutation families</dt><dd>${escapeHtml((report.benchmark?.failedMutationFamilies ?? []).join(', ') || 'none')}</dd>
+      <dt>Failed failure profiles</dt><dd>${escapeHtml((report.benchmark?.failedMutationFamilies ?? []).join(', ') || 'none')}</dd>
       <dt>Run date</dt><dd>${escapeHtml(report.runDate)}</dd>
       <dt>Status</dt><dd>${escapeHtml(report.status)}</dd>
       <dt>Evidence mode</dt><dd>${escapeHtml(report.evidenceMode)}</dd>
@@ -505,6 +601,30 @@ export function reportPrintHtml(report) {
     <p>${escapeHtml(report.gate.failCondition)}</p>
     ${reportHtmlList(report.releaseGate.reasons)}
     ${reportHtmlTable(['Metric', 'Required', 'Actual', 'Result'], report.gate.thresholds.map((item) => [item.metric, item.required, item.actual, item.result]))}
+  </section>
+  <section>
+    <h2>Toolchain Readiness</h2>
+    ${reportHtmlTable(['Signal', 'Value'], [
+      ['Connected execution targets', report.releaseGate.toolchain?.connectedTargets ?? 0],
+      ['Toolchain status', report.toolchainReadiness?.status ?? report.releaseGate.toolchain?.status ?? report.releaseGate.status],
+      ['Readiness score', report.toolchainReadiness?.readinessScore ?? 'not recorded'],
+      ['Production capable', report.toolchainReadiness?.productionCapable ? 'yes' : 'no'],
+      ['Trace capture', report.toolchainReadiness?.traceCapture ? 'yes' : 'no'],
+      ['Replay available', report.toolchainReadiness?.replayAvailable ? 'yes' : 'no'],
+      ['Tools checked', report.toolchainReadiness?.tools?.length ?? 0],
+      ['Recommended gate profiles', (report.toolchainReadiness?.recommendedGateProfiles ?? []).join(', ') || 'none'],
+      ['Tool validation status', report.releaseGate.toolchain?.validationStatus ?? report.targetReliability.readinessStatus],
+      ['Action-taking tools', report.releaseGate.toolchain?.actionTakingTools ?? 0],
+      ['Read-only tools', report.releaseGate.toolchain?.readOnlyTools ?? 0],
+      ['Human approval tools', report.releaseGate.toolchain?.humanApprovalTools ?? 0],
+      ['Ambiguous schemas', report.releaseGate.toolchain?.ambiguousSchemas ?? 0],
+      ['Recent contract failures', report.releaseGate.toolchain?.recentContractFailures ?? 0],
+      ['Release status', report.releaseGate.toolchain?.releaseStatus ?? report.releaseGate.status],
+    ])}
+  </section>
+  <section>
+    <h2>Toolchain Readiness Evidence</h2>
+    ${htmlToolContractFindings(report.toolchainReadiness ?? report.releaseGate.toolchain)}
   </section>
   ${domainFailuresSection}
   <section>
@@ -531,7 +651,7 @@ export function reportPrintHtml(report) {
   <section class="page-break">
     <h2>Failure Evidence</h2>
     <p>${escapeHtml(report.failureSummary.primaryRisk)}</p>
-    ${report.failureEvidence.length ? reportHtmlTable(['Severity', 'Contract', 'Scenario', 'Mutation', 'Expected', 'Observed', 'Recommended control'], report.failureEvidence.map((failure) => [failure.severity, failure.contract, failure.scenarioId, failure.mutationId, failure.expected, failure.observed, failure.recommendedControl])) : '<p>No release-blocking failures.</p>'}
+    ${report.failureEvidence.length ? reportHtmlTable(['Severity', 'Contract', 'Scenario', 'Failure profile', 'Expected', 'Observed', 'Recommended control'], report.failureEvidence.map((failure) => [failure.severity, failure.contract, failure.scenarioId, failure.mutationId, failure.expected, failure.observed, failure.recommendedControl])) : '<p>No release-blocking failures.</p>'}
   </section>
   ${retrievalSection}
   <section>
@@ -715,14 +835,14 @@ function sampleBenchmarkSnapshot({ name, pack, score, critical }) {
     scoringProfileVersion: 'sample',
     gateProfileId: 'sample',
     gateProfileVersion: 'sample',
-    description: 'Seeded sample report. Not real benchmark evidence.',
+    description: 'Seeded sample report. Not production release evidence.',
     capturedAt,
   };
 }
 
 function benchmarkLabel(report) {
   if (!report.benchmark) return 'not recorded';
-  if (report.benchmark.seeded) return 'Seeded sample - not a real benchmark result';
+  if (report.benchmark.seeded) return 'Seeded sample - not production release evidence';
   return `${report.benchmark.name} v${report.benchmark.version}`;
 }
 
@@ -831,6 +951,121 @@ function observationFailureEvidence(report) {
       recommendedControl: 'Use captured runner observations to pin regression cases and validate source provenance.',
     }];
   }).slice(0, Math.max(1, Math.min(4, numericRunValue(report.criticalFailures) || 1)));
+}
+
+function agentHarnessEvidenceForObservations(observations = [], report = {}) {
+  const first = Array.isArray(observations)
+    ? observations.find((observation) => observation?.metadata?.agentHarnessResult || observation?.metadata?.harnessTask)
+    : null;
+  if (!first) return null;
+  const metadata = first.metadata ?? {};
+  const result = metadata.agentHarnessResult ?? {};
+  const task = metadata.harnessTask ?? {};
+  const traceEvidence = metadata.traceEvidence ?? {};
+  return {
+    targetType: metadata.targetType ?? report.executionTarget?.targetType ?? 'generic_agent_harness',
+    targetId: metadata.targetId ?? report.executionTarget?.targetId ?? 'fixture-target',
+    adapterVersion: metadata.adapterVersion ?? report.executionTarget?.adapterVersion ?? 'agent-harness-target.v0.1',
+    fixture: true,
+    memoryPolicy: metadata.memoryPolicy ?? task.memoryPolicy ?? {},
+    permissionPolicy: metadata.permissionPolicy ?? task.permissionPolicy ?? {},
+    workspacePolicy: metadata.workspacePolicy ?? task.workspacePolicy ?? {},
+    runtimeBudget: metadata.runtimeBudget ?? task.runtimeBudget ?? {},
+    artifactPolicy: metadata.artifactPolicy ?? task.artifactPolicy ?? {},
+    actionsTaken: result.actionsTaken ?? [],
+    memoryReads: result.memoryReads ?? [],
+    memoryWrites: result.memoryWrites ?? [],
+    toolCalls: result.toolCalls ?? [],
+    permissionPrompts: result.permissionPrompts ?? [],
+    workspaceChanges: result.workspaceChanges ?? [],
+    artifacts: result.artifacts ?? [],
+    traceIntegrity: result.traceIntegrity ?? {},
+    replayAvailable: Boolean(traceEvidence.replayPayload || result.traceIntegrity?.replaySnapshotAvailable),
+    memoryPolicySummary: policySummary(metadata.memoryPolicy ?? task.memoryPolicy),
+    permissionPolicySummary: permissionPolicySummary(metadata.permissionPolicy ?? task.permissionPolicy),
+    workspacePolicySummary: workspacePolicySummary(metadata.workspacePolicy ?? task.workspacePolicy),
+    actionSummary: summarizeItems(result.actionsTaken, 'actionType'),
+    memorySummary: summarizeMemory(result.memoryReads, result.memoryWrites),
+    toolSummary: summarizeItems(result.toolCalls, 'name'),
+    workspaceSummary: summarizeItems(result.workspaceChanges, 'path'),
+    artifactSummary: summarizeItems(result.artifacts, 'id'),
+  };
+}
+
+function markdownAgentHarnessEvidence(evidence) {
+  if (!evidence) return 'No agent harness target evidence recorded.';
+  return markdownTable(['Field', 'Value'], [
+    ['Target', `${evidence.targetType} / ${evidence.targetId}`],
+    ['Adapter', evidence.adapterVersion],
+    ['Fixture/scaffold', evidence.fixture ? 'yes' : 'no'],
+    ['Memory policy', evidence.memoryPolicySummary],
+    ['Permission policy', evidence.permissionPolicySummary],
+    ['Workspace policy', evidence.workspacePolicySummary],
+    ['Runtime budget', runtimeBudgetSummary(evidence.runtimeBudget)],
+    ['Actions', evidence.actionSummary || 'none'],
+    ['Memory events', evidence.memorySummary || 'none'],
+    ['Tool calls', evidence.toolSummary || 'none'],
+    ['Workspace changes', evidence.workspaceSummary || 'none'],
+    ['Artifacts', evidence.artifactSummary || 'none'],
+    ['Replay-safe evidence', evidence.replayAvailable ? 'available' : 'not recorded'],
+  ]);
+}
+
+function markdownToolContractFindings(readiness = {}) {
+  const toolRows = (readiness.tools ?? []).map((tool) => [
+    tool.name,
+    tool.category,
+    tool.riskLevel,
+    tool.permissionBoundary,
+    tool.schemaStatus,
+    tool.descriptionQuality,
+    [...(tool.blockers ?? []), ...(tool.warnings ?? [])].map((finding) => finding.message).join('; ') || 'none',
+  ]);
+  const blockerRows = [
+    ...(readiness.releaseBlockers ?? []).map((finding) => ['blocker', finding.contractArea, finding.message]),
+    ...(readiness.warnings ?? []).map((finding) => ['warning', finding.contractArea, finding.message]),
+  ];
+  return [
+    markdownTable(['Tool', 'Category', 'Risk', 'Permission boundary', 'Schema', 'Description', 'Findings'], toolRows.length ? toolRows : [['none', 'not recorded', 'not recorded', 'not recorded', 'not recorded', 'not recorded', 'No tool contracts declared.']]),
+    markdownTable(['Type', 'Contract area', 'Message'], blockerRows.length ? blockerRows : [['info', 'release', 'No Tool Contract Doctor blockers or warnings recorded.']]),
+  ].join('\n\n');
+}
+
+function htmlAgentHarnessEvidence(evidence) {
+  if (!evidence) return '<p>No agent harness target evidence recorded.</p>';
+  return reportHtmlTable(['Field', 'Value'], [
+    ['Target', `${evidence.targetType} / ${evidence.targetId}`],
+    ['Adapter', evidence.adapterVersion],
+    ['Fixture/scaffold', evidence.fixture ? 'yes' : 'no'],
+    ['Memory policy', evidence.memoryPolicySummary],
+    ['Permission policy', evidence.permissionPolicySummary],
+    ['Workspace policy', evidence.workspacePolicySummary],
+    ['Runtime budget', runtimeBudgetSummary(evidence.runtimeBudget)],
+    ['Actions', evidence.actionSummary || 'none'],
+    ['Memory events', evidence.memorySummary || 'none'],
+    ['Tool calls', evidence.toolSummary || 'none'],
+    ['Workspace changes', evidence.workspaceSummary || 'none'],
+    ['Artifacts', evidence.artifactSummary || 'none'],
+    ['Replay-safe evidence', evidence.replayAvailable ? 'available' : 'not recorded'],
+  ]);
+}
+
+function htmlToolContractFindings(readiness = {}) {
+  const toolRows = (readiness.tools ?? []).map((tool) => [
+    tool.name,
+    tool.category,
+    tool.riskLevel,
+    tool.permissionBoundary,
+    tool.schemaStatus,
+    tool.descriptionQuality,
+    [...(tool.blockers ?? []), ...(tool.warnings ?? [])].map((finding) => finding.message).join('; ') || 'none',
+  ]);
+  const blockerRows = [
+    ...(readiness.releaseBlockers ?? []).map((finding) => ['blocker', finding.contractArea, finding.message]),
+    ...(readiness.warnings ?? []).map((finding) => ['warning', finding.contractArea, finding.message]),
+  ];
+  return `${reportHtmlTable(['Tool', 'Category', 'Risk', 'Permission boundary', 'Schema', 'Description', 'Findings'], toolRows.length ? toolRows : [['none', 'not recorded', 'not recorded', 'not recorded', 'not recorded', 'not recorded', 'No tool contracts declared.']])}
+    ${reportHtmlTable(['Type', 'Contract area', 'Message'], blockerRows.length ? blockerRows : [['info', 'release', 'No Tool Contract Doctor blockers or warnings recorded.']])}`;
 }
 
 function standardFailureEvidence(report, context) {
@@ -1237,6 +1472,41 @@ function replaySummary(failure) {
 function traceEventSummary(traceEvidence = {}) {
   const events = Array.isArray(traceEvidence?.keyTraceEvents) ? traceEvidence.keyTraceEvents : [];
   return events.map((event) => `${event.step}. ${event.eventType}: ${event.label}`);
+}
+
+function policySummary(policy = {}) {
+  if (!policy) return 'not recorded';
+  return `mode ${policy.mode ?? 'not recorded'}; writes ${policy.allowWrites === false ? 'blocked' : 'allowed'}; explicit persistence ${policy.requireExplicitPersistence === false ? 'not required' : 'required'}`;
+}
+
+function permissionPolicySummary(policy = {}) {
+  if (!policy) return 'not recorded';
+  const confirmations = Array.isArray(policy.requireConfirmationFor) ? policy.requireConfirmationFor.join(', ') : 'none';
+  return `confirm ${confirmations || 'none'}; irreversible ${policy.irreversibleActionsBlocked === false ? 'allowed' : 'blocked'}`;
+}
+
+function workspacePolicySummary(policy = {}) {
+  if (!policy) return 'not recorded';
+  const allowed = Array.isArray(policy.allowedPaths) ? policy.allowedPaths.join(', ') : 'not recorded';
+  const denied = Array.isArray(policy.deniedPaths) ? policy.deniedPaths.join(', ') : 'none';
+  return `sandbox ${policy.sandboxRequired === false ? 'optional' : 'required'}; allowed ${allowed}; denied ${denied}; network ${policy.networkPolicy ?? 'not recorded'}`;
+}
+
+function runtimeBudgetSummary(budget = {}) {
+  if (!budget) return 'not recorded';
+  return `${budget.maxSteps ?? 'n/a'} steps / ${budget.maxToolCalls ?? 'n/a'} tool calls / ${budget.maxWallClockMs ?? 'n/a'}ms`;
+}
+
+function summarizeItems(items = [], field) {
+  return Array.isArray(items)
+    ? items.map((item) => item?.[field] ?? item?.summary ?? '').filter(Boolean).join('; ')
+    : '';
+}
+
+function summarizeMemory(reads = [], writes = []) {
+  const readSummary = summarizeItems(reads, 'key');
+  const writeSummary = summarizeItems(writes, 'key');
+  return [readSummary ? `reads ${readSummary}` : '', writeSummary ? `writes ${writeSummary}` : ''].filter(Boolean).join('; ');
 }
 
 function fallbackFailureOrigin(failure) {
