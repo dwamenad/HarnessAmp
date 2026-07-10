@@ -3921,7 +3921,20 @@ section[id] {
   color: var(--ha-red);
 }
 
+.ha-badge--blocked,
+.ha-badge--not-certifiable {
+  background: #fee2e2;
+  color: var(--ha-red);
+}
+
 .ha-badge--major {
+  background: #ffedd5;
+  color: var(--ha-orange);
+}
+
+.ha-badge--warning,
+.ha-badge--needs-validation,
+.ha-badge--sample-evidence {
   background: #ffedd5;
   color: var(--ha-orange);
 }
@@ -3932,6 +3945,13 @@ section[id] {
 }
 
 .ha-badge--passed {
+  background: #dcfce7;
+  color: var(--ha-green);
+}
+
+.ha-badge--certified,
+.ha-badge--trace-backed,
+.ha-badge--replay-available {
   background: #dcfce7;
   color: var(--ha-green);
 }
