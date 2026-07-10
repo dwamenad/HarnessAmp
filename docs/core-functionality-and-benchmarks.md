@@ -42,7 +42,7 @@ The wrapper is the layer that changes during robustness testing. Intent and cont
 
 ### 3. Risk Profiles
 
-Risk profiles select which mutation packs matter for a system.
+Risk profiles select which failure-profile coverage matters for a system. Internally, that coverage maps to deterministic mutation packs.
 
 Examples:
 
@@ -64,7 +64,7 @@ A risk profile should describe:
 
 HarnessAmp applies deterministic mutations to wrapper surfaces.
 
-Current mutation pack categories:
+Current internal pack categories:
 
 - `prompt_integrity_pack`
 - `tool_payload_pack`
@@ -139,7 +139,7 @@ The gate should be deterministic, reproducible, and exportable as Markdown and J
 
 Benchmarks should prove the system mission, not memorize one prompt wrapper.
 
-A good benchmark pack has four layers:
+A good benchmark-backed release gate has four layers:
 
 ```text
 intent -> contract -> benchmark -> wrapper
